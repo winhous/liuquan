@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/winhous/project/studio/skills/**)",
+      "Read(//home/winhous/project/studio/registry/skills/**)",
+      "Read(//home/winhous/project/EOMS/**)",
+      "Read(//home/winhous/project/EOMS/docs/superpowers/plans/**)"
+    ]
+  }
+}
