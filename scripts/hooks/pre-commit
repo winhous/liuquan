@@ -1,0 +1,7 @@
+#!/bin/sh
+# 刘全 pre-commit hook（开发流程 ④ 四绿 hook：不绿不让提交）
+#
+# 生效方式：git config core.hooksPath scripts/hooks
+#   本目录进 git，跟踪文件即生效 hook（改本文件即生效，无需复制到 .git/hooks）。
+# 豁免：git commit --no-verify 必须人工记录原因进变更日志（开发流程 ④ 例外与豁免）。
+exec bash "$(git rev-parse --show-toplevel)/scripts/check.sh"

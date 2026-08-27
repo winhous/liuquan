@@ -1,0 +1,15 @@
+# 密钥与本地环境（开发规范 R20：.env 永不入 git）
+.env
+
+# Python 虚拟环境与缓存
+.venv/
+__pycache__/
+.pytest_cache/
+
+# 打包产物
+dist/
+*.egg-info/
+
+# pgserver 本地测试数据目录（tests 用到嵌入式 PG 时）
+.pgdata/
+tests/.pgdata/
