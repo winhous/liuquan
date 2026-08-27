@@ -3,7 +3,9 @@ name = "liuquan"
 version = "0.1.0"
 description = "刘全 - Etsy 综合智能运营系统（AI 引擎 v0.1 地基）"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pyyaml>=6",
+]
 
 [project.scripts]
 liuquan-engine = "engine.cli:main"

@@ -4,7 +4,7 @@
 # 用法：bash scripts/check.sh（任意 cwd 可执行，自动定位仓库根；可重复执行）
 #
 # 四绿：
-#   1) lint              engine/lint P1/P2/P3 三规则（详设 §9）
+#   1) lint              engine/lint P2/P3（T2 已落地；P1 业务词黑名单 T11 落地）
 #   2) registry 一致性   liuquan-engine registry-check（详设 §10）
 #   3) 全量单测          uv run pytest（fake LLM、零网络，规范 R12）
 #   4) verify            liuquan-engine verify（详设 §10）
@@ -27,7 +27,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 # ---- 各 skipped 项的落地任务号（v0.1 任务拆解；任务落地时更新此表并留变更日志）----
-LINT_LAND_TASK="T2"        # engine/lint 三规则（P1/P2/P3）
+# lint 于 T2 落地（P2/P3 两规则已转真跑；P1 业务词黑名单 T11 落地后加入）
 REGISTRY_LAND_TASK="T4"    # liuquan-engine registry-check
 VERIFY_LAND_TASK="T7"      # liuquan-engine verify
 
@@ -64,19 +64,14 @@ cli_gate() {
 
 echo "==== 刘全四绿总门 scripts/check.sh ===="
 
-# ---------- 绿 1/4：lint ----------
-# 可执行判定：lint 入口模块存在（engine/lint/__main__.py => python -m engine.lint 可跑）；
-# T2 若以其他入口落地，随任务调整本探针（变更日志留痕）。
-if [[ -f engine/lint/__main__.py ]]; then
-  echo "---- 1/4 lint：uv run python -m engine.lint ----"
-  if uv run python -m engine.lint; then
-    mark_green "1 lint（0 违规）"
-  else
-    mark_red "1 lint（存在违规，详见上方输出）"
-  fi
+# ---------- 绿 1/4：lint（T2 落地：P2 凭据端点零容忍 + P3 契约纪律，P1=T11）----------
+# 入口 engine/lint/__main__.py：0 违规退出 0，有违规打印明细退出 1。
+# lint 自身也在扫描对象内（详设 §9 扫全仓），tests/ 有正反双向测试防校验器改坏。
+echo "---- 1/4 lint：uv run python -m engine.lint ----"
+if uv run python -m engine.lint; then
+  mark_green "1 lint（0 违规）"
 else
-  echo "lint: skipped（规则未建，${LINT_LAND_TASK} 落地）"
-  mark_skip "1 lint" "规则未建，${LINT_LAND_TASK} 落地"
+  mark_red "1 lint（存在违规，详见上方输出）"
 fi
 
 # ---------- 绿 2/4：registry 一致性 ----------
