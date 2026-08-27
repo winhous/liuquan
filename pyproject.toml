@@ -4,14 +4,22 @@ version = "0.1.0"
 description = "刘全 - Etsy 综合智能运营系统（AI 引擎 v0.1 地基）"
 requires-python = ">=3.12"
 dependencies = [
+    "asyncpg>=0.31.0",
+    "pydantic>=2.13.4",
+    "pydantic-ai>=2.35.1",
     "pyyaml>=6",
+    "sqlalchemy>=2.0.52",
 ]
 
 [project.scripts]
 liuquan-engine = "engine.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.4"]
+dev = [
+    "alembic>=1.19.1",
+    "pytest>=8.4",
+    "pytest-asyncio>=1.4.0",
+]
 
 [build-system]
 requires = ["hatchling"]
