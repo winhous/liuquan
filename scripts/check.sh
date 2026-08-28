@@ -76,16 +76,23 @@ fi
 # ---------- 绿 2/4：registry 一致性 ----------
 cli_gate "2 registry" "registry-check" "$REGISTRY_LAND_TASK" "registry-check 不合规"
 
-# ---------- 绿 3/4：全量单测（必须真跑，不允许空转）----------
-echo "---- 3/4 单测：uv run pytest ----"
-if uv run pytest; then
-  mark_green "3 单测（uv run pytest 通过）"
+# ---------- 绿 3/4：全量单测 + verify ----------
+# 修复（2026-08-28，v0.2 复核反馈后）：绿 3 与绿 4 合并为**一次** verify 调用——
+# verify 内部已含 lint + registry + 单测完整三件套（engine/cli.py _VERIFY_CHECKS）。
+# 此前绿 3 独立 `uv run pytest` + 绿 4 verify（内部又跑 pytest）= 连续两次 pytest，
+# 两次都抢 tests/.pgdata 嵌入式 PG 簇（v0.2 加 tm_pg_cluster 后更多测试用嵌入式
+# PG），第二次必现 ConnectionRefused 竞态（子代理与复核修复后均撞到过）。
+# 现在 pytest 只跑一次（在 verify 内真跑，不允许空转），绿 3/绿 4 共用其结果。
+echo "---- 3/4+4/4 单测+verify：uv run liuquan-engine verify（单测在 verify 内真跑，pytest 只跑一次）----"
+if out="$(uv run liuquan-engine verify 2>&1)"; then rc=0; else rc=$?; fi
+echo "$out"
+if [[ "$rc" -eq 0 ]]; then
+  mark_green "3 单测（verify 内真跑，通过）"
+  mark_green "4 verify（通过）"
 else
-  mark_red "3 单测（pytest 有失败或未收集到测试）"
+  mark_red "3 单测（verify 内真跑，pytest 有失败或未收集到测试）"
+  mark_red "4 verify（未通过）"
 fi
-
-# ---------- 绿 4/4：verify ----------
-cli_gate "4 verify" "verify" "$VERIFY_LAND_TASK" "verify 未通过"
 
 # ---------- 汇总 ----------
 echo

@@ -934,12 +934,17 @@ async def test_a18_idempotent_same_delivery_once(
 @pytest.mark.version_acceptance
 def test_a19_four_greens_gates_covered() -> None:
     """A19：四绿守门（check.sh 断言已有，本断言为标注 + 最小检查）——
-    四门存在 + 任一真红非零退出（R13 提交被拦）+ A12-A26 逐条有测试落点。"""
+    四门存在 + 任一真红非零退出（R13 提交被拦）+ A12-A26 逐条有测试落点。
+    2026-08-28 修复：绿 3（单测）与绿 4（verify）合并为一次 verify 调用
+    （verify 内部 _VERIFY_CHECKS 含 lint+registry+pytest 三件套；此前连续两次
+    pytest 抢 tests/.pgdata 嵌入式 PG 簇必现 ConnectionRefused 竞态），
+    故单测由 verify 承载而非 check.sh 独立 pytest。"""
     script = (REPO_ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
     assert "python -m engine.lint" in script  # 绿 1 lint
     assert "registry-check" in script  # 绿 2 registry 一致性
-    assert "uv run pytest" in script  # 绿 3 全量单测
-    assert '"verify"' in script and "liuquan-engine" in script  # 绿 4 verify
+    assert "liuquan-engine verify" in script  # 绿 3+4：单测 + verify
+    # 单测真跑：verify 的 _VERIFY_CHECKS 内含 uv run pytest（engine/cli.py）
+    assert "uv run pytest" in (REPO_ROOT / "engine" / "cli.py").read_text(encoding="utf-8")
     assert "exit 1" in script and "RED" in script  # 任一真红 -> 非零退出
     # 交付要求 3：A12-A26 每条至少一个测试函数（命名含断言号便于追溯）
     for num in range(12, 27):
