@@ -77,14 +77,34 @@ def test_p1_config_numeric_spec_in_run_py_flagged(tmp_path: Path) -> None:
     _assert_single(P1BusinessTermsRule().check(repo), "13", line=1)
 
 
-def test_p1_config_key_in_run_py_flagged(tmp_path: Path) -> None:
-    """config/ 的键也入自动词表：键名出现在 run.py 字符串常量 -> 拦。"""
+def test_p1_config_key_in_run_py_pass(tmp_path: Path) -> None:
+    """T11 收紧（T10 前置）：config/ 的键不入自动词表——工序按键读取配置是
+    R10 设计机制（run.py 的 ctx.config["tone"] 含键字面量合法），键不拦。"""
     config = "tags_count: 13\n"
     run = 'MSG = "tags_count 已外置到配置"\n'
     repo = _worker_repo(tmp_path, config, run)
-    violations = P1BusinessTermsRule().check(repo)
-    assert len(violations) == 1
-    assert "tags_count" in violations[0].message
+    assert P1BusinessTermsRule().check(repo) == []
+
+
+def test_p1_ascii_value_standalone_word_flagged(tmp_path: Path) -> None:
+    """T11 收紧：纯 ASCII 词按整词匹配——config 值 "echo" 独立出现在
+    run.py 字符串常量（前后非词字符）-> 拦。"""
+    config = "label: echo\n"
+    run = 'NAME = "echo"\n'
+    repo = _worker_repo(tmp_path, config, run)
+    _assert_single(P1BusinessTermsRule().check(repo), "echo", line=1)
+
+
+def test_p1_ascii_value_inside_identifier_not_flagged(tmp_path: Path) -> None:
+    """T11 收紧（T10 工序落地回归）：config 值 "echo" 出现在结构标识
+    "demo_echo"（chain.yaml 的 worker id）里 -> 不算命中（结构标识符合法）。"""
+    config = "label: echo\n"
+    _write(
+        tmp_path,
+        "engine/registry/chains/demo/chain.yaml",
+        "id: demo_echo\nsteps: []\n",
+    )
+    assert P1BusinessTermsRule().check(tmp_path) == []
 
 
 def test_p1_config_value_in_yaml_scalar_flagged(tmp_path: Path) -> None:
