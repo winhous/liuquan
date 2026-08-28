@@ -29,11 +29,11 @@ templates = Jinja2Templates(directory=BASE / "templates")
 # ---- 整体系统框架：模块清单（L1 业务应用层） ----
 
 MODULES: list[dict[str, str]] = [
-    {"id": "tm", "name": "任务中心", "icon": "fas fa-tasks", "desc": "AI 提案转任务、人工处理回流（v0.2 首个真实模块）"},
-    {"id": "crm", "name": "CRM", "icon": "fas fa-comments", "desc": "客户对话翻译 / 快照 / 待办（v0.3 平移，建设中）"},
-    {"id": "erp", "name": "ERP 增强", "icon": "fas fa-boxes", "desc": "库存 / 补货建议 / 异常预警（v0.6，只读 NocoBase 视图）"},
-    {"id": "seo", "name": "SEO", "icon": "fas fa-chart-line", "desc": "关键词研究 / 标题优化 / 体检（v0.5，数据源 eHunt）"},
-    {"id": "scrape", "name": "扒图", "icon": "fas fa-image", "desc": "选品扒图 / 图片体检（v0.5，建设中）"},
+    {"id": "tm", "name": "任务中心", "icon": "ti ti-list-check", "desc": "AI 提案转任务、人工处理回流（v0.2 首个真实模块）"},
+    {"id": "crm", "name": "CRM", "icon": "ti ti-message-circle", "desc": "客户对话翻译 / 快照 / 待办（v0.3 平移，建设中）"},
+    {"id": "erp", "name": "ERP 增强", "icon": "ti ti-box", "desc": "库存 / 补货建议 / 异常预警（v0.6，只读 NocoBase 视图）"},
+    {"id": "seo", "name": "SEO", "icon": "ti ti-chart-line", "desc": "关键词研究 / 标题优化 / 体检（v0.5，数据源 eHunt）"},
+    {"id": "scrape", "name": "扒图", "icon": "ti ti-photo", "desc": "选品扒图 / 图片体检（v0.5，建设中）"},
 ]
 
 # 角色：cookie 存 ASCII 键（latin-1 限制），显示映射中文标签

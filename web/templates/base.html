@@ -4,79 +4,75 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}刘全 · 综合智能运营系统{% endblock %}</title>
-  <!-- AdminLTE 3.2（现成后台模板，MIT） -->
-  <link rel="stylesheet" href="/static/vendor/adminlte/plugins/fontawesome-free/css/all.min.css">
-  <link rel="stylesheet" href="/static/vendor/adminlte/plugins/overlayScrollbars/css/OverlayScrollbars.min.css">
-  <link rel="stylesheet" href="/static/vendor/adminlte/css/adminlte.min.css">
+  <!-- Tabler 1.4（现代后台模板，MIT） -->
+  <link rel="stylesheet" href="/static/vendor/tabler/plugins/tabler-icons/css/tabler-icons.min.css">
+  <link rel="stylesheet" href="/static/vendor/tabler/css/tabler.min.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body class="hold-transition sidebar-mini layout-fixed">
-<div class="wrapper">
+<body>
+<div class="page">
   <!-- 顶栏 -->
-  <nav class="main-header navbar navbar-expand navbar-white navbar-light">
-    <ul class="navbar-nav">
-      <li class="nav-item"><a class="nav-link" data-widget="pushmenu" href="#" role="button"><i class="fas fa-bars"></i></a></li>
-    </ul>
-    <ul class="navbar-nav ml-auto">
-      <li class="nav-item"><span class="nav-link">{% block topbar_title %}任务中心{% endblock %}</span></li>
-      <li class="nav-item dropdown">
-        <a class="nav-link" href="#" data-toggle="dropdown">
-          <i class="fas fa-user-circle"></i> {{ role }} <i class="fas fa-caret-down"></i>
-        </a>
-        <div class="dropdown-menu dropdown-menu-right">
-          <a class="dropdown-item" href="/login"><i class="fas fa-sign-out-alt"></i> 切换角色</a>
+  <header class="navbar navbar-expand-md navbar-light d-print-none">
+    <div class="container-fluid">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topbar-menu" aria-label="菜单">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="navbar-brand flex-fill text-truncate">{% block topbar_title %}任务中心{% endblock %}</div>
+      <div class="navbar-nav flex-row order-md-last">
+        <div class="nav-item dropdown">
+          <a href="#" class="nav-link d-flex lh-1 text-reset p-0" data-bs-toggle="dropdown">
+            <span class="avatar avatar-sm" style="background:#3b82f6;color:#fff;">{{ (role|default('客'))[0] }}</span>
+            <div class="d-none d-xl-block ps-2">
+              <div>{{ role|default('访客') }}</div>
+              <div class="mt-1 small text-muted">刘全 · 智能运营系统</div>
+            </div>
+          </a>
+          <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+            <a href="/login" class="dropdown-item"><i class="ti ti-switch-horizontal me-2"></i>切换角色</a>
+          </div>
         </div>
-      </li>
-    </ul>
-  </nav>
+      </div>
+    </div>
+  </header>
 
   <!-- 侧边栏：整体系统框架（L1 模块导航） -->
-  <aside class="main-sidebar sidebar-dark-primary elevation-4">
-    <a href="/tasks" class="brand-link">
-      <span class="brand-image img-circle elevation-3" style="background:#3b82f6;color:#fff;display:grid;place-items:center;font-weight:700;">刘</span>
-      <span class="brand-text font-weight-light">刘全 · 智能运营</span>
-    </a>
-    <div class="sidebar">
-      <nav class="mt-2">
-        <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu">
+  <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
+    <div class="container-fluid">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu" aria-label="侧栏">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <a href="/tasks" class="navbar-brand">
+        <span class="navbar-brand-image" style="background:#3b82f6;color:#fff;display:grid;place-items:center;font-weight:700;border-radius:8px;width:30px;height:30px;">刘</span>
+        刘全
+      </a>
+      <div class="collapse navbar-collapse" id="sidebar-menu">
+        <ul class="navbar-nav pt-lg-3">
           {% for m in modules %}
           <li class="nav-item">
             <a href="/modules/{{ m.id }}" class="nav-link {{ 'active' if m.id == active else '' }}">
-              <i class="nav-icon {{ m.icon }}"></i>
-              <p>{{ m.name }}</p>
+              <span class="nav-link-icon"><i class="ti {{ m.icon }}"></i></span>
+              <span class="nav-link-title">{{ m.name }}</span>
             </a>
           </li>
           {% endfor %}
         </ul>
-      </nav>
+      </div>
     </div>
   </aside>
 
   <!-- 内容区 -->
-  <div class="content-wrapper">
-    <section class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6"><h1 class="m-0">{% block content_title %}任务中心{% endblock %}</h1></div>
-        </div>
+  <div class="page-wrapper">
+    <div class="container-fluid">
+      <div class="page-header">
+        <h1 class="page-title">{% block content_title %}任务中心{% endblock %}</h1>
       </div>
-    </section>
-    <section class="content">
-      <div class="container-fluid">
+      <div class="page-body">
         {% block content %}{% endblock %}
       </div>
-    </section>
+    </div>
   </div>
-
-  <footer class="main-footer">
-    <strong>刘全 v0.2 原型</strong> · 页面原型阶段 · 整体系统框架
-  </footer>
 </div>
-
-<script src="/static/vendor/adminlte/plugins/jquery/jquery.min.js"></script>
-<script src="/static/vendor/adminlte/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
-<script src="/static/vendor/adminlte/plugins/overlayScrollbars/js/jquery.overlayScrollbars.min.js"></script>
-<script src="/static/vendor/adminlte/js/adminlte.min.js"></script>
+<script src="/static/vendor/tabler/js/tabler.min.js"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

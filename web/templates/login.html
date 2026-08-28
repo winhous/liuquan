@@ -4,27 +4,23 @@
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-5">
-    <div class="card card-primary">
-      <div class="card-header"><h3 class="card-title"><i class="fas fa-sign-in-alt"></i> 登录（原型）</h3></div>
-      <form method="post" action="/login">
-        <div class="card-body">
-          <div class="form-group">
-            <label>密码</label>
-            <input type="password" name="password" value="liuquan" class="form-control" autocomplete="off">
-          </div>
-          <div class="form-group">
-            <label>角色</label>
-            <select name="role" class="form-control">
-              {% for key, label in roles %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
-            </select>
-          </div>
-          <p class="text-muted small mb-0">共享密码登录（原型形态）· 角色决定可操作范围；真实认证随 v0.2 开发落地。</p>
+    <form class="card card-md" method="post" action="/login">
+      <div class="card-body">
+        <h2 class="card-title text-center mb-3"><i class="ti ti-shield-lock me-1"></i>登录（原型）</h2>
+        <div class="mb-3">
+          <label class="form-label">密码</label>
+          <input type="password" name="password" value="liuquan" class="form-control" autocomplete="off">
         </div>
-        <div class="card-footer">
-          <button type="submit" class="btn btn-primary"><i class="fas fa-arrow-right"></i> 进入系统</button>
+        <div class="mb-3">
+          <label class="form-label">角色</label>
+          <select name="role" class="form-select">
+            {% for key, label in roles %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+          </select>
         </div>
-      </form>
-    </div>
+        <p class="text-muted small mb-3">共享密码登录（原型形态）· 角色决定可操作范围；真实认证随 v0.2 开发落地。</p>
+        <button type="submit" class="btn btn-primary w-100"><i class="ti ti-arrow-right me-1"></i>进入系统</button>
+      </div>
+    </form>
   </div>
 </div>
 {% endblock %}

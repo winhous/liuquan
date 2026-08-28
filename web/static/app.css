@@ -1,4 +1,4 @@
-/* 刘全 v0.2 原型自定义样式（AdminLTE 3 之上的补充：优先级/状态色等） */
+/* 刘全 v0.2 原型自定义样式（Tabler 之上的补充：优先级/状态色等） */
 
 /* 优先级徽章 */
 .prio-P0 { background: #dc2626; color: #fff; }
@@ -13,5 +13,8 @@
 .status-void { background: #94a3b8; color: #fff; }
 .status-blocked { background: #dc2626; color: #fff; }
 
-/* 逾期行整体红底提示（配合 .table-danger 行） */
-table.table .table-danger td { background-color: #fef2f2; }
+/* 逾期行整行红底 */
+.table .table-danger td { background-color: #fef2f2; }
+
+/* 页面背景微调（Tabler 默认浅灰，更干净的白色工作区） */
+.page-wrapper { background: #f6f8fb; }
