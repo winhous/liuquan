@@ -89,7 +89,7 @@
       <div class="col-md-3">
         <label class="form-label">链（工序链）</label>
         <select name="chain_id" id="chain-select" class="form-select">
-          {% for c in registry.chains %}<option value="{{ c.id }}">{{ c.id }}</option>{% endfor %}
+          {% for c in registry.chains %}<option value="{{ c.id }}">{{ chain_labels.get(c.id, c.id) }}</option>{% endfor %}
         </select>
       </div>
       <div class="col-md-9">

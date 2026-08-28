@@ -86,6 +86,15 @@ CHAIN_INPUTS: dict[str, dict[str, Any]] = {
     },
 }
 
+# 链 id -> 中文展示名（用户复核反馈：触发面板链名称改中文）。
+# 链 id 是引擎技术标识（loader L1 强制 snake_case 不可改），展示层映射中文；
+# 未知链回退显示 id 本身。
+CHAIN_LABELS: dict[str, str] = {
+    "tm_demo_chain": "任务提案演示链",
+    "demo_echo_chain": "回声冒烟链",
+    "crm_translate_chain": "翻译雏形链",
+}
+
 # 状态操作 -> 完成提示语（msg 展示）
 _ACTION_MSG = {
     "started": "已开始",
@@ -312,6 +321,7 @@ def create_app(
                 registry=registry,
                 registry_error=registry_error,
                 chain_inputs=CHAIN_INPUTS,
+                chain_labels=CHAIN_LABELS,
                 msg=request.query_params.get("msg", ""),
                 err=request.query_params.get("err", ""),
                 engine_task_id=request.query_params.get("engine_task_id", ""),
