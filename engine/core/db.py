@@ -201,6 +201,24 @@ class CheckpointRow(NamedTuple):
     created_at: datetime
 
 
+class StepRow(NamedTuple):
+    """engine_step 行（T12a 契约扩展，对齐详设 §3 表结构；供 runner OBSERVE 读回）。"""
+
+    id: int
+    task_id: int
+    step_index: int
+    worker_id: str
+    phase: str
+    status: str
+    input: dict
+    output: dict | None
+    attempt: int
+    error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
 class AuditRow(NamedTuple):
     id: int
     task_id: int
@@ -386,6 +404,19 @@ async def update_step(
         )
 
 
+async def get_step(engine: AsyncEngine, step_id: int) -> StepRow | None:
+    """按 step_id 查工序实例；不存在返回 None。
+
+    T12a 契约扩展（只新增不改既有）：详设 §3 的 DAO 契约本无 get_step，
+    runner 的 OBSERVE 相位（v0.1 语义 = 读回 engine_step.output 确认副作用
+    已落库）与 resume 恢复定位需要按 id 读工序行，故补充本函数 + StepRow
+    类型；不触碰任何既有函数签名。
+    """
+    async with _sessions(engine)() as session:
+        step = await session.get(EngineStep, step_id)
+        return _step_row(step) if step is not None else None
+
+
 # ---- engine_checkpoint（恢复定位：取该任务最后一条）----
 
 
@@ -497,6 +528,24 @@ def _task_row(task: EngineTask) -> TaskRow:
         created_at=task.created_at,
         started_at=task.started_at,
         finished_at=task.finished_at,
+    )
+
+
+def _step_row(step: EngineStep) -> StepRow:
+    return StepRow(
+        id=step.id,
+        task_id=step.task_id,
+        step_index=step.step_index,
+        worker_id=step.worker_id,
+        phase=step.phase,
+        status=step.status,
+        input=step.input,
+        output=step.output,
+        attempt=step.attempt,
+        error=step.error,
+        created_at=step.created_at,
+        started_at=step.started_at,
+        finished_at=step.finished_at,
     )
 
 

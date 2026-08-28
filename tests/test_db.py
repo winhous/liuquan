@@ -28,6 +28,7 @@ from engine.core.db import (
     EngineCheckpoint,
     EngineStep,
     EngineTask,
+    StepRow,
     TaskRow,
     _dequeue_stmt,
     append_audit,
@@ -37,6 +38,7 @@ from engine.core.db import (
     dequeue_task,
     dispose_engine,
     get_audit,
+    get_step,
     get_task,
     last_checkpoint,
     update_step,
@@ -585,3 +587,62 @@ async def test_transaction_rollback_leaves_no_dirty_data(db_engine) -> None:
     assert steps == []
     assert audits == []
     assert checkpoints == []
+
+
+# ==== T12a 契约扩展：get_step（runner OBSERVE 读回 / resume 恢复定位用）====
+# 只新增不改既有：详设 §3 DAO 契约本无 get_step，T12a 补充按 id 读工序行
+# （对应 engine/core/db.py 的 StepRow + get_step，禁止改任何既有函数签名）。
+
+
+@pytest.mark.asyncio
+async def test_get_step_roundtrip(db_engine) -> None:
+    task_id = await _insert_task(db_engine)
+    step_id = await create_step(
+        db_engine, task_id, step_index=0, worker_id="demo.echo", input_={"text": "你好"}
+    )
+    await update_step(
+        db_engine,
+        step_id,
+        phase="ACT",
+        status="running",
+        output={"text": "echoed", "n": [1, 2]},
+        attempt=1,
+        error="oops",
+    )
+    row = await get_step(db_engine, step_id)
+    assert row is not None
+    assert isinstance(row, StepRow)
+    assert row.id == step_id
+    assert row.task_id == task_id
+    assert row.step_index == 0
+    assert row.worker_id == "demo.echo"
+    assert row.phase == "ACT"
+    assert row.status == "running"
+    assert row.input == {"text": "你好"}  # JSONB 保真（中文）
+    assert row.output == {"text": "echoed", "n": [1, 2]}
+    assert row.attempt == 1
+    assert row.error == "oops"
+    assert row.created_at is not None
+    assert row.started_at is None
+    assert row.finished_at is None
+
+
+@pytest.mark.asyncio
+async def test_get_step_missing_returns_none(db_engine) -> None:
+    assert await get_step(db_engine, 999999) is None
+
+
+@pytest.mark.asyncio
+async def test_get_step_defaults_reflect_ddl(db_engine) -> None:
+    """新建未更新的工序行：phase/status/attempt 为 DDL 默认（OBSERVE 读回基线）。"""
+    task_id = await _insert_task(db_engine)
+    step_id = await create_step(
+        db_engine, task_id, step_index=2, worker_id="demo.echo", input_={}
+    )
+    row = await get_step(db_engine, step_id)
+    assert row is not None
+    assert row.phase == "INIT"
+    assert row.status == "running"
+    assert row.attempt == 0
+    assert row.output is None
+    assert row.error is None
