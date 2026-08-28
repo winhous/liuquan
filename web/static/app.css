@@ -1,0 +1,17 @@
+/* 刘全 v0.2 原型自定义样式（AdminLTE 3 之上的补充：优先级/状态色等） */
+
+/* 优先级徽章 */
+.prio-P0 { background: #dc2626; color: #fff; }
+.prio-P1 { background: #ea580c; color: #fff; }
+.prio-P2 { background: #2563eb; color: #fff; }
+.prio-P3 { background: #64748b; color: #fff; }
+
+/* 状态徽章 */
+.status-open { background: #2563eb; color: #fff; }
+.status-in_progress { background: #d97706; color: #fff; }
+.status-done { background: #16a34a; color: #fff; }
+.status-void { background: #94a3b8; color: #fff; }
+.status-blocked { background: #dc2626; color: #fff; }
+
+/* 逾期行整体红底提示（配合 .table-danger 行） */
+table.table .table-danger td { background-color: #fef2f2; }

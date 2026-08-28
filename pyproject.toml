@@ -5,11 +5,14 @@ description = "刘全 - Etsy 综合智能运营系统（AI 引擎 v0.1 地基）
 requires-python = ">=3.12"
 dependencies = [
     "asyncpg>=0.31.0",
+    "fastapi>=0.141.1",
+    "jinja2>=3.1.6",
     "pydantic>=2.13.4",
     "pydantic-ai>=2.35.1",
     "python-dotenv>=1.2.3",
     "pyyaml>=6",
     "sqlalchemy>=2.0.52",
+    "uvicorn[standard]>=0.52.4",
 ]
 
 [project.scripts]

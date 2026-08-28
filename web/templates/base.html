@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}刘全 · 综合智能运营系统{% endblock %}</title>
+  <!-- AdminLTE 3.2（现成后台模板，MIT） -->
+  <link rel="stylesheet" href="/static/vendor/adminlte/plugins/fontawesome-free/css/all.min.css">
+  <link rel="stylesheet" href="/static/vendor/adminlte/plugins/overlayScrollbars/css/OverlayScrollbars.min.css">
+  <link rel="stylesheet" href="/static/vendor/adminlte/css/adminlte.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="hold-transition sidebar-mini layout-fixed">
+<div class="wrapper">
+  <!-- 顶栏 -->
+  <nav class="main-header navbar navbar-expand navbar-white navbar-light">
+    <ul class="navbar-nav">
+      <li class="nav-item"><a class="nav-link" data-widget="pushmenu" href="#" role="button"><i class="fas fa-bars"></i></a></li>
+    </ul>
+    <ul class="navbar-nav ml-auto">
+      <li class="nav-item"><span class="nav-link">{% block topbar_title %}任务中心{% endblock %}</span></li>
+      <li class="nav-item dropdown">
+        <a class="nav-link" href="#" data-toggle="dropdown">
+          <i class="fas fa-user-circle"></i> {{ role }} <i class="fas fa-caret-down"></i>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <a class="dropdown-item" href="/login"><i class="fas fa-sign-out-alt"></i> 切换角色</a>
+        </div>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- 侧边栏：整体系统框架（L1 模块导航） -->
+  <aside class="main-sidebar sidebar-dark-primary elevation-4">
+    <a href="/tasks" class="brand-link">
+      <span class="brand-image img-circle elevation-3" style="background:#3b82f6;color:#fff;display:grid;place-items:center;font-weight:700;">刘</span>
+      <span class="brand-text font-weight-light">刘全 · 智能运营</span>
+    </a>
+    <div class="sidebar">
+      <nav class="mt-2">
+        <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu">
+          {% for m in modules %}
+          <li class="nav-item">
+            <a href="/modules/{{ m.id }}" class="nav-link {{ 'active' if m.id == active else '' }}">
+              <i class="nav-icon {{ m.icon }}"></i>
+              <p>{{ m.name }}</p>
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+      </nav>
+    </div>
+  </aside>
+
+  <!-- 内容区 -->
+  <div class="content-wrapper">
+    <section class="content-header">
+      <div class="container-fluid">
+        <div class="row mb-2">
+          <div class="col-sm-6"><h1 class="m-0">{% block content_title %}任务中心{% endblock %}</h1></div>
+        </div>
+      </div>
+    </section>
+    <section class="content">
+      <div class="container-fluid">
+        {% block content %}{% endblock %}
+      </div>
+    </section>
+  </div>
+
+  <footer class="main-footer">
+    <strong>刘全 v0.2 原型</strong> · 页面原型阶段 · 整体系统框架
+  </footer>
+</div>
+
+<script src="/static/vendor/adminlte/plugins/jquery/jquery.min.js"></script>
+<script src="/static/vendor/adminlte/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="/static/vendor/adminlte/plugins/overlayScrollbars/js/jquery.overlayScrollbars.min.js"></script>
+<script src="/static/vendor/adminlte/js/adminlte.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
