@@ -52,48 +52,48 @@ def _d(days: int) -> date:
 # 状态五态：open / in_progress / done / void / blocked（决策 11）
 # 优先级 P0-P3；逾期 = 截止 < 今天 且未 done/void
 TASKS: list[dict[str, Any]] = [
-    {"id": 1, "title": "回复买家 #A1821 关于物流时效的疑问", "priority": "P0", "status": "open",
+    {"id": 1, "title": "回复买家 #A1821 关于物流时效的疑问", "status": "open",
      "role": "运营", "due": _d(-1), "source": "AI 建议", "created": _d(-2)},
-    {"id": 2, "title": "店铺公告：春节发货安排更新", "priority": "P1", "status": "in_progress",
+    {"id": 2, "title": "店铺公告：春节发货安排更新", "status": "in_progress",
      "role": "运营", "due": _d(1), "source": "人工", "created": _d(-1)},
-    {"id": 3, "title": "采购：补货 20 个 SKU-312 经典款", "priority": "P0", "status": "in_progress",
+    {"id": 3, "title": "采购：补货 20 个 SKU-312 经典款", "status": "in_progress",
      "role": "采购", "due": _d(-1), "source": "AI 建议", "created": _d(-3)},
-    {"id": 4, "title": "核查上架商品价格与供应商报价差异", "priority": "P1", "status": "open",
+    {"id": 4, "title": "核查上架商品价格与供应商报价差异", "status": "open",
      "role": "采购", "due": _d(2), "source": "人工", "created": _d(-1)},
-    {"id": 5, "title": "翻译买家对话并更新客户快照（CRM 演示）", "priority": "P2", "status": "in_progress",
+    {"id": 5, "title": "翻译买家对话并更新客户快照（CRM 演示）", "status": "in_progress",
      "role": "运营", "due": _d(3), "source": "AI 建议", "created": _d(0)},
-    {"id": 6, "title": "整理 3 条差评归因给运营复盘", "priority": "P2", "status": "done",
+    {"id": 6, "title": "整理 3 条差评归因给运营复盘", "status": "done",
      "role": "运营", "due": _d(-2), "source": "AI 建议", "created": _d(-4)},
-    {"id": 7, "title": "确认大货期：供应商延迟 3 天", "priority": "P3", "status": "blocked",
+    {"id": 7, "title": "确认大货期：供应商延迟 3 天", "status": "blocked",
      "role": "采购", "due": _d(1), "source": "人工", "created": _d(-2)},
-    {"id": 8, "title": "过季款式下架清理", "priority": "P3", "status": "void",
+    {"id": 8, "title": "过季款式下架清理", "status": "void",
      "role": "运营", "due": _d(-5), "source": "人工", "created": _d(-6)},
 ]
 
 STATUS_LABEL = {"open": "待处理", "in_progress": "进行中", "done": "已完成", "void": "已作废", "blocked": "阻塞"}
-PRIORITY_NOTE = {"P0": "今天", "P1": "三天内", "P2": "一周内", "P3": "可缓"}
+
 
 
 def _task_view(t: dict[str, Any]) -> dict[str, Any]:
     overdue = t["status"] not in ("done", "void") and t["due"] < _TODAY
     return {**t, "status_label": STATUS_LABEL[t["status"]], "overdue": overdue,
-            "due_label": t["due"].isoformat(), "prio_note": PRIORITY_NOTE[t["priority"]]}
+            "due_label": t["due"].isoformat()}
 
 
-# 提案待审核（决策 12：全部人工审，不设代码自动通过）
+# 提案待审核（决策 12：全部人工审，不设代码自动通过；2026-08-28 修订：无优先级分级）
 PROPOSALS: list[dict[str, Any]] = [
     {"id": 101, "title": "建议回复买家 #A1821（超 48h 未跟进）", "domain": "crm", "risk": "suggest",
-     "priority": "P0", "role": "运营", "due": 0,
+     "role": "运营", "due": 0,
      "detail": "买家询问物流时效，超过 48 小时未跟进，建议当天回复并提供预计送达时间。",
      "evidence": [{"kind": "message", "ref": "msg-88231", "quote": "Where is my order? It's been 2 weeks."}],
      "source": {"chain": "chat-inbox", "worker": "crm_translate", "audit": "e-000001"}},
     {"id": 102, "title": "建议补货 SKU-312 经典款 20 件", "domain": "erp", "risk": "suggest",
-     "priority": "P1", "role": "采购", "due": 3,
+     "role": "采购", "due": 3,
      "detail": "近 30 天销量 45 件、现库存 6 件、供应商交期 7 天，按安全库存建议补货 20 件。",
      "evidence": [{"kind": "metric", "ref": "sku-312", "quote": "库存 6 件 / 近 30 天销量 45 件"}],
      "source": {"chain": "inventory-check", "worker": "erp_replenish", "audit": "e-000002"}},
     {"id": 103, "title": "建议更新客户 A1821 快照（新对话要点）", "domain": "crm", "risk": "suggest",
-     "priority": "P2", "role": "运营", "due": 7,
+     "role": "运营", "due": 7,
      "detail": "客户本次对话新增信息：偏好空运、对价格敏感。建议追加到快照。",
      "evidence": [{"kind": "message", "ref": "msg-88231", "quote": "prefer air shipping"}],
      "source": {"chain": "chat-inbox", "worker": "snapshot-update", "audit": "e-000003"}},
@@ -101,7 +101,7 @@ PROPOSALS: list[dict[str, Any]] = [
 
 
 def _proposal_view(p: dict[str, Any]) -> dict[str, Any]:
-    return {**p, "prio_note": PRIORITY_NOTE[p["priority"]],
+    return {**p,
             "risk_label": {"read": "只读分析", "suggest": "建议", "write": "写操作"}[p["risk"]]}
 
 

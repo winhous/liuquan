@@ -6,7 +6,7 @@
   read/suggest/write（transaction 拒载，详设 §6.3）
 - SourceTrace / EvidenceRef：缺省值（audit_ids=[]、quote=None）、
   kind 枚举校验
-- TaskProposal：title 长度（1..80）、priority/role 枚举、evidence 条数
+- TaskProposal：title 长度（1..80）、role 枚举、evidence 条数（2026-08-28 修订：priority 分级移除）
   （<=20，pydantic v2 用 Field(max_length=20)）
 - §6.4 业务校验函数：assert_suggest_has_evidence（evidence 空抛
   ValueError）、validate_audit_ids（注入 audit_lookup，非空 + 可查才 True）
@@ -47,7 +47,6 @@ def _make_proposal(**overrides: Any) -> TaskProposal:
         "detail": "买家询问发货时间，需要运营跟进确认",
         "domain": "crm",
         "action_id": "crm.create_followup_task",
-        "suggested_priority": "P1",
         "suggested_role": "运营",
         "suggested_due_days": 3,
         "evidence": [
@@ -241,7 +240,6 @@ def test_task_proposal_full_construct() -> None:
     assert p.detail == "买家询问发货时间，需要运营跟进确认"
     assert p.domain == "crm"
     assert p.action_id == "crm.create_followup_task"
-    assert p.suggested_priority == "P1"
     assert p.suggested_role == "运营"
     assert p.suggested_due_days == 3
     assert isinstance(p.evidence[0], EvidenceRef)
@@ -254,8 +252,8 @@ def test_task_proposal_full_construct() -> None:
 
 
 def test_task_proposal_suggested_due_days_none_ok() -> None:
-    """P3 级任务无截止建议（详设 §6.4 注释：P0=0/P1=3/P2=7/P3=None）。"""
-    p = _make_proposal(suggested_priority="P3", suggested_due_days=None)
+    """截止建议可缺省（独立 AI 建议，人工可改；2026-08-28 修订：无分级映射）。"""
+    p = _make_proposal(suggested_due_days=None)
     assert p.suggested_due_days is None
 
 
@@ -274,16 +272,11 @@ def test_task_proposal_title_boundary_80_ok() -> None:
     assert len(p.title) == 80
 
 
-def test_task_proposal_priority_invalid_rejected() -> None:
-    for bad in ("P5", "p1", "紧急", ""):
-        with pytest.raises(ValidationError):
-            _make_proposal(suggested_priority=bad)
-
-
-def test_task_proposal_priority_all_valid_ok() -> None:
-    for prio in ("P0", "P1", "P2", "P3"):
-        p = _make_proposal(suggested_priority=prio)  # type: ignore[arg-type]
-        assert p.suggested_priority == prio
+def test_task_proposal_no_priority_field() -> None:
+    """2026-08-28 修订：P0-P3 分级移除（无分级标准），TaskProposal 无优先级字段。"""
+    assert "suggested_priority" not in TaskProposal.model_fields
+    p = _make_proposal()
+    assert not hasattr(p, "suggested_priority")
 
 
 def test_task_proposal_role_invalid_rejected() -> None:

@@ -17,7 +17,7 @@
   <div class="col-md-3 col-sm-6">
     <div class="card">
       <div class="card-body">
-        <div class="subheader">已逾期（超期标红，自动升一级）</div>
+        <div class="subheader">已逾期（超期标红）</div>
         <div class="h1 mb-3 text-danger">{{ stats.overdue }}</div>
         <div class="d-flex align-items-baseline gap-2"><i class="ti ti-alert-triangle text-danger"></i><span class="text-muted">需尽快处理</span></div>
       </div>
@@ -58,13 +58,12 @@
       <div class="table-responsive">
         <table class="table table-vcenter card-table">
           <thead>
-            <tr><th>优先级</th><th>任务</th><th>状态</th><th>负责人</th><th>截止</th><th>来源</th></tr>
+            <tr><th>任务</th><th>状态</th><th>负责人</th><th>截止</th><th>来源</th></tr>
           </thead>
           <tbody>
             {% for t in tasks %}
             <tr class="{{ 'table-danger' if t.overdue else '' }}">
-              <td><span class="badge prio-{{ t.priority }}">{{ t.priority }}</span><small class="text-muted ms-1">{{ t.prio_note }}</small></td>
-              <td class="text-truncate" style="max-width:300px;">{{ t.title }}</td>
+              <td class="text-truncate" style="max-width:380px;">{{ t.title }}</td>
               <td><span class="badge status-{{ t.status }}">{{ t.status_label }}</span></td>
               <td>{{ t.role }}</td>
               <td>{{ t.due_label }}{% if t.overdue %} <span class="text-danger fw-bold">⚠ 逾期</span>{% endif %}</td>
@@ -88,7 +87,6 @@
         {% for p in proposals %}
         <div class="list-group-item">
           <div class="d-flex align-items-center gap-2 mb-1">
-            <span class="badge prio-{{ p.priority }}">{{ p.priority }}</span>
             <span class="badge badge-{{ {'read':'secondary','suggest':'warning','write':'danger'}[p.risk] }}">{{ p.risk_label }}</span>
             <small class="text-muted">{{ p.domain }} 域</small>
           </div>
@@ -99,7 +97,7 @@
           {% endfor %}
           <div class="small text-muted mb-2">来源：{{ p.source.chain }} → {{ p.source.worker }} · 审计 {{ p.source.audit }}</div>
           <div class="d-flex justify-content-between align-items-center">
-            <small class="text-muted">建议 {{ p.priority }} / {{ p.role }} / {{ p.due }} 天内</small>
+            <small class="text-muted">建议 {{ p.role }} / {{ p.due }} 天内</small>
             <span class="d-flex gap-1">
               <button class="btn btn-success btn-sm">批准</button>
               <button class="btn btn-outline-secondary btn-sm">驳回</button>
