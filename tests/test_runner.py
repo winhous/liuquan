@@ -151,6 +151,18 @@ PAUSE_RUN_PY = (
     "    return EchoResult(text=inputs.text)\n"
 )
 
+LLM_OUT_RUN_PY = (
+    "from engine.core.context import EngineContext\n"
+    "from models.workers import EchoInput, EchoResult\n"
+    "\n"
+    "SEEN: dict = {}\n"
+    "\n"
+    "\n"
+    "def run(inputs: EchoInput, ctx: EngineContext) -> EchoResult:\n"
+    "    SEEN['llm_output'] = ctx.llm_output\n"
+    "    return EchoResult(text=inputs.text)\n"
+)
+
 DEFAULT_PROMPT = (
     "你是 echo 工序，把输入原样返回。\n"
     "输入文本：{input.text}\n"
@@ -486,6 +498,22 @@ async def test_run_full_chain_done_with_phase_lines(tmp_path, monkeypatch, db_en
     audit = await get_audit(db_engine, result.task_id)
     assert len(audit) == 1 and audit[0].result == "ok"
     assert agents[0].calls == 1
+
+
+@pytest.mark.asyncio
+async def test_act_worker_receives_llm_output(tmp_path, monkeypatch, db_engine) -> None:
+    """集成修复固化（2026-08-28）：REASON 的 LLM 结果经 ctx.llm_output 达 ACT 的
+    run()——工序执行副作用的依据（§2.1），避免二次调 LLM（R4）。"""
+    factory, agents = make_agent_factory(FakeAgent, output=lambda ot: ot(text="echoed"))
+    _, _, _, build = make_runner_env(tmp_path, monkeypatch, run_py=LLM_OUT_RUN_PY)
+    result = await build(db_engine, agent_factory_fn=factory).run(
+        "echo_chain", {"text": "hi"}
+    )
+    assert result.status == "done"
+    run_mod = importlib.import_module("engine.registry.workers.demo.echo.run")
+    llm_output = run_mod.SEEN["llm_output"]
+    assert llm_output.text == "echoed"  # FakeAgent 的 LLM 结果到达了 ACT
+    assert agents[0].calls == 1  # 全程只调一次 LLM（未二次调）
 
 
 @pytest.mark.asyncio

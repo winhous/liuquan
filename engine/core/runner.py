@@ -434,7 +434,7 @@ class TaskRunner:
                 )
             elif phase is Phase.ACT:
                 event, phase_output, new_memory, error = await self._phase_act(
-                    task_id, step_id, worker, step_input, memory, lines
+                    task_id, step_id, worker, step_input, phase_output, memory, lines
                 )
             elif phase is Phase.OBSERVE:
                 event, phase_output, new_memory, error = await self._phase_observe(
@@ -626,11 +626,14 @@ class TaskRunner:
         step_id: int,
         worker: Any,
         step_input: dict,
+        phase_output: Any,
         memory: dict[str, Any],
         lines: list[PhaseLine],
     ) -> tuple[str | None, Any, dict[str, Any], str | None]:
         """ACT：import 工序 run 模块（engine.registry.workers.<域>.<工序>.run），
-        构造 EngineContext（inputs 过 input Model 校验），输出过 output Model 校验。"""
+        构造 EngineContext（inputs 过 input Model 校验；phase_output = REASON 的
+        LLM 结果，经 ctx.llm_output 传给 run——工序执行副作用的依据，避免二次
+        调 LLM（R4）；2026-08-28 集成修复），输出过 output Model 校验。"""
         attempt = int(memory.get("attempt", 0)) + 1
         memory = {**memory, "attempt": attempt}
         try:
@@ -650,6 +653,7 @@ class TaskRunner:
                 config=self._config_for(worker),
                 context_data=context_data,
                 engine=self._engine,
+                llm_output=phase_output,
                 task_id=task_id,
                 step_id=step_id,
             )

@@ -15,6 +15,10 @@ EngineContext 承载「规格外置」与「低耦合」（R10 架构层防线 /
   无 provider / provider 实现未注入时为 {}（v0.1 demo 语义）
 - engine：AsyncEngine（ACT 写库通道；v0.1 demo 工序不写 = None，引擎库写入
   由 runner 统一经 DAO 做，工序自身不碰连接）
+- llm_output：REASON 相位产出的 LLM 结构化结果（已过本工序 output Model 校验）；
+  ACT 执行副作用的依据（§2.1：REASON 产出 -> ACT 执行）。v0.1 集成修复：
+  T12a 初版未传（demo-echo 确定性重算可掩盖），翻译雏形必须拿到才能产出——
+  经 ctx 传给 run()，避免工序二次调 LLM（R4）。测试固化「llm_output 达 run」。
 - task_id / step_id：当前任务与工序实例 id（审计/定位用；None = 未关联）
 """
 
@@ -38,5 +42,6 @@ class EngineContext:
     config: dict[str, Any]
     context_data: dict[str, Any]
     engine: Any | None = None
+    llm_output: Any = None  # REASON 的 LLM 结构化结果（ACT 副作用依据；None = 未过 REASON）
     task_id: int | None = None
     step_id: int | None = None
