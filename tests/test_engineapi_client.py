@@ -247,10 +247,10 @@ async def test_read_timeout_wrapped_as_connection_error() -> None:
 
 
 def test_resolve_base_url_reads_dotenv(tmp_path: Path) -> None:
-    """.env 配置了 LIQUAN_ENGINE_API_URL -> 取配置值。"""
+    """.env 配置了 LIUQUAN_ENGINE_API_URL -> 取配置值。"""
     dotenv_file = tmp_path / ".env"
     dotenv_file.write_text(
-        f"LIQUAN_ENGINE_API_URL={_FAKE_SCHEME}{_FAKE_HOST}:9" + "999\n",
+        f"LIUQUAN_ENGINE_API_URL={_FAKE_SCHEME}{_FAKE_HOST}:9" + "999\n",
         encoding="utf-8",
     )
     assert _resolve_base_url(dotenv_file) == f"{_FAKE_SCHEME}{_FAKE_HOST}:9" + "999"
@@ -273,7 +273,7 @@ def test_resolve_base_url_default_when_unset(tmp_path: Path) -> None:
 def test_resolve_base_url_default_when_empty(tmp_path: Path) -> None:
     """.env 变量为空串 -> 回退缺省地址。"""
     dotenv_file = tmp_path / ".env"
-    dotenv_file.write_text("LIQUAN_ENGINE_API_URL=\n", encoding="utf-8")
+    dotenv_file.write_text("LIUQUAN_ENGINE_API_URL=\n", encoding="utf-8")
     assert _resolve_base_url(dotenv_file) == (_FAKE_SCHEME + _FAKE_HOST + ":81" + "00")
 
 
@@ -282,7 +282,7 @@ async def test_client_resolves_base_url_from_dotenv(tmp_path: Path) -> None:
     """client 经 dotenv_path 注入 -> 实际请求打到 .env 配置的 host/port。"""
     dotenv_file = tmp_path / ".env"
     dotenv_file.write_text(
-        f"LIQUAN_ENGINE_API_URL={_FAKE_SCHEME}{_FAKE_HOST}:9" + "999\n",
+        f"LIUQUAN_ENGINE_API_URL={_FAKE_SCHEME}{_FAKE_HOST}:9" + "999\n",
         encoding="utf-8",
     )
     captured: dict[str, Any] = {}

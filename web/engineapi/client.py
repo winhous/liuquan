@@ -3,7 +3,7 @@
 - 只发 HTTP：零 engine import（lint P3-2 执法：web/ 不得 import engine.*，
   双向零代码耦合，规范 R24）。本包只依赖 httpx（已入项目直接依赖）与
   python-dotenv（读 .env 文件）。
-- base URL 来自仓库根 .env 的 LIQUAN_ENGINE_API_URL（规范 R20：值只存
+- base URL 来自仓库根 .env 的 LIUQUAN_ENGINE_API_URL（规范 R20：值只存
   .env；经 dotenv_values 读 .env 文件，不触碰 os.environ——P2 规则 4 的
   唯一合法来源即 .env 文件，先例 engine/core/db.py）；未配置/为空时回退
   到本地缺省地址（_DEFAULT_BASE_URL，按段拼接构造：P2 凭据零容忍扫全仓，
@@ -30,7 +30,7 @@ from dotenv import dotenv_values
 
 # ---- base URL 解析（R20：值只存 .env；P2 规则 4：不读 os.environ）----
 
-_ENV_KEY = "LIQUAN_ENGINE_API_URL"
+_ENV_KEY = "LIUQUAN_ENGINE_API_URL"
 
 # web/engineapi/client.py -> web/ -> 仓库根（不依赖 cwd）
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,7 +48,7 @@ DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=30.0)
 
 
 def _resolve_base_url(dotenv_path: Path | None = None) -> str:
-    """读 .env 的 LIQUAN_ENGINE_API_URL；未配置/为空回退缺省地址。"""
+    """读 .env 的 LIUQUAN_ENGINE_API_URL；未配置/为空回退缺省地址。"""
     values = dotenv_values(dotenv_path if dotenv_path is not None else _DOTENV_PATH)
     raw = (values.get(_ENV_KEY) or "").strip()
     return raw if raw else _DEFAULT_BASE_URL
