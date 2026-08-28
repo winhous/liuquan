@@ -203,3 +203,73 @@ def engine_pg_cluster() -> PgCluster:
         text=True,
     )
     shutil.rmtree(datadir, ignore_errors=True)
+
+
+_TM_DB_NAME = "liuquan"
+
+
+@pytest.fixture(scope="session")
+def tm_pg_cluster(engine_pg_cluster: PgCluster) -> PgCluster:
+    """业务库嵌入式簇（v0.2 TM）：复用 engine 簇的 PG 实例，另建 liuquan 库 + tm schema + 业务迁移。
+
+    业务库与引擎库同簇异库（详设-v0.2 §2.1 双 database 物理隔离）。本 fixture
+    依赖 engine_pg_cluster（保证 PG 实例已启动、引擎迁移已跑）：
+    - createdb liuquan（业务库）；
+    - CREATE SCHEMA tm（详设 §2.1：schema 由部署侧建，迁移内不建——此处模拟部署侧）；
+    - alembic upgrade head（migrations/business/，经 `-x db_url=` 传连接串，
+      不注入环境变量，P2 规则4 合法）。
+    yield 业务库 PgCluster（url 指向 liuquan 库；PG 实例生命周期归 engine_pg_cluster）。
+    """
+    cluster = engine_pg_cluster
+    user = getpass.getuser()
+    _run(
+        [
+            str(_PGBIN / "createdb"),
+            "-h",
+            _HOST,
+            "-p",
+            str(cluster.port),
+            "-U",
+            user,
+            _TM_DB_NAME,
+        ]
+    )
+    url = f"postgresql+asyncpg://{user}@{_HOST}:{cluster.port}/{_TM_DB_NAME}"
+    _run(
+        [
+            str(_PGBIN / "psql"),
+            "-h",
+            _HOST,
+            "-p",
+            str(cluster.port),
+            "-U",
+            user,
+            "-d",
+            _TM_DB_NAME,
+            "-c",
+            "CREATE SCHEMA tm",
+        ]
+    )
+    repo_root = Path(__file__).resolve().parents[1]
+    _run(
+        [
+            "uv",
+            "run",
+            "alembic",
+            "-c",
+            "migrations/business/alembic.ini",
+            "-x",
+            f"db_url={url}",
+            "upgrade",
+            "head",
+        ],
+        cwd=repo_root,
+        timeout=180,
+    )
+    return PgCluster(
+        url=url,
+        pgbin=_PGBIN,
+        port=cluster.port,
+        datadir=cluster.datadir,
+        db_name=_TM_DB_NAME,
+    )
