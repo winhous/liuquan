@@ -1,0 +1,10 @@
+# crm_translate_chain 链声明（详设-v0.1 §4.2；任务 T10）
+# 链 id 与工序 id 不重名（loader L1 工序/链/provider 三表跨表全局唯一）。
+# 步骤省略 input = 整链入参直传（§4.2 原文）。
+id: crm_translate_chain
+domain: crm
+description: 翻译雏形链：整链入参直传 crm_translate 工序（v0.3 探路）
+input:
+  model: ChatTranslateInput
+steps:
+  - worker: crm_translate

@@ -1,0 +1,3 @@
+# demo_echo 规格外置（R10：业务规格值只住 config/，run.py 零字面量）
+tone: 友好
+label: 回显标记

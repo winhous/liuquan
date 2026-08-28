@@ -1,0 +1,14 @@
+# demo 域 Context provider 登记位（详设-v0.1 §4.3/§6.2；任务 T10）
+# v0.1 只声明不消费：工序不声明 context（真实运行不依赖 provider），
+# 本文件登记 provider 供后续版本/测试桩注入使用。
+# 注意：provider id 按 loader L1 须 snake_case（点分拒载），故 id 用
+# demo_greeting；实现标识（provider 字段）保留 demo.greeting 点分形态
+# （web 侧注册实现的标识，测试 fake_providers.yaml 同款，详设 §13）。
+- id: demo_greeting
+  domain: demo
+  description: demo 问候语 provider（v0.1 只声明不消费）
+  params:
+    model: DemoGreetingParams
+  returns:
+    model: DemoGreeting
+  provider: demo.greeting

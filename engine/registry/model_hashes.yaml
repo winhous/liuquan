@@ -1,4 +1,16 @@
 # 自动生成文件：registry-check --write-hashes 重写，勿手改（详设 §4.4 L9）
 # hash = Model 字段名+类型结构摘要；version = 引用工序 version
 # （同一 Model 被多个工序引用时，记录为其中最大 version，各工序须一致）
-models: {}
+models:
+  ChatTranslateInput:
+    version: 1
+    hash: 7a44c2b377912c78376c04c5830dd38c8fe920d9d9fcaecabfdfcb92601eadeb
+  ChatTranslateResult:
+    version: 1
+    hash: 4b1c7f63d7eafda24b20778a9895998fa71ed27cc5a7dcc35937bfd91663fa0c
+  DemoEchoInput:
+    version: 1
+    hash: 6899a551b2315d420f3c3bfcc304e10bdd7bd71ed53d0b45ccc63402443c715d
+  DemoEchoResult:
+    version: 1
+    hash: 6899a551b2315d420f3c3bfcc304e10bdd7bd71ed53d0b45ccc63402443c715d

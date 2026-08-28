@@ -1,0 +1,18 @@
+# crm_translate 工序声明（详设-v0.1 §4.1；任务 T10）
+# 翻译雏形（v0.3 探路，仅 demo 级数据写入引擎库 output 字段）：
+# REASON 真调 LLM 产出译文 -> ACT 消费 ctx.llm_output 校验后交由 runner 落库。
+id: crm_translate
+domain: crm
+version: 1
+risk: read
+description: 翻译雏形：把对话文本按目标语言翻译（为 v0.3 探路）
+input:
+  model: ChatTranslateInput
+output:
+  model: ChatTranslateResult
+model: default
+retry:
+  max_attempts: 2
+  timeout_s: 30
+prompt: prompt.md
+config_dir: config/

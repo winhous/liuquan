@@ -1,0 +1,3 @@
+# crm_translate 规格外置（R10：翻译规格只住 config/，run.py 零字面量）
+style_guide: 简洁直译
+max_length: 200

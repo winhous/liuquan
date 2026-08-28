@@ -1,0 +1,9 @@
+# demo 域事件登记位（详设-v0.1 §6.1；任务 T10）
+# v0.1 只登记不消费（§6.1 原文）。event_type 允许点分（schema pattern
+# 与 loader L1 同源：只有 event_type 允许点分形态）。
+# trigger_chain 必须引用已登记链（R22：全册引用断裂 = 拒载）。
+- event_type: demo.echo_done
+  domain: demo
+  payload_model: DemoEchoEventPayload
+  dedup_window_min: 0
+  trigger_chain: demo_echo_chain

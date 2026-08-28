@@ -1,0 +1,8 @@
+# demo 域 Action 登记位（详设-v0.1 §6.3；任务 T10）
+# ActionDeclaration 复用 models/contract/action.py 冻结契约类。
+# target 一期唯一合法值 tm.proposal（loader L10 锁死）；demo 域只登记不消费。
+- action_id: demo_echo_record
+  domain: demo
+  risk: read
+  output_model: DemoEchoResult
+  target: tm.proposal

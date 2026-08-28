@@ -73,18 +73,20 @@ def _make_tmp_repo(tmp_path: Path, *, models_yaml: str | None) -> Path:
 
 
 class TestRegistryCheck:
-    def test_real_repo_empty_registry_exit_zero(
+    def test_real_repo_registry_check_exit_zero(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """真仓库：空册 + models.yaml 已交付 -> 0 违规退出 0，清单为空、无 [L4]。"""
+        """真仓库（T10 落地后：2 工序 2 链 1 provider 1 事件 1 Action）-> 0 违规退出 0。"""
         _set_env(monkeypatch)
         rc = cli.main(["registry-check"])
         out = capsys.readouterr().out
         assert rc == 0
         assert "[L4]" not in out
         assert "0 违规" in out
-        for label in ("工序 0", "链 0", "Context provider 0", "事件 0", "Action 0"):
+        # 清单随 T10 声明：工序 demo_echo/crm_translate、链 ×2、provider/事件/Action 各 1
+        for label in ("工序 2", "链 2", "Context provider 1", "事件 1", "Action 1"):
             assert label in out, f"清单应包含 {label}"
+        assert "demo_echo" in out and "crm_translate" in out
 
     def test_missing_models_yaml_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

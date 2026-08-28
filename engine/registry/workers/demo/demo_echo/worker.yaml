@@ -1,0 +1,18 @@
+# demo_echo 工序声明（详设-v0.1 §4.1；任务 T10）
+# 演示工序 = demo-echo 桩驱动：REASON 由 LLM 产出（测试用 FakeAgent 桩），
+# ACT 确定性回显入参（不消费 ctx.llm_output），验证状态机全相位。
+id: demo_echo
+domain: demo
+version: 1
+risk: read
+description: 演示工序：把输入文本原样返回（结构化冒烟，桩驱动）
+input:
+  model: DemoEchoInput
+output:
+  model: DemoEchoResult
+model: default
+retry:
+  max_attempts: 2
+  timeout_s: 30
+prompt: prompt.md
+config_dir: config/
