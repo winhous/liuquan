@@ -49,7 +49,7 @@ from models.workers import (
 )
 from test_runner import (
     FakeAgent,
-    _clean_engine_tables,  # noqa: F401  # autouse 清库（随模块收集，同 test_acceptance）
+    _clean_engine_tables,  # noqa: F401  # autouse 清库（跨模块 import，随模块收集）
     db_engine,
     make_agent_factory,
 )

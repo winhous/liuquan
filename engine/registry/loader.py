@@ -145,8 +145,28 @@ class _Decl:
 
 
 def _canonical_type(tp: Any) -> str:
-    """类型注解 -> 稳定字符串（L9 hash 输入；同环境内确定）。"""
+    """类型注解 -> 稳定字符串（L9 hash 输入；同环境内确定）。
+
+    review 修复（2026-08-28）：规范化等价写法——`Optional[str]` / `str | None` /
+    `Union[str, None]` / `None | str` 是同一语义类型，必须产出同一 hash（原实现
+    各自不同，纯语法重构会误报「结构已变更」逼无意义 bump version）。
+    """
     origin = typing.get_origin(tp)
+    if origin is typing.Annotated:
+        # 元数据不算结构（Annotated[X, ...] -> X）
+        return _canonical_type(typing.get_args(tp)[0])
+    if origin is typing.Union or origin is types.UnionType:
+        args = typing.get_args(tp)
+        non_none = [a for a in args if a is not type(None)]
+        has_none = len(non_none) != len(args)
+        if len(non_none) == 1:
+            inner = _canonical_type(non_none[0])
+            return f"Optional[{inner}]" if has_none else inner
+        body = ",".join(sorted(_canonical_type(a) for a in non_none))
+        return f"Optional[Union[{body}]]" if has_none else f"Union[{body}]"
+    if origin is typing.Literal:
+        parts = ",".join(sorted(repr(a) for a in typing.get_args(tp)))
+        return f"Literal[{parts}]"
     if origin is None:
         if isinstance(tp, type):
             return tp.__name__

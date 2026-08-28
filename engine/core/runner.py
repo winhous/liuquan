@@ -266,7 +266,19 @@ class TaskRunner:
             trigger_ref=trigger_ref,
             input_=input_,
         )
-        row = await _db.dequeue_task(self._engine)
+        # 取自己这条（SKIP LOCKED 最老优先）；遇孤儿（创建后未被取走即崩溃的
+        # 任务）先标记失败清理再重试，防止毒化队列（review M8 修复）
+        row: Any = None
+        for _ in range(20):
+            row = await _db.dequeue_task(self._engine)
+            if row is None or row.id == task_id:
+                break
+            await _db.update_task(
+                self._engine,
+                row.id,
+                status="failed",
+                error="孤儿任务（创建后未被取走即崩溃，被后续 run 清理）",
+            )
         if row is None or row.id != task_id:
             raise RuntimeError(
                 f"dequeue 未取到本任务（task_id={task_id}）——队列被并发消费"
@@ -276,9 +288,13 @@ class TaskRunner:
         )
         self._pause_requested = False
         lines: list[PhaseLine] = []
-        status, error = await self._run_chain_steps(
-            task_id, chain, input_, start_index=0, prior_outputs=[], lines=lines
-        )
+        try:
+            status, error = await self._run_chain_steps(
+                task_id, chain, input_, start_index=0, prior_outputs=[], lines=lines
+            )
+        except Exception as exc:
+            # 意外异常兜底：任何未捕获异常也落终态，不留 running 脏行（review C1 修复）
+            status, error = "failed", f"runner 未捕获异常：{exc}"
         return await self._finalize(task_id, chain_id, status, error, lines)
 
     async def resume(self, task_id: int) -> TaskResult:
@@ -302,7 +318,6 @@ class TaskRunner:
         ).resume_point(task_id)
         if point is None:
             raise ValueError(f"任务 {task_id} 无检查点，无法恢复（§2.3）")
-        target = _resume_target(point)
         step_row = await _db.get_step(self._engine, point.step_id)
         if step_row is None:
             raise ValueError(f"检查点引用的 step {point.step_id} 不存在（数据不一致）")
@@ -310,32 +325,65 @@ class TaskRunner:
         if step_index >= len(chain.steps):
             raise ValueError(f"检查点 step_index {step_index} 超出链步骤数")
 
+        # 恢复执行期间任务标回 running（review M14 修复：防并发二次 resume）
+        await _db.update_task(self._engine, task_id, status="running")
         self._pause_requested = False
         lines: list[PhaseLine] = []
-        outcome = await self._execute_step(
-            task_id,
-            point.step_id,
-            step_index,
-            chain.steps[step_index],
-            step_row.input or {},
-            resume_phase=target,
-            resume_state=point.state,
-        )
-        lines.extend(outcome.lines)
-        if outcome.status in ("failed", "paused"):
-            return await self._finalize(
-                task_id, task.chain_id, outcome.status, outcome.error, lines
+        try:
+            to_phase = Phase(point.to_phase)
+            target = (
+                to_phase if to_phase is not Phase.PAUSED else Phase(point.from_phase)
             )
-        prior = await self._completed_step_outputs(task_id, step_index + 1)
-        status, error = await self._run_chain_steps(
-            task_id,
-            chain,
-            task.input,
-            start_index=step_index + 1,
-            prior_outputs=prior,
-            lines=lines,
-        )
-        return await self._finalize(task_id, task.chain_id, status, error, lines)
+            if target is Phase.DONE:
+                # 崩溃落在「该步已 done 的终态检查点 -> 下一步/任务终态」之间
+                # （review M3 修复）：该步输出已落库，直接续跑后续步骤/终态
+                prior = await self._completed_step_outputs(task_id, step_index + 1)
+                status, error = await self._run_chain_steps(
+                    task_id,
+                    chain,
+                    task.input,
+                    start_index=step_index + 1,
+                    prior_outputs=prior,
+                    lines=lines,
+                )
+                return await self._finalize(
+                    task_id, task.chain_id, status, error, lines
+                )
+            # 与状态机 PAUSED+EVENT_RESUME 同路径校验（目标必须是运行相位，fail-closed）
+            target = transition(
+                Phase.PAUSED,
+                EVENT_RESUME,
+                TransitionContext(resume_phase=target),
+            )
+            outcome = await self._execute_step(
+                task_id,
+                point.step_id,
+                step_index,
+                chain.steps[step_index],
+                step_row.input or {},
+                resume_phase=target,
+                resume_state=point.state,
+            )
+            lines.extend(outcome.lines)
+            if outcome.status in ("failed", "paused"):
+                return await self._finalize(
+                    task_id, task.chain_id, outcome.status, outcome.error, lines
+                )
+            prior = await self._completed_step_outputs(task_id, step_index + 1)
+            status, error = await self._run_chain_steps(
+                task_id,
+                chain,
+                task.input,
+                start_index=step_index + 1,
+                prior_outputs=prior,
+                lines=lines,
+            )
+            return await self._finalize(task_id, task.chain_id, status, error, lines)
+        except Exception as exc:
+            # 意外异常兜底：不留 running 脏行（review C1 修复）
+            return await self._finalize(
+                task_id, task.chain_id, "failed", f"resume 未捕获异常：{exc}", lines
+            )
 
     def request_pause(self) -> None:
         """请求暂停（人工 pause 指令，§2.2 转换表）；相位循环顶部生效。
@@ -495,7 +543,15 @@ class TaskRunner:
         lines: list[PhaseLine],
     ) -> tuple[str | None, Any, dict[str, Any], str | None]:
         """INIT：Policy 门禁（域权限/风险/越域读）+ 工序入参类型 + 上下文装配。"""
-        context_domains = [c.id.split(".")[0] for c in worker.context]
+        # context 域 = provider 声明里的 domain（review M7 修复：不按 id 点分前缀
+        # 推导——snake_case id 如 demo_greeting 推导不出 "demo"；声明域才是真相，
+        # 与 loader L2 同源）
+        context_domains: list[str] = []
+        for ref in worker.context:
+            decl = self._registry.context_providers.get(ref.id)
+            context_domains.append(
+                decl.domain.value if decl is not None else ref.id
+            )
         policy = check_policy(worker.domain, worker.risk, context_domains)
         if not policy.ok:
             lines.append(PhaseLine("INIT", f"policy failed: {policy.reason}"))
@@ -642,9 +698,22 @@ class TaskRunner:
                 raise ValueError(
                     f"工序 {worker.id} 的 input Model {worker.input.model} 不可解析"
                 )
+            out_cls = self._resolve_model(worker.output.model)
+            if out_cls is None:
+                raise ValueError(
+                    f"工序 {worker.id} 的 output Model {worker.output.model} 不可解析"
+                )
             inputs_model = input_cls.model_validate(step_input)
             context_data = await self._rebuild_context_models(
                 worker, memory.get("context_data") or {}
+            )
+            # llm_output 归一化为 output Model（review M1 修复）：正常路径 phase_output
+            # 已是 Model；resume 路径从检查点还原的是 dict——必须还原成 Model 再交给
+            # 工序（翻译工序 isinstance 校验依赖它；A4 对真实工序的续跑前提）
+            llm_model = (
+                self._coerce_model(phase_output, out_cls)
+                if phase_output is not None
+                else None
             )
             ctx = EngineContext(
                 worker_id=worker.id,
@@ -653,16 +722,11 @@ class TaskRunner:
                 config=self._config_for(worker),
                 context_data=context_data,
                 engine=self._engine,
-                llm_output=phase_output,
+                llm_output=llm_model,
                 task_id=task_id,
                 step_id=step_id,
             )
             output_value = await self._call_worker_run(worker, inputs_model, ctx)
-            out_cls = self._resolve_model(worker.output.model)
-            if out_cls is None:
-                raise ValueError(
-                    f"工序 {worker.id} 的 output Model {worker.output.model} 不可解析"
-                )
             output_model = self._coerce_model(output_value, out_cls)
             if output_model is None:
                 raise ValueError(
@@ -933,15 +997,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _resume_target(point: Any) -> Phase:
-    """恢复目标相位（§2.3）：to_phase 为 PAUSED 时取 from_phase（暂停 = 待执行相位）。"""
-    target = Phase(point.to_phase)
-    if target is Phase.PAUSED:
-        target = Phase(point.from_phase)
-    # 与状态机 PAUSED+EVENT_RESUME 同路径校验（目标必须是运行相位，fail-closed）
-    return transition(Phase.PAUSED, EVENT_RESUME, TransitionContext(resume_phase=target))
-
-
 def _transition_ctx(phase: Phase, event: str, memory: dict[str, Any], worker: Any) -> TransitionContext:
     """转换条件快照（§2.2 条件列；fail-closed：条件与事件矛盾即抛）。"""
     if phase is Phase.INIT:
@@ -951,9 +1006,11 @@ def _transition_ctx(phase: Phase, event: str, memory: dict[str, Any], worker: An
     if phase is Phase.ACT:
         max_attempts = worker.retry.max_attempts if worker.retry else _DEFAULT_MAX_ATTEMPTS
         attempt = int(memory.get("attempt", 0))
+        # 总尝试 = 1 次初调 + max_attempts 次重试（§14 与 LLM 层 range(max_attempts+1)
+        # 同口径）；attempt = 已执行的次数（review M2 修复：原 max_attempts-attempt 少算一次）
         return TransitionContext(
             side_effect_ok=event == EVENT_SIDE_EFFECT_OK,
-            attempt_left=max_attempts - attempt,
+            attempt_left=max_attempts + 1 - attempt,
         )
     if phase is Phase.VERIFY:
         return TransitionContext(assertions_ok=event == EVENT_ASSERTIONS_OK)

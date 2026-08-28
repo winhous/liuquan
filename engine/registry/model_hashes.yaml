@@ -7,7 +7,7 @@ models:
     hash: 7a44c2b377912c78376c04c5830dd38c8fe920d9d9fcaecabfdfcb92601eadeb
   ChatTranslateResult:
     version: 1
-    hash: 4b1c7f63d7eafda24b20778a9895998fa71ed27cc5a7dcc35937bfd91663fa0c
+    hash: 2eb1141a7bc77267c103c9b851592f662b6148627b065399a2951153667c4579
   DemoEchoInput:
     version: 1
     hash: 6899a551b2315d420f3c3bfcc304e10bdd7bd71ed53d0b45ccc63402443c715d

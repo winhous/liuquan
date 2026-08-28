@@ -91,7 +91,11 @@ async def db_engine(engine_pg_cluster):
 
 @async_fixture(autouse=True)
 async def _clean_engine_tables(db_engine):
-    """每测试后 TRUNCATE 4 表（RESTART IDENTITY 重置自增、CASCADE 破外键），互不污染。"""
+    """每测试后 TRUNCATE 4 表（RESTART IDENTITY 重置自增、CASCADE 破外键），互不污染。
+
+    review 修复：module 级 autouse（与 test_runner 同款），只对本文件测试生效；
+    不做 conftest 全局 autouse（会给全仓纯同步测试引入事件循环开销拖慢套件）。
+    """
     yield
     async with AsyncSession(db_engine) as session, session.begin():
         await session.execute(

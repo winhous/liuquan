@@ -50,6 +50,7 @@ from engine.core.db import (
     get_audit,
     get_step,
     get_task,
+    update_task,
 )
 from engine.core.llm import agent_factory, load_models
 from engine.core.runner import PhaseLine, TaskResult, TaskRunner
@@ -363,7 +364,13 @@ async def db_engine(engine_pg_cluster):
 
 @async_fixture(autouse=True)
 async def _clean_engine_tables(db_engine):
-    """每测试后 TRUNCATE 4 表（RESTART IDENTITY 重置自增、CASCADE 破外键），互不污染。"""
+    """每测试后 TRUNCATE 4 表（RESTART IDENTITY 重置自增、CASCADE 破外键），互不污染。
+
+    review major-1 修复：本 fixture 被 test_acceptance/test_workers 跨模块 import
+    （autouse 随模块收集）；test_cli 的共享簇插入由 test_cli 自身清理（见其
+    TestAuditCommand）。保持 module 级而非 conftest 全局 autouse——全局会给全仓
+    纯同步测试引入事件循环开销（实测 ~1.8s/测试拖慢整个套件）。
+    """
     yield
     async with AsyncSession(db_engine) as session, session.begin():
         await session.execute(
@@ -555,7 +562,9 @@ async def test_llm_unavailable_retry_then_failed_no_partial_output(
     assert row.status == "failed"
     audit = await get_audit(db_engine, result.task_id)
     assert len(audit) == 1 and audit[0].result == "failed"
-    assert audit[0].output_full == {"error": audit[0].output_full["error"]}  # 带原因
+    # review 加固：error 键必须存在且带非空原因（原恒真式断言只验证键存在）
+    assert isinstance(audit[0].output_full, dict)
+    assert audit[0].output_full.get("error")
 
 
 @pytest.mark.asyncio
@@ -656,7 +665,12 @@ async def test_pause_then_resume_from_paused(tmp_path, monkeypatch, db_engine) -
     run_mod.BLOCK_ON = None
     result2 = await build(db_engine, agent_factory_fn=factory).resume(task_row.id)
     assert result2.status == "done"
-    assert agents[0].calls == 1  # 暂停发生在 ACT 之后：REASON 不重烧
+    # 暂停发生在 ACT 之后：REASON 不重烧（review major-3 加固：同时断言
+    # 未新建 agent 且审计条数不变——原仅 agents[0].calls==1 拦不住「新建
+    # agent 重跑 REASON」的回归）
+    assert len(agents) == 1 and agents[0].calls == 1
+    audits = await get_audit(db_engine, task_row.id)
+    assert len(audits) == 1  # REASON 只调一次 = 审计只一条
     done = await get_task(db_engine, task_row.id)
     assert done.status == "done"
 
@@ -794,3 +808,148 @@ async def test_audit_gate_unwritable_rejects_llm(tmp_path, monkeypatch, db_engin
     ).run("echo_chain", {"text": "hi"})
     assert result.status == "failed"
     assert len(agents) == 1 and agents[0].calls == 0  # 审计不可写 -> 调用不允许发生
+
+
+# ==== review 回归测试（2026-08-28 代码审查修复的固化）====
+
+LLM_TYPE_RUN_PY = (
+    "from engine.core.context import EngineContext\n"
+    "from models.workers import EchoInput, EchoResult\n"
+    "\n"
+    "CRASH = False\n"
+    "SEEN: dict = {}\n"
+    "\n"
+    "\n"
+    "def run(inputs: EchoInput, ctx: EngineContext) -> EchoResult:\n"
+    "    SEEN['llm_type'] = type(ctx.llm_output).__name__\n"
+    "    if CRASH:\n"
+    "        raise KeyboardInterrupt('模拟崩溃（kill -9）')\n"
+    "    return EchoResult(text=inputs.text)\n"
+)
+
+ALWAYS_RAISE_RUN_PY = (
+    "from engine.core.context import EngineContext\n"
+    "from models.workers import EchoInput, EchoResult\n"
+    "\n"
+    "CALLS = 0\n"
+    "\n"
+    "\n"
+    "def run(inputs: EchoInput, ctx: EngineContext) -> EchoResult:\n"
+    "    global CALLS\n"
+    "    CALLS += 1\n"
+    "    raise ValueError('副作用必然失败（测试）')\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_resume_llm_output_restored_as_model(tmp_path, monkeypatch, db_engine) -> None:
+    """review M1 回归：resume 后 ctx.llm_output 必须是 output Model（非检查点还原的
+    dict）——真实翻译工序的 isinstance 校验依赖它（A4 对真实工序的续跑前提）。"""
+    factory, agents = make_agent_factory(FakeAgent, output=lambda ot: ot(text="echoed"))
+    _, _, _, build = make_runner_env(
+        tmp_path, monkeypatch, run_py=LLM_TYPE_RUN_PY
+    )
+    run_mod = importlib.import_module("engine.registry.workers.demo.echo.run")
+    run_mod.CRASH = True
+    with pytest.raises(KeyboardInterrupt):
+        await build(db_engine, agent_factory_fn=factory).run("echo_chain", {"text": "hi"})
+    task = await _latest_task(db_engine)
+    assert task.status == "running"  # 崩溃中间态
+    run_mod.CRASH = False
+    result = await build(db_engine, agent_factory_fn=factory).resume(task.id)
+    assert result.status == "done"
+    assert run_mod.SEEN["llm_type"] == "EchoResult"  # 非 dict，是 Model
+    assert len(await get_audit(db_engine, task.id)) == 1  # 不重烧
+
+
+@pytest.mark.asyncio
+async def test_act_retry_max_attempts_two_three_total(tmp_path, monkeypatch, db_engine) -> None:
+    """review M2 回归：max_attempts=2 -> 1 次初调 + 2 次重试 = 共 3 次尝试
+    （原 off-by-one 只重试 1 次；§14 与 LLM 层 range(max_attempts+1) 同口径）。"""
+    factory, agents = make_agent_factory(FakeAgent, output=lambda ot: ot(text="echoed"))
+    _, _, _, build = make_runner_env(
+        tmp_path, monkeypatch, run_py=ALWAYS_RAISE_RUN_PY, backoff=0.0
+    )
+    result = await build(db_engine, agent_factory_fn=factory).run(
+        "echo_chain", {"text": "hi"}
+    )
+    assert result.status == "failed"
+    run_mod = importlib.import_module("engine.registry.workers.demo.echo.run")
+    assert run_mod.CALLS == 3  # 1 初调 + 2 重试
+
+
+@pytest.mark.asyncio
+async def test_resume_after_step_done_checkpoint_finalizes(tmp_path, monkeypatch, db_engine) -> None:
+    """review M3 回归：崩溃落在「步骤 VERIFY->DONE 终态检查点 -> 任务终态」之间
+    （把已完成任务的 status 改回 running 模拟）-> resume 不抛、正常终态 DONE。"""
+    factory, agents = make_agent_factory(FakeAgent, output=lambda ot: ot(text="echoed"))
+    _, _, _, build = make_runner_env(tmp_path, monkeypatch)
+    first = await build(db_engine, agent_factory_fn=factory).run("echo_chain", {"text": "hi"})
+    assert first.status == "done"
+    # 模拟崩溃窗口：任务完成但 status 被改回 running（终态检查点仍在）
+    await update_task(db_engine, first.task_id, status="running", finished_at=None)
+    result = await build(db_engine, agent_factory_fn=factory).resume(first.task_id)
+    assert result.status == "done"
+    done = await get_task(db_engine, first.task_id)
+    assert done.status == "done"
+    assert len(agents) == 1 and agents[0].calls == 1  # 不重烧
+
+
+@pytest.mark.asyncio
+async def test_provider_snake_case_id_passes_policy(tmp_path, monkeypatch, db_engine) -> None:
+    """review M7 回归：context provider id 为 snake_case（demo_greeting，L1 合规形态）
+    时，Policy 用 provider 声明的 domain 判域（不按 id 点分前缀推导）-> 不误拒。"""
+    provider = type("FakeGreeting", (), {"calls": 0, "provide": None})()
+
+    async def provide(params):
+        provider.calls += 1
+        return GreetingResult(greeting="hello")
+
+    repo = _build_repo(
+        tmp_path,
+        monkeypatch,
+        worker_kw={"context": [{"id": "demo_greeting", "params": {"name": "input.text"}}]},
+    )
+    _write(
+        repo,
+        "engine/registry/context/demo.yaml",
+        _provider_yaml(provider_id="demo_greeting", impl_id="demo.greeting"),
+    )
+    registry = load_registry(repo)
+    model_registry = load_models(repo / "models.yaml")
+    factory, agents = make_agent_factory(FakeAgent, output=lambda ot: ot(text="echoed"))
+    runner = TaskRunner(
+        db_engine,
+        registry,
+        agent_factory=factory,
+        model_registry=model_registry,
+        repo_root=repo,
+        providers={"demo.greeting": provide},
+    )
+    result = await runner.run("echo_chain", {"text": "hi"})
+    assert result.status == "done", result.error
+    assert provider.calls == 1  # provider 真实被拉取（Context 通道生效）
+
+
+@pytest.mark.asyncio
+async def test_orphan_queued_task_cleaned_and_new_run_succeeds(
+    tmp_path, monkeypatch, db_engine
+) -> None:
+    """review M8 回归：队列残留孤儿任务（create 后未取走即崩溃）被后续 run 清理
+    （标记 failed），新任务正常执行到 DONE（原直接抛错级联毒化）。"""
+    orphan_id = await create_task(
+        db_engine,
+        chain_id="echo_chain",
+        trigger_type="manual",
+        trigger_ref=None,
+        input_={"text": "orphan"},
+    )
+    factory, agents = make_agent_factory(FakeAgent, output=lambda ot: ot(text="echoed"))
+    _, _, _, build = make_runner_env(tmp_path, monkeypatch)
+    result = await build(db_engine, agent_factory_fn=factory).run(
+        "echo_chain", {"text": "hi"}
+    )
+    assert result.status == "done"
+    orphan = await get_task(db_engine, orphan_id)
+    assert orphan.status == "failed"  # 孤儿被清理
+    assert "孤儿任务" in (orphan.error or "")

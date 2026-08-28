@@ -81,23 +81,21 @@ def engine_pg_cluster() -> PgCluster:
         pytest.skip("本机未部署 PG16（Wave 0 T3 的 ~/.local/pg16 缺失）")
 
     repo_root = Path(__file__).resolve().parents[1]
-    datadir = repo_root / "tests" / ".pgdata" / f"pgtest-{os.getpid()}"
-    if datadir.exists():
-        # 上次同 pid 崩溃残留：先尝试停掉（不在跑则忽略），再清目录保证 initdb 全新
-        if (_PGBIN / "pg_ctl").is_file():
+    pgdata_root = repo_root / "tests" / ".pgdata"
+    datadir = pgdata_root / f"pgtest-{os.getpid()}"
+    # review major-2 修复：清理全部残留簇（含不同 pid 的孤儿——pytest 被 kill 后
+    # teardown 不执行、PG 常驻、目录不删；原来只清同 pid，长期累积占端口/内存）
+    if (_PGBIN / "pg_ctl").is_file():
+        for stale in sorted(pgdata_root.glob("pgtest-*")):
+            if not stale.is_dir():
+                continue
             subprocess.run(
-                [
-                    str(_PGBIN / "pg_ctl"),
-                    "-D",
-                    str(datadir),
-                    "-m",
-                    "fast",
-                    "stop",
-                ],
+                [str(_PGBIN / "pg_ctl"), "-D", str(stale), "-m", "fast", "stop"],
                 capture_output=True,
                 text=True,
             )
-        shutil.rmtree(datadir, ignore_errors=True)
+    for stale in sorted(pgdata_root.glob("pgtest-*")):
+        shutil.rmtree(stale, ignore_errors=True)
     datadir.mkdir(parents=True)
 
     user = getpass.getuser()

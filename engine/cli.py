@@ -55,6 +55,7 @@ from sqlalchemy import text
 
 from engine.core.audit import audit_summary
 from engine.core.db import create_engine, dispose_engine, get_audit
+from engine.core.llm.models_config import load_models
 from engine.registry import loader
 
 # 与 pyproject.toml 的 project.version 保持同步（v0.1 内均为 0.1.0）
@@ -165,6 +166,18 @@ def _cmd_registry_check(args: argparse.Namespace) -> int:
     _load_dotenv(repo_root)
     violations = loader.validate(repo_root)
     if args.write_hashes:
+        # review 修复：注册表有「非 L9」违规时不改写登记文件（失败路径上的写
+        # 副作用）；L9 mismatch 本身正是 write-hashes 要修的（改 Model 后
+        # bump version + 重跑登记），不拦。
+        blocking = [v for v in violations if not v.startswith("[L9]")]
+        if blocking:
+            for line in blocking:
+                print(line)
+            print(
+                f"registry-check：{len(blocking)} 条非 L9 违规，--write-hashes 已跳过"
+                "（先修违规再重写登记）"
+            )
+            return 1
         try:
             path = loader.write_hashes(repo_root)
         except loader.RegistryLoadError as exc:
@@ -172,6 +185,7 @@ def _cmd_registry_check(args: argparse.Namespace) -> int:
                 print(line)
             return 1
         print(f"已写入 Model 结构摘要登记（L9）：{_rel(repo_root, path)}")
+        violations = loader.validate(repo_root)  # 重写后重新校验（L9 已修）
     if violations:
         for line in violations:
             print(line)
@@ -186,9 +200,12 @@ def _cmd_registry_check(args: argparse.Namespace) -> int:
 # ---- run / resume ----
 
 
-def _print_result(result: Any, elapsed: float) -> int:
-    """打印任务结果（§10 相位流水）：created 行 + 每相位一行 + 终态行。"""
-    print(f"task e-{result.task_id:06d} created, chain: {result.chain_id}")
+def _print_result(result: Any, elapsed: float, *, verb: str = "created") -> int:
+    """打印任务结果（§10 相位流水）：任务行 + 每相位一行 + 终态行。
+
+    verb：run 用 "created"；resume 用 "resumed"（review 修复：resume 误打 created）。
+    """
+    print(f"task e-{result.task_id:06d} {verb}, chain: {result.chain_id}")
     for line in result.phase_lines:
         print(f"[{line.phase}] {line.message}")
     if str(result.status).lower() == "done":
@@ -205,12 +222,15 @@ async def _run_task_async(repo_root: Path, chain_id: str, input_: dict) -> int:
     try:
         engine = create_engine()
         registry = loader.load_registry(repo_root)
+        model_registry = load_models(repo_root / "models.yaml")
         await _probe_db(engine)
         runner = _runner_module().TaskRunner(
             engine,
             registry,
             agent_factory=_llm_agent_factory(),
             writable_check=lambda: True,
+            model_registry=model_registry,
+            repo_root=repo_root,
         )
         start = time.monotonic()
         result = await runner.run(chain_id, input_)
@@ -227,12 +247,15 @@ async def _resume_task_async(repo_root: Path, task_id: int) -> int:
     try:
         engine = create_engine()
         registry = loader.load_registry(repo_root)
+        model_registry = load_models(repo_root / "models.yaml")
         await _probe_db(engine)
         runner = _runner_module().TaskRunner(
             engine,
             registry,
             agent_factory=_llm_agent_factory(),
             writable_check=lambda: True,
+            model_registry=model_registry,
+            repo_root=repo_root,
         )
         start = time.monotonic()
         result = await runner.resume(task_id)
@@ -240,7 +263,7 @@ async def _resume_task_async(repo_root: Path, task_id: int) -> int:
     finally:
         if engine is not None:
             await _dispose(engine)
-    return _print_result(result, elapsed)
+    return _print_result(result, elapsed, verb="resumed")
 
 
 def _cmd_run(args: argparse.Namespace) -> int:

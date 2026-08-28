@@ -41,6 +41,7 @@ from engine.registry import (
     validate,
     write_hashes,
 )
+from engine.registry.loader import model_structure_hash
 
 # ---- 测试 Model 类（注入 models.workers 的临时模块，见模块 docstring）----
 
@@ -974,3 +975,29 @@ def test_event_trigger_chain_registered_passes(
     repo = _valid_repo(tmp_path, monkeypatch)
     reg = load_registry(repo)
     assert reg.events["demo.message_received"].trigger_chain == "echo_chain"
+
+
+def test_l9_equivalent_annotations_same_hash() -> None:
+    """review 回归（2026-08-28）：等价类型写法（Optional / str|None / Union /
+    None|str / Literal 顺序）必须产出同一结构 hash——纯语法重构不得触发
+    「结构已变更」误报（原实现三写法两 hash）。"""
+    from typing import Literal, Optional, Union
+
+    class A(BaseModel):
+        x: str | None = None
+        y: Literal["a", "b"] = "a"
+
+    class B(BaseModel):
+        x: Optional[str] = None
+        y: Literal["b", "a"] = "a"
+
+    class C(BaseModel):
+        x: Union[str, None] = None
+        y: Literal["a", "b"] = "a"
+
+    class D(BaseModel):
+        x: None | str = None
+        y: Literal["a", "b"] = "a"
+
+    hashes = {model_structure_hash(m) for m in (A, B, C, D)}
+    assert len(hashes) == 1, f"等价注解 hash 不一致：{hashes}"

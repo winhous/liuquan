@@ -27,7 +27,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from engine import cli
 from engine.core import db
@@ -148,12 +149,24 @@ class _FakeTaskResult:
 class _FakeTaskRunner:
     """桩 runner：记录调用参数，按场景返回固定终态（§13 桩注入式，CLI 对桩零感知）。"""
 
-    def __init__(self, engine, registry, *, agent_factory, audit_gate=None, writable_check=None) -> None:
+    def __init__(
+        self,
+        engine,
+        registry,
+        *,
+        agent_factory,
+        audit_gate=None,
+        writable_check=None,
+        model_registry=None,
+        repo_root=None,
+    ) -> None:
         self.engine = engine
         self.registry = registry
         self.agent_factory = agent_factory
         self.audit_gate = audit_gate
         self.writable_check = writable_check
+        self.model_registry = model_registry  # review 修复后 CLI 注入（C1）
+        self.repo_root = repo_root
         self.calls: list = []
         self.resume_id: int | None = None
 
@@ -258,7 +271,7 @@ class TestRunResumeWiring:
         assert rc == 1
         assert fake.last_runner is not None
         assert fake.last_runner.resume_id == 7
-        assert "task e-000007 created, chain: demo-echo" in out
+        assert "task e-000007 resumed, chain: demo-echo" in out
         assert "[FAILED] LLM 调用失败" in out
 
     def test_run_missing_dotenv_clear_error(
@@ -316,6 +329,15 @@ async def _insert_audit_row(url: str, *, chain_id: str = "demo-echo") -> int:
 
 
 class TestAuditCommand:
+    @pytest.fixture(autouse=True)
+    def _clean_shared_pg(self, engine_pg_cluster) -> None:
+        """review major-1 修复：本类向共享 PG 簇插入任务/审计，每测后必须清表——
+        否则残留的 queued 任务会被后续 test_runner/test_acceptance 的 SKIP LOCKED
+        取走（顺序依赖 flaky：pytest tests/test_cli.py tests/test_runner.py 必红）。
+        独立引擎 + 独立事件循环（asyncio.run），不与其他 loop 绑定。"""
+        yield
+        asyncio.run(_truncate_all(engine_pg_cluster.url))
+
     def test_audit_prints_summary_rows(
         self, engine_pg_cluster, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -466,3 +488,18 @@ class TestCliBasics:
         )
         assert proc.returncode == 0
         assert "liuquan-engine" in proc.stdout
+
+
+async def _truncate_all(url: str) -> None:
+    """清 4 表（TestAuditCommand 共享簇清理用；独立引擎防 loop 绑定）。"""
+    engine = create_async_engine(url)
+    try:
+        async with AsyncSession(engine) as session, session.begin():
+            await session.execute(
+                text(
+                    "TRUNCATE engine_audit, engine_checkpoint, engine_step, "
+                    "engine_task RESTART IDENTITY CASCADE"
+                )
+            )
+    finally:
+        await engine.dispose()
