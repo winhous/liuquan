@@ -1,14 +1,44 @@
 {% extends "base.html" %}
-{% block content_title %}任务列表{% endblock %}
+{% block title %}任务中心 · 刘全{% endblock %}
+{% block content_title %}任务中心{% endblock %}
 {% block content %}
-<!-- 概览：4 统计卡片 -->
+
+<!-- 消息/错误提示（PRG 后 query 参数） -->
+{% if msg %}
+<div class="alert alert-success alert-dismissible" role="alert">
+  <i class="ti ti-circle-check me-1"></i>{{ msg }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+{% if err %}
+<div class="alert alert-danger alert-dismissible" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+
+<!-- 逾期提醒条（常驻，决策 17 第 5 条：逾期一直提醒直到任务结束） -->
+{% if stats.overdue > 0 %}
+<div class="alert alert-danger d-flex align-items-center" role="alert">
+  <i class="ti ti-alert-triangle me-2 fs-3"></i>
+  <div>
+    <strong>{{ stats.overdue }} 个任务已逾期</strong>
+    <span class="text-muted">（未完成任务逾期一直提醒，直到人工结束——完成/作废必须填回复，不回复不能结束）</span>
+    <a href="/tasks?overdue=1" class="alert-link ms-2">查看逾期任务</a>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-success d-flex align-items-center py-2" role="alert">
+  <i class="ti ti-circle-check me-2"></i><span>当前无逾期任务（逾期提醒条常驻：未完成任务逾期一直提醒，直到人工结束）</span>
+</div>
+{% endif %}
+
+<!-- 概览：4 统计卡片（真实聚合 tm.task / tm.task_proposal） -->
 <div class="row g-3">
   <div class="col-md-3 col-sm-6">
     <div class="card">
       <div class="card-body">
-        <div class="d-flex align-items-center">
-          <div class="subheader">待办（open / in_progress）</div>
-        </div>
+        <div class="subheader">待办（open / in_progress）</div>
         <div class="h1 mb-3">{{ stats.open }}</div>
         <div class="d-flex align-items-baseline gap-2"><i class="ti ti-tasks text-primary"></i><span class="text-muted">需处理</span></div>
       </div>
@@ -36,10 +66,73 @@
     <div class="card">
       <div class="card-body">
         <div class="subheader">已完成</div>
-        <div class="h1 mb-3 text-success">{{ stats.done_today }}</div>
+        <div class="h1 mb-3 text-success">{{ stats.done }}</div>
         <div class="d-flex align-items-baseline gap-2"><i class="ti ti-circle-check text-success"></i><span class="text-muted">闭环回流</span></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- 触发演示链面板（链清单来自 GET /api/engine/registry；选链填参 -> POST -> 轮询查终态） -->
+<div class="card mt-3" id="trigger-panel">
+  <div class="card-header">
+    <h3 class="card-title"><i class="ti ti-robot me-1"></i>触发演示链</h3>
+    <div class="card-actions">
+      <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#trigger-body" aria-expanded="{{ 'true' if engine_task_id else 'false' }}">展开 / 收起</button>
+    </div>
+  </div>
+  <div class="card-body collapse {{ 'show' if engine_task_id else '' }}" id="trigger-body">
+    {% if registry_error %}
+    <div class="alert alert-warning mb-0"><i class="ti ti-plug-x me-1"></i>{{ registry_error }}（触发演示链需要引擎常驻服务；任务列表等其余功能不受影响）</div>
+    {% elif registry and registry.chains %}
+    <form method="post" action="/tasks/trigger" class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label">链（工序链）</label>
+        <select name="chain_id" id="chain-select" class="form-select">
+          {% for c in registry.chains %}<option value="{{ c.id }}">{{ c.id }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-9">
+        {% for c in registry.chains %}
+        {% set spec = chain_inputs.get(c.id) %}
+        <div class="chain-inputs {{ '' if loop.first else 'd-none' }}" id="inputs-{{ c.id }}">
+          {% if spec %}
+            {% for f in spec.fields %}
+            <div class="row g-2 mb-2">
+              <div class="col-md-3 col-form-label">{{ f.label }}{% if f.required %}<span class="text-danger">*</span>{% endif %}</div>
+              <div class="col-md-9">
+                {% if f.type == 'select' %}
+                <select name="{{ f.name }}" class="form-select">
+                  {% for opt in f.options %}<option value="{{ opt }}">{{ opt }}</option>{% endfor %}
+                </select>
+                {% else %}
+                <input type="text" name="{{ f.name }}" class="form-control" {% if f.required %}required{% endif %}>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="row g-2 mb-2">
+            <div class="col-md-3 col-form-label">输入（JSON）*</div>
+            <div class="col-md-9"><textarea name="input_json" class="form-control" rows="2" placeholder='{"text": "..."}'></textarea></div>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      <div class="col-12">
+        <button type="submit" class="btn btn-primary"><i class="ti ti-rocket me-1"></i>触发</button>
+        <span class="text-muted small ms-2">触发后引擎异步跑链（页面轮询 GET 查终态，完成后自动刷新待审核栏）</span>
+      </div>
+    </form>
+    {% if engine_task_id %}
+    <div class="mt-3 alert alert-info" id="engine-poll">
+      <i class="ti ti-loader me-1"></i>引擎任务 <code>{{ engine_task_id }}</code> 已触发，等待完成<span id="engine-status"></span>
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="text-muted">引擎注册表暂无链（引擎未启动或未登记演示链）。</div>
+    {% endif %}
   </div>
 </div>
 
@@ -49,26 +142,89 @@
     <div class="card">
       <div class="card-header">
         <h3 class="card-title"><i class="ti ti-list me-1"></i>任务清单</h3>
-        <div class="card-actions">
-          <button class="btn btn-primary" onclick="alert('演示链触发（原型）——v0.2 开发落地后调用引擎 POST /api/engine/tasks')">
-            <i class="ti ti-plus me-1"></i>触发演示链
+        <div class="card-actions d-flex gap-2">
+          <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#modal-create">
+            <i class="ti ti-plus me-1"></i>新建任务
           </button>
         </div>
+      </div>
+      <!-- 列表筛选器（决策 17 第 5 条：筛选功能一定有；先做状态+逾期+关键词） -->
+      <div class="card-body border-bottom py-2">
+        <form method="get" action="/tasks" class="row g-2 align-items-center">
+          <div class="col-auto">
+            <select name="status" class="form-select form-select-sm">
+              <option value="all" {{ 'selected' if filters.status == 'all' }}>全部状态</option>
+              {% for key, label in status_options %}
+              <option value="{{ key }}" {{ 'selected' if filters.status == key }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-auto form-check">
+            <input type="checkbox" class="form-check-input" name="overdue" value="1" id="f-overdue" {{ 'checked' if filters.overdue }}>
+            <label class="form-check-label" for="f-overdue">仅看逾期</label>
+          </div>
+          <div class="col-auto">
+            <input type="text" class="form-control form-control-sm" name="q" value="{{ filters.q }}" placeholder="关键词（标题/详情）">
+          </div>
+          <div class="col-auto"><button class="btn btn-sm btn-primary">筛选</button></div>
+        </form>
       </div>
       <div class="table-responsive">
         <table class="table table-vcenter card-table">
           <thead>
-            <tr><th>任务</th><th>状态</th><th>负责人</th><th>截止</th><th>来源</th></tr>
+            <tr><th>任务</th><th>状态</th><th>负责人</th><th>截止</th><th>来源</th><th class="text-end">操作</th></tr>
           </thead>
           <tbody>
             {% for t in tasks %}
             <tr class="{{ 'table-danger' if t.overdue else '' }}">
-              <td class="text-truncate" style="max-width:380px;">{{ t.title }}</td>
-              <td><span class="badge status-{{ t.status }}">{{ t.status_label }}</span></td>
+              <td class="text-truncate" style="max-width:300px;">
+                <div class="fw-semibold">{{ t.title }}</div>
+                <div class="text-muted small text-truncate">{{ t.display_id }}{% if t.derived_from_label %} <span class="badge bg-secondary">由 {{ t.derived_from_label }} 派生</span>{% endif %}</div>
+                {% if t.detail %}<div class="text-muted small text-truncate">{{ t.detail }}</div>{% endif %}
+              </td>
+              <td>
+                <span class="badge status-{{ t.status }}" {% if t.status == 'blocked' and t.blocked_reason %}title="阻塞原因：{{ t.blocked_reason }}"{% endif %}>{{ t.status_label }}</span>
+              </td>
               <td>{{ t.role }}</td>
               <td>{{ t.due_label }}{% if t.overdue %} <span class="text-danger fw-bold">⚠ 逾期</span>{% endif %}</td>
-              <td><span class="badge {{ 'bg-indigo' if t.source == 'AI 建议' else 'bg-secondary' }}">{{ t.source }}</span></td>
+              <td><span class="badge {{ t.domain_meta.cls }}">{{ t.domain_meta.label }}</span></td>
+              <td class="text-end">
+                <div class="btn-group btn-group-sm flex-wrap justify-content-end">
+                  {% if t.status == 'open' %}
+                  <form method="post" action="/tasks/status" class="d-inline">
+                    <input type="hidden" name="task_id" value="{{ t.id }}">
+                    <input type="hidden" name="action" value="started">
+                    <button type="submit" class="btn btn-outline-primary">开始</button>
+                  </form>
+                  {% elif t.status == 'in_progress' %}
+                  <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal-status" data-status-modal="completed" data-task-id="{{ t.id }}">完成</button>
+                  <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#modal-status" data-status-modal="voided" data-task-id="{{ t.id }}">作废</button>
+                  {% elif t.status == 'blocked' %}
+                  <form method="post" action="/tasks/status" class="d-inline">
+                    <input type="hidden" name="task_id" value="{{ t.id }}">
+                    <input type="hidden" name="action" value="unblocked">
+                    <button type="submit" class="btn btn-outline-success">解除阻塞</button>
+                  </form>
+                  {% elif t.status in ('done', 'void') %}
+                  <form method="post" action="/tasks/reopen" class="d-inline">
+                    <input type="hidden" name="task_id" value="{{ t.id }}">
+                    <button type="submit" class="btn btn-warning">重开</button>
+                  </form>
+                  {% endif %}
+                  {% if t.status in ('open', 'in_progress', 'blocked') %}
+                  <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#modal-blocked" data-blocked-modal data-task-id="{{ t.id }}">阻塞</button>
+                  {% endif %}
+                  {% if t.status in ('open', 'in_progress', 'blocked') %}
+                  <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#modal-derive" data-derive-modal data-task-id="{{ t.id }}" data-domain="{{ t.domain }}">派生</button>
+                  {% endif %}
+                  <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modal-edit"
+                    data-edit-modal data-task-id="{{ t.id }}" data-title="{{ t.title }}" data-role="{{ t.role }}"
+                    data-due="{{ t.due_label }}" data-domain="{{ t.domain }}" data-detail="{{ t.detail }}">编辑</button>
+                </div>
+              </td>
             </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted py-4">暂无任务（可新建任务或批准 AI 提案）</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -76,7 +232,7 @@
     </div>
   </div>
 
-  <!-- AI 提案待审核 -->
+  <!-- AI 提案待审核（全部人工审，决策 12；依据强制展示，决策 16） -->
   <div class="col-lg-4">
     <div class="card">
       <div class="card-header">
@@ -88,19 +244,36 @@
         <div class="list-group-item">
           <div class="d-flex align-items-center gap-2 mb-1">
             <span class="badge badge-{{ {'read':'secondary','suggest':'warning','write':'danger'}[p.risk] }}">{{ p.risk_label }}</span>
-            <small class="text-muted">{{ p.domain }} 域</small>
+            <span class="badge {{ p.domain_meta.cls }}">{{ p.domain_meta.label }}</span>
+            <small class="text-muted">{{ p.display_id }}</small>
           </div>
           <div class="fw-bold mb-1">{{ p.title }}</div>
           <div class="text-muted small mb-1">{{ p.detail }}</div>
-          {% for e in p.evidence %}
-          <div class="small border-start border-2 ps-2 mb-1 text-muted">[{{ e.kind }} {{ e.ref }}] “{{ e.quote }}”</div>
-          {% endfor %}
-          <div class="small text-muted mb-2">来源：{{ p.source.chain }} → {{ p.source.worker }} · 审计 {{ p.source.audit }}</div>
+          <!-- 依据区（决策 16：每条 evidence 类型 + ref_id + 原文摘录） -->
+          <div class="mt-2">
+            <div class="small text-muted fw-bold mb-1"><i class="ti ti-shield-check me-1"></i>依据（AI 只能引用链喂给它的数据，机器校验拒幻觉）</div>
+            {% for e in p.evidence %}
+            <div class="small border-start border-2 border-warning ps-2 mb-1">
+              <span class="badge bg-secondary">{{ e.kind }}</span> <code>{{ e.ref_id }}</code>
+              <div class="text-muted">“{{ e.quote }}”</div>
+              <!-- 查看入口（详设 §6.2 ④：v0.2 业务系统未建，展示依据全文 + ref_id，跳转机制预留） -->
+              <a href="#evidence-{{ p.id }}-{{ loop.index }}" class="small text-primary" title="查看依据全文（v0.2 展示全文 + ref_id；CRM/ERP 落地时各业务域注册 evidence 查看 URL 解析器）">查看</a>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="small text-muted mb-2">
+            来源：{{ p.source.chain_id }} · 引擎任务 {{ p.source.engine_task_id }}
+            {% if p.source.worker_id %} · 工序 {{ p.source.worker_id }}{% endif %}
+            · 审计 {{ (p.source.audit_ids or [])|length }} 条
+          </div>
           <div class="d-flex justify-content-between align-items-center">
-            <small class="text-muted">建议 {{ p.role }} / {{ p.due }} 天内</small>
+            <small class="text-muted">建议 {{ p.suggested_role }} / {% if p.suggested_due_days is not none %}{{ p.suggested_due_days }} 天内{% else %}未建议截止{% endif %}</small>
             <span class="d-flex gap-1">
-              <button class="btn btn-success btn-sm">批准</button>
-              <button class="btn btn-outline-secondary btn-sm">驳回</button>
+              <form method="post" action="/tasks/proposals/approve" class="d-inline">
+                <input type="hidden" name="proposal_id" value="{{ p.id }}">
+                <button type="submit" class="btn btn-success btn-sm">批准</button>
+              </form>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#modal-reject" data-reject-modal data-proposal-id="{{ p.id }}">驳回</button>
             </span>
           </div>
         </div>
@@ -111,4 +284,293 @@
     </div>
   </div>
 </div>
+
+<!-- ===== 弹窗 ===== -->
+
+<!-- 完成 / 作废（决策 17：result_note 必填，不填不能提交——HTML5 required + 服务端校验 + DB CHECK 双保险） -->
+<div class="modal fade" id="modal-status" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="/tasks/status">
+      <div class="modal-header">
+        <h5 class="modal-title" id="status-modal-title">完成任务</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="task_id" id="status-task-id">
+        <input type="hidden" name="action" id="status-action">
+        <label class="form-label">回复内容（result_note）<span class="text-danger">*</span></label>
+        <textarea name="result_note" id="status-note" class="form-control" rows="3" required placeholder="填写人工回复——执行结果回流，AI 判断下一步的依据（决策 17：不回复不能结束）"></textarea>
+        <div class="form-hint">任务结束只有两条路（完成 / 作废），任一路都必须人工填回复。</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">取消</button>
+        <button type="submit" class="btn btn-primary">提交</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 阻塞（决策 11：blocked_reason 必填，等物料 / 等回复二选一） -->
+<div class="modal fade" id="modal-blocked" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="/tasks/status">
+      <div class="modal-header">
+        <h5 class="modal-title">阻塞任务</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="task_id" id="blocked-task-id">
+        <input type="hidden" name="action" value="blocked">
+        <label class="form-label">阻塞原因（blocked_reason）<span class="text-danger">*</span></label>
+        <select name="blocked_reason" id="blocked-reason" class="form-select" required>
+          <option value="" selected disabled>请选择</option>
+          <option value="等物料">等物料</option>
+          <option value="等回复">等回复</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">取消</button>
+        <button type="submit" class="btn btn-primary">提交</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 编辑任务（§3.5.5：改 title/role/due/domain/detail，updated 事件带快照） -->
+<div class="modal fade" id="modal-edit" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="/tasks/edit">
+      <div class="modal-header">
+        <h5 class="modal-title">编辑任务</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="task_id" id="edit-task-id">
+        <div class="mb-3">
+          <label class="form-label">标题<span class="text-danger">*</span></label>
+          <input type="text" name="title" id="edit-title" class="form-control" required maxlength="80">
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-6">
+            <label class="form-label">负责人<span class="text-danger">*</span></label>
+            <select name="role" id="edit-role" class="form-select">
+              {% for r in role_values %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label">截止<span class="text-danger">*</span></label>
+            <input type="date" name="due" id="edit-due" class="form-control" required>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">来源域<span class="text-danger">*</span></label>
+          <select name="domain" id="edit-domain" class="form-select">
+            {% for dk, dl in domain_options %}<option value="{{ dk }}">{{ dl }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">详情</label>
+          <textarea name="detail" id="edit-detail" class="form-control" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 派生新任务（决策 17：派生≠原任务结束；task_event 记 derived） -->
+<div class="modal fade" id="modal-derive" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="/tasks/derive">
+      <div class="modal-header">
+        <h5 class="modal-title">派生新任务</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="parent_id" id="derive-parent-id">
+        <div class="alert alert-light py-2 small">派生是"关联"不是"完成"：原任务不自动结束，要结束照常人工回复（决策 17）。</div>
+        <div class="mb-3">
+          <label class="form-label">标题<span class="text-danger">*</span></label>
+          <input type="text" name="title" class="form-control" required maxlength="80">
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-6">
+            <label class="form-label">负责人<span class="text-danger">*</span></label>
+            <select name="role" class="form-select">
+              {% for r in role_values %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label">截止<span class="text-danger">*</span></label>
+            <input type="date" name="due" class="form-control" required>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">来源域</label>
+          <select name="domain" id="derive-domain" class="form-select">
+            {% for dk, dl in domain_options %}<option value="{{ dk }}">{{ dl }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">详情</label>
+          <textarea name="detail" class="form-control" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">取消</button>
+        <button type="submit" class="btn btn-primary">派生</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 人工建任务（决策 16 双通道：人工通道，source_type=manual + 来源域） -->
+<div class="modal fade" id="modal-create" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="/tasks/create">
+      <div class="modal-header">
+        <h5 class="modal-title">人工建任务</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">标题<span class="text-danger">*</span></label>
+          <input type="text" name="title" class="form-control" required maxlength="80">
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-6">
+            <label class="form-label">来源域<span class="text-danger">*</span></label>
+            <select name="domain" class="form-select">
+              {% for dk, dl in domain_options %}<option value="{{ dk }}">{{ dl }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label">负责人<span class="text-danger">*</span></label>
+            <select name="role" class="form-select">
+              {% for r in role_values %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">截止<span class="text-danger">*</span></label>
+          <input type="date" name="due" class="form-control" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">详情</label>
+          <textarea name="detail" class="form-control" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">取消</button>
+        <button type="submit" class="btn btn-primary">创建</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 驳回提案（决策 12：reject_reason 建议填，不强制） -->
+<div class="modal fade" id="modal-reject" tabindex="-1">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="/tasks/proposals/reject">
+      <div class="modal-header">
+        <h5 class="modal-title">驳回提案</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="proposal_id" id="reject-proposal-id">
+        <label class="form-label">驳回理由（选填）</label>
+        <textarea name="reason" id="reject-reason" class="form-control" rows="3" placeholder="说明驳回原因，便于追溯"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">取消</button>
+        <button type="submit" class="btn btn-danger">驳回</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // ---- 完成 / 作废弹窗：填 action + task_id，清空必填回复框 ----
+  document.querySelectorAll('[data-status-modal]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var action = btn.getAttribute('data-status-modal');
+      document.getElementById('status-task-id').value = btn.getAttribute('data-task-id');
+      document.getElementById('status-action').value = action;
+      document.getElementById('status-note').value = '';
+      document.getElementById('status-modal-title').textContent =
+        action === 'completed' ? '完成任务（必填回复）' : '作废任务（必填回复）';
+    });
+  });
+
+  // ---- 阻塞弹窗 ----
+  document.querySelectorAll('[data-blocked-modal]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.getElementById('blocked-task-id').value = btn.getAttribute('data-task-id');
+      document.getElementById('blocked-reason').value = '';
+    });
+  });
+
+  // ---- 编辑弹窗：回填当前值 ----
+  document.querySelectorAll('[data-edit-modal]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.getElementById('edit-task-id').value = btn.getAttribute('data-task-id');
+      document.getElementById('edit-title').value = btn.getAttribute('data-title');
+      document.getElementById('edit-role').value = btn.getAttribute('data-role');
+      document.getElementById('edit-due').value = btn.getAttribute('data-due');
+      document.getElementById('edit-domain').value = btn.getAttribute('data-domain');
+      document.getElementById('edit-detail').value = btn.getAttribute('data-detail') || '';
+    });
+  });
+
+  // ---- 派生弹窗：记父任务 + 默认来源域 ----
+  document.querySelectorAll('[data-derive-modal]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.getElementById('derive-parent-id').value = btn.getAttribute('data-task-id');
+      document.getElementById('derive-domain').value = btn.getAttribute('data-domain');
+    });
+  });
+
+  // ---- 驳回弹窗 ----
+  document.querySelectorAll('[data-reject-modal]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.getElementById('reject-proposal-id').value = btn.getAttribute('data-proposal-id');
+      document.getElementById('reject-reason').value = '';
+    });
+  });
+
+  // ---- 触发面板：切换链 -> 切换输入区 ----
+  var chainSelect = document.getElementById('chain-select');
+  if (chainSelect) {
+    chainSelect.addEventListener('change', function () {
+      document.querySelectorAll('.chain-inputs').forEach(function (el) { el.classList.add('d-none'); });
+      var target = document.getElementById('inputs-' + chainSelect.value);
+      if (target) { target.classList.remove('d-none'); }
+    });
+  }
+
+  // ---- 引擎任务轮询：GET /tasks/engine/{id} 查终态 -> 完成后刷新待审核栏 ----
+  var pollBox = document.getElementById('engine-poll');
+  if (pollBox) {
+    var taskId = '{{ engine_task_id }}';
+    var poll = function () {
+      fetch('/tasks/engine/' + encodeURIComponent(taskId))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var el = document.getElementById('engine-status');
+          if (el) { el.textContent = '（状态：' + data.status + '）'; }
+          if (data.terminal) { window.location.href = '/tasks'; }
+          else { setTimeout(poll, 2000); }
+        })
+        .catch(function () { setTimeout(poll, 2000); });
+    };
+    poll();
+  }
+})();
+</script>
 {% endblock %}
