@@ -44,6 +44,19 @@ from sqlalchemy.ext.asyncio import (
 
 from models.tm import Task, TaskEvent, TaskProposal
 
+# 任务 + 派生关联视图（决策 17 / 用户复核反馈：展示层需要父任务标题与子任务
+# 数，增强派生任务的父子关联性——「由 t-xxx「父标题」派生」+「N 个子任务」）
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class _TaskWithRel:
+    """list_tasks 返回包装：task + 父任务标题 + 子任务数（None/0 = 无派生关联）。"""
+
+    task: Task
+    parent_title: str | None = None
+    child_count: int = 0
+
 # 业务库连接串变量名（R20：值只存 .env；本模块经 dotenv_values 读仓库根
 # .env 文件，不触碰 os.environ——P2 规则 4 的合法来源即「.env 文件」）
 _TM_DB_URL_ENV = "LIUQUAN_TM_DB_URL"
@@ -147,7 +160,34 @@ class TMStore:
             )
         async with self._maker() as session:
             rows = (await session.execute(stmt)).scalars().all()
-        return list(rows)
+            # 派生关联（决策 17，用户复核反馈）：带出父任务标题 + 子任务数，
+            # 展示层据此显示「由 t-xxx「父标题」派生」与「N 个子任务」徽章
+            parent_ids = {t.derived_from for t in rows if t.derived_from}
+            parent_titles: dict[int, str] = {}
+            child_counts: dict[int, int] = {}
+            if parent_ids:
+                parents = (
+                    await session.execute(
+                        select(Task.id, Task.title).where(Task.id.in_(parent_ids))
+                    )
+                ).all()
+                parent_titles = {pid: title for pid, title in parents}
+                cnt_rows = (
+                    await session.execute(
+                        select(Task.derived_from, func.count(Task.id))
+                        .where(Task.derived_from.in_(parent_ids))
+                        .group_by(Task.derived_from)
+                    )
+                ).all()
+                child_counts = {pid: int(cnt) for pid, cnt in cnt_rows}
+        return [
+            _TaskWithRel(
+                task=t,
+                parent_title=parent_titles.get(t.derived_from) if t.derived_from else None,
+                child_count=child_counts.get(t.id, 0),
+            )
+            for t in rows
+        ]
 
     async def count_overdue(self) -> int:
         """逾期任务数（status 非 done/void 且 due < 今天；提醒条计数）。"""

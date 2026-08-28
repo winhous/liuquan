@@ -148,9 +148,10 @@
           </button>
         </div>
       </div>
-      <!-- 列表筛选器（决策 17 第 5 条：筛选功能一定有；先做状态+逾期+关键词） -->
+      <!-- 列表筛选器（决策 17 第 5 条：筛选功能一定有；先做状态+逾期+关键词）
+           复核反馈：加「已筛选」状态提示 + 清除筛选按钮，让筛选生效可见 -->
       <div class="card-body border-bottom py-2">
-        <form method="get" action="/tasks" class="row g-2 align-items-center">
+        <form method="get" action="/tasks" class="row g-2 align-items-center" id="filter-form">
           <div class="col-auto">
             <select name="status" class="form-select form-select-sm">
               <option value="all" {{ 'selected' if filters.status == 'all' }}>全部状态</option>
@@ -166,7 +167,13 @@
           <div class="col-auto">
             <input type="text" class="form-control form-control-sm" name="q" value="{{ filters.q }}" placeholder="关键词（标题/详情）">
           </div>
-          <div class="col-auto"><button class="btn btn-sm btn-primary">筛选</button></div>
+          <div class="col-auto"><button type="submit" class="btn btn-sm btn-primary"><i class="ti ti-filter me-1"></i>筛选</button></div>
+          {% if filters.status != 'all' or filters.overdue or filters.q %}
+          <div class="col-auto">
+            <span class="badge bg-primary">已筛选：{{ '全部状态' if filters.status == 'all' else (status_options|selectattr('0','equalto',filters.status)|map(attribute='1')|first or filters.status) }}{% if filters.overdue %} · 仅逾期{% endif %}{% if filters.q %} · “{{ filters.q }}”{% endif %}</span>
+            <a href="/tasks" class="btn btn-sm btn-outline-secondary ms-1"><i class="ti ti-x me-1"></i>清除筛选</a>
+          </div>
+          {% endif %}
         </form>
       </div>
       <div class="table-responsive">
@@ -179,7 +186,21 @@
             <tr class="{{ 'table-danger' if t.overdue else '' }}">
               <td class="text-truncate" style="max-width:300px;">
                 <div class="fw-semibold">{{ t.title }}</div>
-                <div class="text-muted small text-truncate">{{ t.display_id }}{% if t.derived_from_label %} <span class="badge bg-secondary">由 {{ t.derived_from_label }} 派生</span>{% endif %}</div>
+                <div class="text-muted small text-truncate">
+                  {{ t.display_id }}
+                  {% if t.derived_from_label %}
+                  <!-- 派生关联（决策 17 / 复核反馈）：可点击父任务，显示父标题 -->
+                  <a href="/tasks?q={{ t.parent_title or '' }}" class="badge bg-primary-subtle text-primary text-decoration-none" title="查看父任务 {{ t.derived_from_label }}：{{ t.parent_title or '' }}">
+                    <i class="ti ti-corner-up-right me-1"></i>由 {{ t.derived_from_label }}「{{ t.parent_title or '父任务' }}」派生
+                  </a>
+                  {% endif %}
+                  {% if t.child_count > 0 %}
+                  <!-- 子任务数徽章（父子关联反向可见：本任务是 N 个子任务的父） -->
+                  <span class="badge bg-info-subtle text-info" title="本任务已派生 {{ t.child_count }} 个子任务（派生不结束原任务）">
+                    <i class="ti ti-subtask me-1"></i>{{ t.child_count }} 个子任务
+                  </span>
+                  {% endif %}
+                </div>
                 {% if t.detail %}<div class="text-muted small text-truncate">{{ t.detail }}</div>{% endif %}
               </td>
               <td>
@@ -496,6 +517,16 @@
 {% block scripts %}
 <script>
 (function () {
+  // ---- modal backdrop 残留防护（复核反馈：modal 打开时 backdrop 挡住筛选按钮，
+  //      关闭异常会残留遮罩导致页面按钮点不到）----
+  // Tabler/Bootstrap modal 完全隐藏后强制清理 backdrop + 解锁 body 滚动
+  document.addEventListener('hidden.bs.modal', function () {
+    document.querySelectorAll('.modal-backdrop').forEach(function (b) { b.remove(); });
+    document.body.classList.remove('modal-open');
+    document.body.style.removeProperty('overflow');
+    document.body.style.removeProperty('padding-right');
+  });
+
   // ---- 完成 / 作废弹窗：填 action + task_id，清空必填回复框 ----
   document.querySelectorAll('[data-status-modal]').forEach(function (btn) {
     btn.addEventListener('click', function () {

@@ -129,8 +129,8 @@ def _domain_meta(domain: str) -> dict[str, str]:
     return DOMAIN_META.get(domain, {"label": domain or "其他", "cls": "bg-secondary"})
 
 
-def _task_view(t: Task) -> dict[str, Any]:
-    """任务行视图：展示形 id / 状态标签 / 逾期标记 / 派生提示（由 t-xxx 派生）。"""
+def _task_view(t: Task, *, parent_title: str | None = None, child_count: int = 0) -> dict[str, Any]:
+    """任务行视图：展示形 id / 状态标签 / 逾期标记 / 派生关联（父标题+子任务数）。"""
     overdue = t.status not in ("done", "void") and t.due < date.today()
     return {
         "id": t.id,
@@ -149,6 +149,8 @@ def _task_view(t: Task) -> dict[str, Any]:
         "result_note": t.result_note,
         "derived_from": t.derived_from,
         "derived_from_label": task_display_id(t.derived_from) if t.derived_from else None,
+        "parent_title": parent_title,  # 父任务标题（决策 17 派生关联展示）
+        "child_count": child_count,    # 本任务的子任务数（0 = 无子任务）
         "source_type": t.source_type,
         "source": t.source or {},
         "created_by": t.created_by,
@@ -296,7 +298,7 @@ def create_app(
             _ctx(
                 request,
                 "tm",
-                tasks=[_task_view(t) for t in tasks],
+                tasks=[_task_view(t.task, parent_title=t.parent_title, child_count=t.child_count) for t in tasks],
                 proposals=[_proposal_view(p) for p in proposals],
                 stats=stats,
                 status_options=list(STATUS_LABEL.items()),
