@@ -153,7 +153,7 @@
       <div class="card-body border-bottom py-2">
         <form method="get" action="/tasks" class="row g-2 align-items-center" id="filter-form">
           <div class="col-auto">
-            <select name="status" class="form-select form-select-sm">
+            <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
               <option value="all" {{ 'selected' if filters.status == 'all' }}>全部状态</option>
               {% for key, label in status_options %}
               <option value="{{ key }}" {{ 'selected' if filters.status == key }}>{{ label }}</option>
@@ -161,7 +161,7 @@
             </select>
           </div>
           <div class="col-auto form-check">
-            <input type="checkbox" class="form-check-input" name="overdue" value="1" id="f-overdue" {{ 'checked' if filters.overdue }}>
+            <input type="checkbox" class="form-check-input" name="overdue" value="1" id="f-overdue" {{ 'checked' if filters.overdue }} onchange="this.form.submit()">
             <label class="form-check-label" for="f-overdue">仅看逾期</label>
           </div>
           <div class="col-auto">

@@ -267,6 +267,27 @@ async def test_role_label_shown_after_login(client: TestClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_filter_autosubmit_onchange(client: TestClient, tm_engine) -> None:
+    """筛选选择即生效（用户反馈：选「已作废」仍显示全部——原表单需手动点筛选按钮）：
+    状态下拉框与逾期复选框带 onchange 自动提交（form.submit()），选完立即刷新列表。"""
+    _login(client)
+    await _seed_task(tm_engine, title="待办任务", due=date.today(), status="open")
+    await _seed_task(
+        tm_engine, title="已作废任务", due=date.today() - timedelta(days=1),
+        status="void", result_note="作废回复",
+    )
+    resp = client.get("/tasks")
+    assert resp.status_code == 200
+    # 模板断言：状态下拉框 + 逾期复选框都有 onchange 自动提交（选择即筛选）
+    assert 'name="status"' in resp.text and "onchange=" in resp.text
+    assert 'name="overdue"' in resp.text and "onchange=" in resp.text
+    # 服务端链路：status=void 只回已作废任务（自动提交走的同一 GET 参数）
+    resp = client.get("/tasks", params={"status": "void"})
+    assert "已作废任务" in resp.text
+    assert "待办任务" not in resp.text
+
+
+@pytest.mark.asyncio
 async def test_tasks_page_lists_real_tasks(client: TestClient, tm_engine) -> None:
     _login(client)
     await _seed_task(tm_engine, title="回复买家物流时效疑问", due=date.today() - timedelta(days=1))
@@ -488,6 +509,32 @@ async def test_derive_task_keeps_parent_open(client: TestClient, tm_engine) -> N
     assert [e.event_type for e in parent_events] == ["created", "derived"]
     derived = parent_events[1]
     assert derived.note == task_display_id(child.id)
+
+
+@pytest.mark.asyncio
+async def test_derive_display_shows_parent_link_and_child_badge(
+    client: TestClient, tm_engine
+) -> None:
+    """复核反馈修复：派生关联展示——子任务显示可点击父链接，父任务显示子任务数徽章。"""
+    _login(client)
+    parent = await _seed_task(tm_engine, title="处理退货申请", due=date.today())
+    child = await _seed_task(
+        tm_engine,
+        title="生成退货标签",
+        due=date.today(),
+        derived_from=parent,
+        source_type="manual",
+        source={"creator": "运营"},
+    )
+    resp = client.get("/tasks")
+    assert resp.status_code == 200
+    html = resp.text
+    # 子任务行：可点击的父任务链接（含父标题）
+    assert f"由 {task_display_id(parent)}" in html
+    assert "「处理退货申请」派生" in html
+    assert f'href="/tasks?q=处理退货申请"' in html
+    # 父任务行：子任务数徽章（"1 个子任务"精确徽章文案）
+    assert "1 个子任务" in html
 
 
 # ---- 编辑（A26：updated 事件带 from/to 快照）----
