@@ -576,13 +576,22 @@
   });
 
   // ---- 触发面板：切换链 -> 切换输入区 ----
+  // 修复（复核演示实锤）：所有链的输入区在同一个 form 里，隐藏链的 required
+  // 字段仍参与 HTML5 校验 -> 提交被拦（console: invalid form control not
+  // focusable）。处理：切换时同步禁用隐藏区字段（disabled 不参与校验）。
+  function syncChainInputs() {
+    document.querySelectorAll('.chain-inputs').forEach(function (el) {
+      var isActive = el.id === 'inputs-' + (chainSelect ? chainSelect.value : '');
+      el.classList.toggle('d-none', !isActive);
+      el.querySelectorAll('input, select, textarea').forEach(function (f) {
+        f.disabled = !isActive;  // 非当前链字段禁用（不参与表单校验）
+      });
+    });
+  }
   var chainSelect = document.getElementById('chain-select');
   if (chainSelect) {
-    chainSelect.addEventListener('change', function () {
-      document.querySelectorAll('.chain-inputs').forEach(function (el) { el.classList.add('d-none'); });
-      var target = document.getElementById('inputs-' + chainSelect.value);
-      if (target) { target.classList.remove('d-none'); }
-    });
+    chainSelect.addEventListener('change', syncChainInputs);
+    syncChainInputs();  // 页面加载即同步（默认选中的链可见，其余禁用）
   }
 
   // ---- 引擎任务轮询：GET /tasks/engine/{id} 查终态 -> 完成后刷新待审核栏 ----
