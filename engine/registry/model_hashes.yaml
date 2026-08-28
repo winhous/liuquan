@@ -1,0 +1,4 @@
+# 自动生成文件：registry-check --write-hashes 重写，勿手改（详设 §4.4 L9）
+# hash = Model 字段名+类型结构摘要；version = 引用工序 version
+# （同一 Model 被多个工序引用时，记录为其中最大 version，各工序须一致）
+models: {}

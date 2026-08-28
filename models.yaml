@@ -1,0 +1,11 @@
+# 模型注册（详设-v0.1 §7.1；换模型只改这里，代码永不内联模型串 R11）
+# env: 前缀 = 启动时从环境变量读（值只存 .env，规范 R20；P3-3 执法：
+# api_key 等字段出现真值形态即拒载）
+models:
+  default:
+    provider: deepseek
+    model: deepseek-chat
+    base_url: env:DEEPSEEK_BASE_URL
+    api_key: env:DEEPSEEK_API_KEY
+    timeout_s: 30
+    reask_limit: 2
