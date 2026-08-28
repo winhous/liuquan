@@ -1,0 +1,20 @@
+# 刘全 Web 服务（v0.2：业务应用层）
+# 部署：cp 到 /etc/systemd/system/ + systemctl enable --now liuquan-web
+[Unit]
+Description=Liuquan Web (FastAPI business app)
+After=network.target postgresql.service liuquan-engine.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/liuquan
+ExecStart=/opt/liuquan/.venv/bin/python -m uvicorn web.app:app --host 127.0.0.1 --port 8090
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+User=liuquan
+Group=liuquan
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

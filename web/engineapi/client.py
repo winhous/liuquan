@@ -123,6 +123,10 @@ class EngineAPIClient:
             base_url=resolved,
             timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
             transport=transport,
+            # trust_env=False：不读系统代理环境变量（本机 ALL_PROXY=socks:// 会让
+            # httpx 构造失败，同 v0.1 pydantic-ai 代理坑；引擎服务只连本机/内网，
+            # 不需要走系统代理）
+            trust_env=False,
         )
 
     # ---- 三接口（详设 §4.1 / §4.2 / §4.3）----

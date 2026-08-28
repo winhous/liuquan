@@ -1,0 +1,22 @@
+# 刘全引擎常驻服务（v0.2：三接口 + 队列消费循环）
+# 部署：cp 到 /etc/systemd/system/ + systemctl enable --now liuquan-engine
+# 路径按阿里云部署位调整（/opt/liuquan 或项目实际路径）
+[Unit]
+Description=Liuquan AI Engine (three APIs + queue consumer)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/liuquan
+ExecStart=/opt/liuquan/.venv/bin/python -m engine.server
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+# 安全：专用运行用户（非 root）；密钥只在 .env（R20）
+User=liuquan
+Group=liuquan
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
