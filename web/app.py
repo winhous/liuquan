@@ -5,8 +5,11 @@
   确认后随 v0.2 开发落地（web 只经三接口碰引擎，不 import engine 内部模块，
   lint P3-2 执法：web/ 不得 import engine.core/engine.workers）。
 - 登录为原型形态（共享密码 + 角色 cookie），真实认证随 v0.2 开发落地。
-- 原型页面集（整体系统框架优先，任务功能为第一个真实页面）：
-  /login 登录页 · / 应用壳首页（任务中心）· /modules/<id> 各模块占位页
+- 原型页面集（2026-08-28 按用户意见重构：任务中心改名「工作台」，左侧菜单
+  支持二级导航，修复「点模块即空页」）：
+  /login 登录 · / 应用壳首页（logo → 任务列表）
+  工作台（二级）：/tasks 任务列表 · /proposals 提案审核 · /stats 数据统计
+  其余模块：/modules/<id> 占位页
 """
 
 from __future__ import annotations
@@ -26,14 +29,25 @@ app = FastAPI(title="刘全 · 综合智能运营系统（v0.2 原型）")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 
-# ---- 整体系统框架：模块清单（L1 业务应用层） ----
+# ---- 整体系统框架：模块清单（L1 业务应用层；children = 二级导航） ----
 
-MODULES: list[dict[str, str]] = [
-    {"id": "tm", "name": "任务中心", "icon": "ti ti-list-check", "desc": "AI 提案转任务、人工处理回流（v0.2 首个真实模块）"},
-    {"id": "crm", "name": "CRM", "icon": "ti ti-message-circle", "desc": "客户对话翻译 / 快照 / 待办（v0.3 平移，建设中）"},
-    {"id": "erp", "name": "ERP 增强", "icon": "ti ti-box", "desc": "库存 / 补货建议 / 异常预警（v0.6，只读 NocoBase 视图）"},
-    {"id": "seo", "name": "SEO", "icon": "ti ti-chart-line", "desc": "关键词研究 / 标题优化 / 体检（v0.5，数据源 eHunt）"},
-    {"id": "scrape", "name": "扒图", "icon": "ti ti-photo", "desc": "选品扒图 / 图片体检（v0.5，建设中）"},
+MODULES: list[dict[str, Any]] = [
+    {
+        "id": "tm", "name": "工作台", "icon": "ti ti-dashboard",
+        "children": [
+            {"id": "tasks", "name": "任务列表", "icon": "ti ti-list-check", "href": "/tasks"},
+            {"id": "proposals", "name": "提案审核", "icon": "ti ti-robot", "href": "/proposals"},
+            {"id": "stats", "name": "数据统计", "icon": "ti ti-chart-pie", "href": "/stats"},
+        ],
+    },
+    {"id": "crm", "name": "CRM", "icon": "ti ti-message-circle", "href": "/modules/crm",
+     "desc": "客户对话翻译 / 快照 / 待办（v0.3 平移，建设中）"},
+    {"id": "erp", "name": "ERP 增强", "icon": "ti ti-box", "href": "/modules/erp",
+     "desc": "库存 / 补货建议 / 异常预警（v0.6，只读 NocoBase 视图）"},
+    {"id": "seo", "name": "SEO", "icon": "ti ti-chart-line", "href": "/modules/seo",
+     "desc": "关键词研究 / 标题优化 / 体检（v0.5，数据源 eHunt）"},
+    {"id": "scrape", "name": "扒图", "icon": "ti ti-photo", "href": "/modules/scrape",
+     "desc": "选品扒图 / 图片体检（v0.5，建设中）"},
 ]
 
 # 角色：cookie 存 ASCII 键（latin-1 限制），显示映射中文标签
@@ -122,31 +136,56 @@ def login_submit(request: Request, role: str = "ops"):
     return resp
 
 
-@app.get("/tasks")
-def tasks_page(request: Request):
+def _ctx(request: Request, active: str, **extra: Any) -> dict[str, Any]:
+    """页面公共上下文：角色（cookie 映射中文）+ 模块清单 + 当前页高亮。"""
     role_key = request.cookies.get("role", "admin")
     role = ROLE_LABEL.get(role_key, role_key)
+    return {"role": role, "modules": MODULES, "active": active, **extra}
+
+
+def _stats() -> dict[str, int]:
     tasks = [_task_view(t) for t in TASKS]
-    proposals = [_proposal_view(p) for p in PROPOSALS]
-    stats = {
+    return {
         "open": sum(1 for t in tasks if t["status"] in ("open", "in_progress")),
         "overdue": sum(1 for t in tasks if t["overdue"]),
-        "pending_proposals": len(proposals),
+        "pending_proposals": len(PROPOSALS),
         "done_today": sum(1 for t in tasks if t["status"] == "done"),
     }
-    return templates.TemplateResponse(request, "tasks.html", {
-        "role": role, "modules": MODULES, "active": "tm",
-        "tasks": tasks, "proposals": proposals, "stats": stats,
-    })
+
+
+@app.get("/tasks")
+def tasks_page(request: Request):
+    """工作台 · 任务列表（logo 默认落地页）。"""
+    return templates.TemplateResponse(request, "tasks.html", _ctx(
+        request, "tasks",
+        tasks=[_task_view(t) for t in TASKS],
+        proposals=[_proposal_view(p) for p in PROPOSALS],
+        stats=_stats(),
+    ))
+
+
+@app.get("/proposals")
+def proposals_page(request: Request):
+    """工作台 · 提案审核（决策 12：全部人工审）。"""
+    return templates.TemplateResponse(request, "proposals.html", _ctx(
+        request, "proposals",
+        proposals=[_proposal_view(p) for p in PROPOSALS],
+    ))
+
+
+@app.get("/stats")
+def stats_page(request: Request):
+    """工作台 · 数据统计（未来工作台雏形：概览指标，v0.2 开发落地后接真实数据）。"""
+    return templates.TemplateResponse(request, "stats.html", _ctx(
+        request, "stats", stats=_stats(),
+    ))
 
 
 @app.get("/modules/{module_id}")
 def module_page(request: Request, module_id: str):
-    role = ROLE_LABEL.get(request.cookies.get("role", "admin"), request.cookies.get("role", "admin"))
     module = next((m for m in MODULES if m["id"] == module_id), None)
     if module is None:
         return RedirectResponse("/tasks")
-    return templates.TemplateResponse(request, "module.html", {
-        "role": role, "modules": MODULES, "active": module_id,
-        "module": module,
-    })
+    return templates.TemplateResponse(request, "module.html", _ctx(
+        request, module_id, module=module,
+    ))

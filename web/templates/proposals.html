@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content_title %}提案审核{% endblock %}
+{% block content %}
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title"><i class="ti ti-robot me-1"></i>AI 提案待审核</h3>
+        <span class="text-muted small">全部人工批 / 驳（决策 12，不设代码自动通过）</span>
+      </div>
+      <div class="list-group list-group-flush">
+        {% for p in proposals %}
+        <div class="list-group-item">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="badge badge-{{ {'read':'secondary','suggest':'warning','write':'danger'}[p.risk] }}">{{ p.risk_label }}</span>
+            <small class="text-muted">{{ p.domain }} 域</small>
+          </div>
+          <div class="fw-bold mb-1">{{ p.title }}</div>
+          <div class="text-muted small mb-1">{{ p.detail }}</div>
+          {% for e in p.evidence %}
+          <div class="small border-start border-2 ps-2 mb-1 text-muted">[{{ e.kind }} {{ e.ref }}] “{{ e.quote }}”</div>
+          {% endfor %}
+          <div class="small text-muted mb-2">来源：{{ p.source.chain }} → {{ p.source.worker }} · 审计 {{ p.source.audit }}</div>
+          <div class="d-flex justify-content-between align-items-center">
+            <small class="text-muted">建议 {{ p.role }} / {{ p.due }} 天内</small>
+            <span class="d-flex gap-1">
+              <button class="btn btn-success btn-sm">批准</button>
+              <button class="btn btn-outline-secondary btn-sm">驳回</button>
+            </span>
+          </div>
+        </div>
+        {% else %}
+        <div class="list-group-item text-muted">暂无待审核提案</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title"><i class="ti ti-info-circle me-1"></i>审核规则</h3>
+      </div>
+      <div class="card-body text-muted small">
+        <p class="mb-2"><i class="ti ti-check me-1 text-success"></i>批准 → 提案转为任务，进入任务列表（来源标注「AI 建议」）</p>
+        <p class="mb-2"><i class="ti ti-x me-1 text-danger"></i>驳回 → 提案标记驳回，可附理由（v0.2 开发落地）</p>
+        <p class="mb-0"><i class="ti ti-shield-lock me-1"></i>风险级为代码规则标注（域 + 动作类型查表），仅作展示与排序，不替代人工审</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

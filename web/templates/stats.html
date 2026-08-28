@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content_title %}数据统计{% endblock %}
+{% block content %}
+<!-- 工作台统计雏形：真实数据随 v0.2 开发落地（引擎审计/TM 表） -->
+<div class="row g-3">
+  <div class="col-md-3 col-sm-6">
+    <div class="card">
+      <div class="card-body">
+        <div class="subheader">待办（open / in_progress）</div>
+        <div class="h1 mb-3">{{ stats.open }}</div>
+        <div class="d-flex align-items-baseline gap-2"><i class="ti ti-tasks text-primary"></i><span class="text-muted">需处理</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-sm-6">
+    <div class="card">
+      <div class="card-body">
+        <div class="subheader">已逾期（超期标红）</div>
+        <div class="h1 mb-3 text-danger">{{ stats.overdue }}</div>
+        <div class="d-flex align-items-baseline gap-2"><i class="ti ti-alert-triangle text-danger"></i><span class="text-muted">需尽快处理</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-sm-6">
+    <div class="card">
+      <div class="card-body">
+        <div class="subheader">AI 提案待审核</div>
+        <div class="h1 mb-3 text-primary">{{ stats.pending_proposals }}</div>
+        <div class="d-flex align-items-baseline gap-2"><i class="ti ti-robot text-primary"></i><span class="text-muted">引擎产出</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-sm-6">
+    <div class="card">
+      <div class="card-body">
+        <div class="subheader">已完成</div>
+        <div class="h1 mb-3 text-success">{{ stats.done_today }}</div>
+        <div class="d-flex align-items-baseline gap-2"><i class="ti ti-circle-check text-success"></i><span class="text-muted">闭环回流</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title"><i class="ti ti-chart-bar me-1"></i>统计维度（开发中）</h3>
+    <span class="text-muted small">数据源：引擎审计表 / TM 表，v0.2 开发落地后接入</span>
+  </div>
+  <div class="card-body">
+    <div class="row g-3 text-center">
+      <div class="col-md-4"><div class="border rounded p-4 text-muted"><i class="ti ti-chart-line mb-2" style="font-size:28px;display:block;"></i>近 7 天任务量趋势</div></div>
+      <div class="col-md-4"><div class="border rounded p-4 text-muted"><i class="ti ti-tag mb-2" style="font-size:28px;display:block;"></i>按状态 / 负责人分布</div></div>
+      <div class="col-md-4"><div class="border rounded p-4 text-muted"><i class="ti ti-coin mb-2" style="font-size:28px;display:block;"></i>AI 调用成本 / 审计量</div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

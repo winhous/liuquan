@@ -17,7 +17,7 @@
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topbar-menu" aria-label="菜单">
         <span class="navbar-toggler-icon"></span>
       </button>
-      <div class="navbar-brand flex-fill text-truncate">{% block topbar_title %}任务中心{% endblock %}</div>
+      <div class="navbar-brand flex-fill text-truncate">{% block topbar_title %}工作台{% endblock %}</div>
       <div class="navbar-nav flex-row order-md-last">
         <div class="nav-item dropdown">
           <a href="#" class="nav-link d-flex lh-1 text-reset p-0" data-bs-toggle="dropdown">
@@ -48,12 +48,35 @@
       <div class="collapse navbar-collapse" id="sidebar-menu">
         <ul class="navbar-nav pt-lg-3">
           {% for m in modules %}
-          <li class="nav-item">
-            <a href="/modules/{{ m.id }}" class="nav-link {{ 'active' if m.id == active else '' }}">
-              <span class="nav-link-icon"><i class="ti {{ m.icon }}"></i></span>
-              <span class="nav-link-title">{{ m.name }}</span>
-            </a>
-          </li>
+            {% if m.children %}
+            <!-- 二级导航组（Tabler treeview：data-bs-toggle=collapse + nav-link-toggle） -->
+            <li class="nav-item">
+              <a class="nav-link" data-bs-toggle="collapse" href="#sub-{{ m.id }}" role="button" aria-expanded="{{ 'true' if active in (m.children|map(attribute='id')|list) else 'false' }}">
+                <span class="nav-link-icon"><i class="ti {{ m.icon }}"></i></span>
+                <span class="nav-link-title">{{ m.name }}</span>
+                <span class="nav-link-toggle"></span>
+              </a>
+              <div class="collapse {{ 'show' if active in (m.children|map(attribute='id')|list) else '' }}" id="sub-{{ m.id }}">
+                <ul class="nav nav-sm flex-column">
+                  {% for c in m.children %}
+                  <li class="nav-item">
+                    <a href="{{ c.href }}" class="nav-link {{ 'active' if active == c.id else '' }}">
+                      <span class="nav-link-icon"><i class="ti {{ c.icon }}"></i></span>
+                      <span class="nav-link-title">{{ c.name }}</span>
+                    </a>
+                  </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </li>
+            {% else %}
+            <li class="nav-item">
+              <a href="{{ m.href }}" class="nav-link {{ 'active' if active == m.id else '' }}">
+                <span class="nav-link-icon"><i class="ti {{ m.icon }}"></i></span>
+                <span class="nav-link-title">{{ m.name }}</span>
+              </a>
+            </li>
+            {% endif %}
           {% endfor %}
         </ul>
       </div>
@@ -64,7 +87,7 @@
   <div class="page-wrapper">
     <div class="container-fluid">
       <div class="page-header">
-        <h1 class="page-title">{% block content_title %}任务中心{% endblock %}</h1>
+        <h1 class="page-title">{% block content_title %}工作台{% endblock %}</h1>
       </div>
       <div class="page-body">
         {% block content %}{% endblock %}
