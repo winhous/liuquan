@@ -14,3 +14,9 @@ models:
   DemoEchoResult:
     version: 1
     hash: 6899a551b2315d420f3c3bfcc304e10bdd7bd71ed53d0b45ccc63402443c715d
+  DemoProposeInput:
+    version: 1
+    hash: 20185638483658f3a2d26f96c9a0ac76921586f42c89a115ae6e98511fd36f02
+  TaskProposal:
+    version: 1
+    hash: 3f6716b309cf826eb8e5f894635149d5b28eae45be075d4d2a1f7b2ae8016e4e

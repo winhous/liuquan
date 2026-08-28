@@ -1,0 +1,16 @@
+# tm_demo_chain 链声明（详设-v0.2 §7：端到端演示链）
+# 工序序列：demo_echo（echo 输入）-> demo_propose（组织成 TaskProposal 提案）。
+# 链入参 = DemoProposeInput（text/ref_id/kind）：ref_id 即证据引用的业务对象 id
+# ——决策 16 数据引用封闭性：提案 evidence 只能引用链喂给它的数据。
+id: tm_demo_chain
+domain: demo
+description: v0.2 演示链：echo 输入 -> 组织成 TaskProposal 任务提案（纯代码，零 token 成本）
+input:
+  model: DemoProposeInput
+steps:
+  - worker: demo_echo
+  - worker: demo_propose
+    input:
+      text: steps[0].output.text
+      ref_id: task.input.ref_id
+      kind: task.input.kind

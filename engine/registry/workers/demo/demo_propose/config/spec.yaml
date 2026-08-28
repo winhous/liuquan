@@ -1,0 +1,7 @@
+# demo_propose 规格外置（R10：业务规格值只住 config/，run.py 零字面量；
+# P1 自动词表生成来源：以下「标量值」若以字面量出现在引擎代码/声明里会被拦，
+# 业务值改动只改这里，不动代码）
+default_role: 运营          # TaskProposal.suggested_role 默认值（契约 Literal 三选一）
+default_due_days: 3        # suggested_due_days 建议截止天数（独立建议，人工可改，无分级映射）
+title_template: "跟进：{text}"             # 提案标题模板（{text} = 链输入 echo 文本）
+detail_template: "链输入文本：{text}\n业务对象：{ref_id}"  # 提案详情模板（给执行人看完整说明）

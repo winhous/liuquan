@@ -363,6 +363,7 @@ class TaskRunner:
                 step_row.input or {},
                 resume_phase=target,
                 resume_state=point.state,
+                chain_id=task.chain_id,
             )
             lines.extend(outcome.lines)
             if outcome.status in ("failed", "paused"):
@@ -416,7 +417,9 @@ class TaskRunner:
             await _db.update_task(
                 self._engine, task_id, current_step=i, current_step_row=step_id
             )
-            outcome = await self._execute_step(task_id, step_id, i, decl, step_input)
+            outcome = await self._execute_step(
+                task_id, step_id, i, decl, step_input, chain_id=chain.id
+            )
             lines.extend(outcome.lines)
             if outcome.status == "failed":
                 return "failed", outcome.error
@@ -435,6 +438,7 @@ class TaskRunner:
         *,
         resume_phase: Phase | None = None,
         resume_state: dict[str, Any] | None = None,
+        chain_id: str | None = None,  # 当前链 id（ACT 装配进 EngineContext，v0.2 T4）
     ) -> _StepOutcome:
         """单工序状态机循环（§2.2 转换表；每相位转换**前**落检查点）。"""
         worker = self._registry.workers.get(step_decl.worker)
@@ -477,12 +481,23 @@ class TaskRunner:
                     task_id, step_id, worker, step_input, lines
                 )
             elif phase is Phase.REASON:
-                event, phase_output, new_memory, error = await self._phase_reason(
-                    task_id, step_id, worker, step_input, memory, lines
-                )
+                if getattr(worker, "reason", "llm") == "none":
+                    # 纯代码工序（worker.yaml 的 reason: none，v0.2 T4 技术定）：
+                    # 无 LLM 调用——REASON 直通 ACT（llm_output=None，零 token 成本，
+                    # 详设-v0.2 §7 演示链 demo_propose）
+                    event = EVENT_OUTPUT_VALID
+                    phase_output = None
+                    lines.append(
+                        PhaseLine("REASON", "skipped（reason: none，纯代码工序无 LLM 调用）")
+                    )
+                else:
+                    event, phase_output, new_memory, error = await self._phase_reason(
+                        task_id, step_id, worker, step_input, memory, lines
+                    )
             elif phase is Phase.ACT:
                 event, phase_output, new_memory, error = await self._phase_act(
-                    task_id, step_id, worker, step_input, phase_output, memory, lines
+                    task_id, step_id, worker, step_input, phase_output, memory, lines,
+                    chain_id=chain_id,
                 )
             elif phase is Phase.OBSERVE:
                 event, phase_output, new_memory, error = await self._phase_observe(
@@ -685,6 +700,8 @@ class TaskRunner:
         phase_output: Any,
         memory: dict[str, Any],
         lines: list[PhaseLine],
+        *,
+        chain_id: str | None = None,  # 当前链 id（TaskProposal.source 追溯，v0.2 T4）
     ) -> tuple[str | None, Any, dict[str, Any], str | None]:
         """ACT：import 工序 run 模块（engine.registry.workers.<域>.<工序>.run），
         构造 EngineContext（inputs 过 input Model 校验；phase_output = REASON 的
@@ -725,6 +742,7 @@ class TaskRunner:
                 llm_output=llm_model,
                 task_id=task_id,
                 step_id=step_id,
+                chain_id=chain_id,
             )
             output_value = await self._call_worker_run(worker, inputs_model, ctx)
             output_model = self._coerce_model(output_value, out_cls)

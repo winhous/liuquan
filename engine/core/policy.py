@@ -49,8 +49,11 @@ class DomainPermission:
 
 
 # 域权限矩阵（详设 §5.2 六行全定义；demo/crm 之外的行 v0.1 未启用）
+# v0.2 T4 修订：demo 域风险上限 read -> suggest——演示链 tm_demo_chain 的
+# demo_propose 工序以 suggest 风险产出 TaskProposal（详设-v0.2 §7），
+# 超出 v0.1 的 read 上限；demo 域为演示域，无真实业务写，suggest 不引入风险。
 DOMAIN_PERMISSIONS: dict[Domain, DomainPermission] = {
-    Domain.DEMO: DomainPermission("demo.", None, Risk.READ),
+    Domain.DEMO: DomainPermission("demo.", None, Risk.SUGGEST),
     Domain.CRM: DomainPermission("crm.", "crm schema", Risk.WRITE),
     Domain.TM: DomainPermission("tm.", "tm.proposal", Risk.SUGGEST),
     Domain.ERP: DomainPermission("erp.", "erp 分析结果表", Risk.SUGGEST),

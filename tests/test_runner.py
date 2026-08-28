@@ -738,7 +738,7 @@ async def test_resume_without_checkpoint_raises(tmp_path, monkeypatch, db_engine
 
 @pytest.mark.asyncio
 async def test_policy_violation_fails_at_init_no_llm(tmp_path, monkeypatch, db_engine) -> None:
-    """demo 域风险上限 read；声明 risk: write = 风险越限（§5.2）-> INIT FAILED，不调 LLM。"""
+    """demo 域风险上限 suggest（v0.2 T4 修订）；声明 risk: write = 风险越限（§5.2）-> INIT FAILED，不调 LLM。"""
     factory, agents = make_agent_factory(FakeAgent)
     _, _, _, build = make_runner_env(
         tmp_path, monkeypatch, worker_kw={"risk": "write"}

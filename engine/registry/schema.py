@@ -74,7 +74,12 @@ class WorkerContextRef(BaseModel):
 
 
 class WorkerDeclaration(BaseModel):
-    """工序声明（详设 §4.1）。"""
+    """工序声明（详设 §4.1）。
+
+    v0.2 T4 增 reason 字段（技术定）：REASON 相位策略——llm = 调 LLM（默认，
+    v0.1 全部工序）；none = 纯代码工序（无 LLM 调用，详设-v0.2 §7 演示链
+    demo_propose），runner 跳过 REASON（零 token 成本）。
+    """
 
     id: str = Field(pattern=_ID_PATTERN)
     domain: Domain
@@ -84,6 +89,7 @@ class WorkerDeclaration(BaseModel):
     input: ModelRef
     output: ModelRef
     model: str
+    reason: Literal["llm", "none"] = "llm"
     retry: RetrySpec | None = None
     context: list[WorkerContextRef] = Field(default_factory=list)
     prompt: str

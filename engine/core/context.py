@@ -20,6 +20,8 @@ EngineContext 承载「规格外置」与「低耦合」（R10 架构层防线 /
   T12a 初版未传（demo-echo 确定性重算可掩盖），翻译雏形必须拿到才能产出——
   经 ctx 传给 run()，避免工序二次调 LLM（R4）。测试固化「llm_output 达 run」。
 - task_id / step_id：当前任务与工序实例 id（审计/定位用；None = 未关联）
+- chain_id（v0.2 T4 增）：当前链 id（TaskProposal.source.chain_id 追溯用，
+  详设-v0.2 §3.4；runner ACT 装配时传入；None = 未关联）
 """
 
 from __future__ import annotations
@@ -45,3 +47,4 @@ class EngineContext:
     llm_output: Any = None  # REASON 的 LLM 结构化结果（ACT 副作用依据；None = 未过 REASON）
     task_id: int | None = None
     step_id: int | None = None
+    chain_id: str | None = None  # 当前链 id（TaskProposal.source 追溯；None = 未关联）

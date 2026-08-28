@@ -223,11 +223,11 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
     assert validate(REPO_ROOT) == []
     registry = load_registry(REPO_ROOT)
 
-    assert set(registry.workers) == {"demo_echo", "crm_translate"}
-    assert set(registry.chains) == {"demo_echo_chain", "crm_translate_chain"}
+    assert set(registry.workers) == {"demo_echo", "crm_translate", "demo_propose"}
+    assert set(registry.chains) == {"demo_echo_chain", "crm_translate_chain", "tm_demo_chain"}
     assert set(registry.context_providers) == {"demo_greeting"}
     assert set(registry.events) == {"demo.echo_done"}
-    assert set(registry.actions) == {"demo_echo_record"}
+    assert set(registry.actions) == {"demo_echo_record", "tm.proposal"}
 
     # 工序声明字段（id/domain/risk/model 别名/retry/输入输出 Model 引用）
     echo = registry.workers["demo_echo"]
@@ -247,10 +247,23 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
     assert translate.input.model == "ChatTranslateInput"
     assert translate.output.model == "ChatTranslateResult"
 
+    # v0.2 T4：demo_propose 纯代码工序（reason: none，无 LLM 调用），
+    # suggest 风险产出 TaskProposal 契约（详设-v0.2 §7 演示链）
+    propose = registry.workers["demo_propose"]
+    assert propose.domain.value == "demo"
+    assert propose.risk == "suggest"
+    assert propose.reason == "none"
+    assert propose.input.model == "DemoProposeInput"
+    assert propose.output.model == "TaskProposal"
+    assert propose.version == 1
+
     # 事件 trigger_chain 引用已登记链（R22：引用断裂 = 拒载）
     assert registry.events["demo.echo_done"].trigger_chain == "demo_echo_chain"
-    # Action target 锁死 tm.proposal（loader L10）
+    # Action target 锁死 tm.proposal（loader L10）；v0.2 T4 增 tm.proposal Action
     assert registry.actions["demo_echo_record"].target == "tm.proposal"
+    assert registry.actions["tm.proposal"].target == "tm.proposal"
+    assert registry.actions["tm.proposal"].risk == "suggest"
+    assert registry.actions["tm.proposal"].output_model == "TaskProposal"
     # Context provider：id 为 snake_case（L1），实现标识为点分形态（§4.3 provider 字段）
     provider = registry.context_providers["demo_greeting"]
     assert provider.provider == "demo.greeting"

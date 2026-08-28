@@ -1,0 +1,20 @@
+# demo_propose 工序声明（详设-v0.2 §7：演示链 tm_demo_chain 第 2 道工序）
+# 纯代码工序（reason: none，无 LLM 调用，零 token 成本）：把 demo_echo 的
+# echo 结果组织成 TaskProposal 契约输出——域 demo / action tm.proposal /
+# 默认角色与文案按 config/ 声明（R10 规格外置）。
+id: demo_propose
+domain: demo
+version: 1
+risk: suggest
+description: 演示工序：把输入组织成 TaskProposal 任务提案（纯代码，无 LLM 调用）
+input:
+  model: DemoProposeInput
+output:
+  model: TaskProposal
+model: default
+reason: none
+retry:
+  max_attempts: 2
+  timeout_s: 30
+prompt: prompt.md
+config_dir: config/

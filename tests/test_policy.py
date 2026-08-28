@@ -1,7 +1,8 @@
 """T5 域权限门禁测试（详设-v0.1 §5.1 风险四级 + §5.2 域权限矩阵）。
 
-覆盖（任务 T5 指定）：
-- demo 域 read 直过；demo 域 write 拒（上限 read）
+覆盖（任务 T5 指定 + v0.2 T4 修订）：
+- demo 域 read 直过；demo 域 suggest 直过（v0.2 T4：上限 read -> suggest）；
+  demo 域 write 拒（上限 suggest）
 - crm 域 write 过
 - transaction 恒拒（risk_allowed 恒 False + check_policy 拒）
 - crm 工序引用 demo.* provider（越域）拒
@@ -21,7 +22,7 @@ from engine.core.policy import (
 
 
 def test_demo_read_passes() -> None:
-    """demo 域 read 直过（§5.2：上限 read；Policy 直过，§5.1）。"""
+    """demo 域 read 直过（§5.2；Policy 直过，§5.1）。"""
     res = check_policy(Domain.DEMO, Risk.READ, ())
     assert isinstance(res, PolicyResult)
     assert res.ok
@@ -34,11 +35,17 @@ def test_demo_read_own_context_passes() -> None:
     assert res.ok
 
 
+def test_demo_suggest_passes_v02() -> None:
+    """v0.2 T4 修订：demo 域风险上限 suggest——demo_propose 产出 TaskProposal 直过。"""
+    res = check_policy(Domain.DEMO, Risk.SUGGEST, ())
+    assert res.ok
+
+
 def test_demo_write_rejected_by_ceiling() -> None:
-    """demo 域 write 拒：上限 read，越限（§5.2）。"""
+    """demo 域 write 拒：上限 suggest（v0.2 T4 修订），write 越限（§5.2）。"""
     res = check_policy(Domain.DEMO, Risk.WRITE, ())
     assert not res.ok
-    assert "read" in res.reason
+    assert "suggest" in res.reason
 
 
 def test_crm_read_passes() -> None:
@@ -95,7 +102,7 @@ def test_matrix_defines_all_six_domains() -> None:
     }
     assert DOMAIN_PERMISSIONS[Domain.DEMO].read_prefix == "demo."
     assert DOMAIN_PERMISSIONS[Domain.DEMO].write_target is None
-    assert DOMAIN_PERMISSIONS[Domain.DEMO].risk_ceiling is Risk.READ
+    assert DOMAIN_PERMISSIONS[Domain.DEMO].risk_ceiling is Risk.SUGGEST  # v0.2 T4 修订
     assert DOMAIN_PERMISSIONS[Domain.CRM].read_prefix == "crm."
     assert DOMAIN_PERMISSIONS[Domain.CRM].write_target == "crm schema"
     assert DOMAIN_PERMISSIONS[Domain.CRM].risk_ceiling is Risk.WRITE
