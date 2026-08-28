@@ -184,10 +184,16 @@ class TMStore:
         }
 
     async def list_pending_proposals(self) -> list[TaskProposal]:
-        """待审提案（status=pending，全部人工审，决策 12）。"""
+        """待审提案（status=pending，全部人工审，决策 12）。
+
+        A22：**无依据的提案页面不可见**——转交器落库已保证 evidence 非空
+        （禁幻觉三件套 ①），页面层再防御性过滤空 evidence（决策 16：审核
+        面板强制展示依据，无依据不展示）。
+        """
         stmt = (
             select(TaskProposal)
             .where(TaskProposal.status == "pending")
+            .where(func.jsonb_array_length(TaskProposal.evidence) > 0)
             .order_by(TaskProposal.created_at.desc())
         )
         async with self._maker() as session:

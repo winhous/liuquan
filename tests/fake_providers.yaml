@@ -1,0 +1,14 @@
+# 测试环境 Context provider 注册（详设-v0.1 §13：生产加载 providers.yaml、
+# 测试加载 fake_providers.yaml——注册文件按环境区分；fake 实现类必须住
+# tests/，lint P3-4 执法：生产目录出现 Fake 前缀类 = 拒载，R12）。
+#
+# 格式：<provider 实现标识>: <模块:类>（与 tests/fake_providers.py 同目录，
+# load_providers 按类名在本模块解析；点分路径是声明标识，tests/ 非包不
+# importlib 跨模块）。
+#
+# v0.2 TM 新增（详设-v0.2 §7.5）：demo.inbox = demo 域「链喂给 AI 的数据
+# 集合」provider——同时充当决策 16 禁幻觉校验的白名单来源：测试用其返回的
+# 数据集合对象 id 作 whitelist，命中集合 = 通过；集合外 ref_id = 拒落（A21）。
+
+demo.greeting: tests.fake_providers:FakeDemoGreeting
+demo.inbox:    tests.fake_providers:FakeDemoInbox

@@ -36,5 +36,5 @@ packages = ["engine", "models"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "version_acceptance: v0.1 验收断言（开发流程⑤/A1-A11）；跑法：pytest -m version_acceptance",
+    "version_acceptance: v0.1/v0.2 验收断言（开发流程⑤/A1-A11 + A12-A26）；跑法：pytest -m version_acceptance",
 ]

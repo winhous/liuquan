@@ -1,0 +1,25 @@
+# 假 evidence 样本（详设-v0.2 §7.5：结构对齐 models/contract/task.py 的
+# EvidenceRef——kind（message/metric/order_view/listing/image）+ ref_id +
+# quote 原文摘录）。加载即类型校验（tests/fixtures/tm/load.py），结构漂移
+# 测试自然红（R12 测试数据规则 1 + R22）。
+
+message:
+  kind: message
+  ref_id: msg-001
+  quote: 买家询问物流时效
+metric:
+  kind: metric
+  ref_id: met-001
+  quote: 近 7 日转化率 3.2%
+order_view:
+  kind: order_view
+  ref_id: ord-001
+  quote: 订单含 2 件未发货商品
+listing:
+  kind: listing
+  ref_id: lst-001
+  quote: Listing 标题含侵权词
+image:
+  kind: image
+  ref_id: img-001
+  quote: 主图含促销角标

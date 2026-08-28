@@ -1,0 +1,85 @@
+# 假 tm.task 样本（详设-v0.2 §7.5：结构对齐 models/tm.py 的 Task——tm.task
+# 表列集合；加载即类型校验（tests/fixtures/tm/load.py 按 ORM __table__.columns
+# 校验键集合 + 必填列 + due 类型归一），结构漂移测试自然红）。
+#
+# 覆盖形态：AI 通道任务（source_type=ai + 提案来源追溯）/ 人工通道任务
+# （source_type=manual + creator）/ 各状态 / 逾期 / 派生（derived_from）。
+
+open_ai_task:
+  title: 跟进买家物流时效咨询
+  detail: 提案批准生成的演示任务
+  domain: demo
+  role: 运营
+  due: "2026-09-30"
+  status: open
+  source_type: ai
+  source:
+    chain_id: tm_demo_chain
+    engine_task_id: "e-000001"
+    worker_id: demo_propose
+    audit_ids: []
+    proposal_id: "p-000001"
+  created_by: 运营
+
+in_progress_manual_task:
+  title: 生成退货标签
+  detail: 买家要求退货
+  domain: crm
+  role: 运营
+  due: "2026-09-15"
+  status: in_progress
+  source_type: manual
+  source:
+    creator: 运营
+  created_by: 运营
+
+done_task:
+  title: 已完成回复
+  detail: 已结束
+  domain: crm
+  role: 运营
+  due: "2026-08-01"
+  status: done
+  result_note: 已回复买家并确认送达时间
+  source_type: manual
+  source:
+    creator: 运营
+  created_by: 运营
+
+void_task:
+  title: 已作废任务
+  detail: 需求变更
+  domain: erp
+  role: 采购
+  due: "2026-08-10"
+  status: void
+  result_note: 需求变更，作废
+  source_type: manual
+  source:
+    creator: 采购
+  created_by: 采购
+
+overdue_task:
+  title: 逾期未处理（挂起不自动清理）
+  detail: 决策 17：未完成任务一直挂着，逾期一直提醒
+  domain: erp
+  role: 采购
+  due: "2026-01-01"
+  status: open
+  source_type: manual
+  source:
+    creator: 采购
+  created_by: 采购
+
+derived_task:
+  title: 由父任务派生的新任务
+  detail: 派生不等于原任务结束
+  domain: crm
+  role: 运营
+  due: "2026-09-20"
+  status: open
+  derived_from: 1
+  source_type: manual
+  source:
+    creator: 运营
+  created_by: 运营

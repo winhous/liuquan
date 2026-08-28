@@ -1,0 +1,77 @@
+# 假 TaskProposal 样本（详设-v0.2 §7.5：结构对齐 models/contract/task.py 的
+# TaskProposal——title/detail/domain/action_id/suggested_role/
+# suggested_due_days/evidence[]/source{SourceTrace}）。
+#
+# 禁幻觉三件套用例（详设 §7.5 样本 A/B/C/D + §3.2，A21 反向测试）：
+#   A valid          : ref_id 命中 fake provider 数据集合 + audit_id 可查 -> 落库
+#   B hallucinated   : ref_id 在 fake provider 数据集合外 -> 拒落 + 链 FAILED
+#   C empty_evidence : evidence=[] -> 拒落（无依据不出建议，详设 v0.1 §6.4）
+#   D broken_audit   : audit_ids 指向不存在的引擎审计记录 -> 拒落（追溯保证）
+#
+# worker_id 说明：demo_echo 为 reason=llm 工序（audit_ids 必须可查）；
+# demo_propose 为 reason:none 纯代码工序（audit_ids 空豁免，任务书技术决策）。
+
+valid:
+  title: 跟进买家物流时效咨询
+  detail: 买家询问物流时效，建议运营跟进确认并回复
+  domain: demo
+  action_id: tm.proposal
+  suggested_role: 运营
+  suggested_due_days: 1
+  evidence:
+    - kind: message
+      ref_id: msg-001
+      quote: 买家询问物流时效
+  source:
+    chain_id: tm_demo_chain
+    engine_task_id: "e-000042"
+    worker_id: demo_echo
+    audit_ids: ["7"]
+
+hallucinated:
+  title: 跟进买家物流时效咨询
+  detail: 引用链未喂给 AI 的数据对象（白名单外 ref_id）
+  domain: demo
+  action_id: tm.proposal
+  suggested_role: 运营
+  suggested_due_days: 1
+  evidence:
+    - kind: message
+      ref_id: msg-999
+      quote: 买家询问物流时效
+  source:
+    chain_id: tm_demo_chain
+    engine_task_id: "e-000043"
+    worker_id: demo_propose
+    audit_ids: []
+
+empty_evidence:
+  title: 无依据建议
+  detail: 空 evidence（无依据不出建议）
+  domain: demo
+  action_id: tm.proposal
+  suggested_role: 运营
+  suggested_due_days: 1
+  evidence: []
+  source:
+    chain_id: tm_demo_chain
+    engine_task_id: "e-000044"
+    worker_id: demo_propose
+    audit_ids: []
+
+broken_audit:
+  title: 断链审计建议
+  detail: audit_ids 指向不存在的引擎审计记录
+  domain: demo
+  action_id: tm.proposal
+  suggested_role: 运营
+  suggested_due_days: 1
+  evidence:
+    - kind: message
+      ref_id: msg-001
+      quote: 买家询问物流时效
+  source:
+    chain_id: tm_demo_chain
+    engine_task_id: "e-000045"
+    worker_id: demo_echo
+    audit_ids: ["404"]
