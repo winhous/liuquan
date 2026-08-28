@@ -386,6 +386,35 @@ class TaskRunner:
                 task_id, task.chain_id, "failed", f"resume 未捕获异常：{exc}", lines
             )
 
+    async def consume_once(self) -> TaskResult | None:
+        """消费队列最老一条 queued 任务到终态（v0.2 常驻 server 的单次执行，
+        详设-v0.2 §2.3 常驻消费循环）。
+
+        与 run() 同源（队列取 + 逐工序状态机 + 终态落库）但**不创建新任务**——
+        只消费队列里已有任务：claim_task 原子认领（变更日志 M4 的 v0.2 落地：
+        SELECT FOR UPDATE SKIP LOCKED + UPDATE running 同事务，双消费者不重取
+        同一任务）-> 逐工序执行 -> finalize。队列空返回 None。
+        """
+        row = await _db.claim_task(self._engine)
+        if row is None:
+            return None
+        chain = self._registry.chains.get(row.chain_id)
+        lines: list[PhaseLine] = []
+        if chain is None:
+            # 链未登记（注册表版本漂移）：显式终态，不毒化队列
+            # （v0.1 孤儿清理同哲学，review M8）
+            status, error = "failed", f"链 {row.chain_id} 未在注册表登记"
+        else:
+            self._pause_requested = False
+            try:
+                status, error = await self._run_chain_steps(
+                    row.id, chain, row.input, start_index=0, prior_outputs=[], lines=lines
+                )
+            except Exception as exc:
+                # 意外异常兜底：任何未捕获异常也落终态，不留 running 脏行（C1 同款）
+                status, error = "failed", f"runner 未捕获异常：{exc}"
+        return await self._finalize(row.id, row.chain_id, status, error, lines)
+
     def request_pause(self) -> None:
         """请求暂停（人工 pause 指令，§2.2 转换表）；相位循环顶部生效。
 

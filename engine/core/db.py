@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
@@ -317,6 +317,26 @@ async def dequeue_task(
         return _task_row(task) if task is not None else None
 
 
+async def claim_task(
+    engine: AsyncEngine, *, worker_id: str | None = None
+) -> TaskRow | None:
+    """原子认领最老一条 queued 任务（v0.2 常驻 server 队列消费；详设-v0.2 §2.3）。
+
+    与 dequeue_task 的区别：认领事务内把行置 running（SELECT ... FOR UPDATE
+    SKIP LOCKED + UPDATE 同事务）——双消费者不会重取同一任务（变更日志 M4：
+    v0.1 dequeue 只取不改，双消费者可重取同一任务；v0.2 常驻 runner 需原子
+    认领，本函数即该落地，测试断言锁死）。worker_id 参数预留（不落库）。
+    """
+    async with _sessions(engine)() as session, session.begin():
+        task = (await session.execute(_dequeue_stmt())).scalar_one_or_none()
+        if task is None:
+            return None
+        task.status = "running"
+        task.started_at = datetime.now(timezone.utc)
+        await session.flush()
+        return _task_row(task)
+
+
 async def update_task(
     engine: AsyncEngine,
     task_id: int,
@@ -415,6 +435,36 @@ async def get_step(engine: AsyncEngine, step_id: int) -> StepRow | None:
     async with _sessions(engine)() as session:
         step = await session.get(EngineStep, step_id)
         return _step_row(step) if step is not None else None
+
+
+async def get_last_step(engine: AsyncEngine, task_id: int) -> StepRow | None:
+    """取该任务最后一条工序实例（链产物定位：末步 output = 链产物，v0.2 T5）。
+
+    按 step_index 倒序取最后一条（重试 = 新行的语义下同 index 取后建者）。
+    """
+    async with _sessions(engine)() as session:
+        step = (
+            await session.execute(
+                select(EngineStep)
+                .where(EngineStep.task_id == task_id)
+                .order_by(EngineStep.step_index.desc(), EngineStep.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return _step_row(step) if step is not None else None
+
+
+async def list_tasks_by_status(engine: AsyncEngine, status: str) -> list[TaskRow]:
+    """按状态列任务（插入序；v0.2 常驻 server 崩溃恢复：找遗留 running 任务）。"""
+    async with _sessions(engine)() as session:
+        rows = (
+            await session.execute(
+                select(EngineTask)
+                .where(EngineTask.status == status)
+                .order_by(EngineTask.id)
+            )
+        ).scalars()
+        return [_task_row(t) for t in rows]
 
 
 # ---- engine_checkpoint（恢复定位：取该任务最后一条）----
