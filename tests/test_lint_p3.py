@@ -317,7 +317,7 @@ def test_p3_4_clean_and_dirs_absent_pass(tmp_path: Path) -> None:
 
 def test_rules_registry_shape() -> None:
     """框架形态：每条规则一个类、统一 rule_id；P1（T11）插入不改框架。"""
-    assert [r.rule_id for r in RULES] == ["P2", "P3-1", "P3-2", "P3-3", "P3-4"]
+    assert [r.rule_id for r in RULES] == ["P1", "P2", "P3-1", "P3-2", "P3-3", "P3-4"]
 
 
 def test_run_all_real_repo_green() -> None:

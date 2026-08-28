@@ -1,8 +1,9 @@
 """engine.lint：静态执法 lint（详设-v0.1 §9；scripts/check.sh 四绿之绿 1）。
 
 T2 已落地：P2 凭据端点零容忍 + P3 契约纪律（四条子规则）。
-P1 业务词黑名单 = T11 落地（词表从注册表自动生成），插入方式：新规则
-文件 + 本模块 RULES 注册一行，规则框架（rules.py）不动。
+T11 已落地：P1 业务词黑名单（词表 = 基础词表 ∪ config/ 自动生成，
+重复扫 = 词表自动生长）。新增规则 = 新规则文件 + 本模块 RULES 注册
+一行，规则框架（rules.py）不动。
 
 公共 API：``run_all(repo_root) -> list[Violation]``；
 CLI：``python -m engine.lint``（0 违规退出 0，有违规打印明细退出 1）。
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .p1 import P1BusinessTermsRule
 from .p2 import P2CredentialsRule
 from .p3 import (
     P3Rule1WorkerSignature,
@@ -28,8 +30,9 @@ from .rules import Rule, Violation
 
 __all__ = ["RULES", "Rule", "Violation", "run_all"]
 
-# 规则注册表（T11 的 P1 插入 = 新规则文件 + 此处一行，框架不改）
+# 规则注册表（新增规则 = 新规则文件 + 此处一行，框架不改）
 RULES: tuple[Rule, ...] = (
+    P1BusinessTermsRule(),
     P2CredentialsRule(),
     P3Rule1WorkerSignature(),
     P3Rule2CouplingImports(),

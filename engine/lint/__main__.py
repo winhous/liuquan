@@ -19,17 +19,11 @@ def main(repo_root: Path | None = None) -> int:
     violations = run_all(root)
     rule_ids = "、".join(rule.rule_id for rule in RULES)
     if violations:
-        print(
-            f"engine.lint：{len(violations)} 处违规"
-            f"（规则 {rule_ids}；P1 业务词黑名单 T11 落地后加入）"
-        )
+        print(f"engine.lint：{len(violations)} 处违规（规则 {rule_ids}）")
         for violation in violations:
             print(violation.format())
         return 1
-    print(
-        f"engine.lint：0 违规（规则 {rule_ids} 全绿；"
-        "P1 业务词黑名单 T11 落地后加入）"
-    )
+    print(f"engine.lint：0 违规（规则 {rule_ids} 全绿）")
     return 0
 
 
