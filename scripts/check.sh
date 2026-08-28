@@ -3,11 +3,11 @@
 #
 # 用法：bash scripts/check.sh（任意 cwd 可执行，自动定位仓库根；可重复执行）
 #
-# 四绿：
-#   1) lint              engine/lint P2/P3（T2 已落地；P1 业务词黑名单 T11 落地）
-#   2) registry 一致性   liuquan-engine registry-check（详设 §10）
+# 四绿（v0.1 全真跑，无 skipped）：
+#   1) lint              engine/lint P1/P2/P3（T2 P2/P3 + T11 P1 已落地）
+#   2) registry 一致性   liuquan-engine registry-check（详设 §10；T12b 已实现，真跑）
 #   3) 全量单测          uv run pytest（fake LLM、零网络，规范 R12）
-#   4) verify            liuquan-engine verify（详设 §10）
+#   4) verify            liuquan-engine verify（详设 §10；T12b 已实现，真跑）
 #
 # 判定：
 #   - 任一【真红】= 本脚本非零退出（git pre-commit hook 拦提交，不绿不让提交）
@@ -26,10 +26,9 @@ if ! command -v uv >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# ---- 各 skipped 项的落地任务号（v0.1 任务拆解；任务落地时更新此表并留变更日志）----
-# lint 于 T2 落地（P2/P3 两规则已转真跑；P1 业务词黑名单 T11 落地后加入）
-REGISTRY_LAND_TASK="T4"    # liuquan-engine registry-check
-VERIFY_LAND_TASK="T7"      # liuquan-engine verify
+# ---- 落地任务号（v0.1 已全部落地：T2 lint P2/P3、T11 P1、T12b registry-check/verify）----
+REGISTRY_LAND_TASK="T12b"    # liuquan-engine registry-check（已实现，真跑）
+VERIFY_LAND_TASK="T12b"      # liuquan-engine verify（已实现，真跑）
 
 SUMMARY=()   # 末尾四行「绿/红」汇总
 RED=0        # 真红计数
@@ -101,5 +100,5 @@ if [[ "$RED" -gt 0 ]]; then
   exit 1
 fi
 echo
-echo "结果：四绿全绿（skipped 项为骨架期过渡态，落地任务号见各例行）"
+echo "结果：四绿全绿（v0.1 全真跑，无 skipped）"
 exit 0

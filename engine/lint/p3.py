@@ -9,9 +9,9 @@
 - P3-4 桩泄漏（R12）：生产目录出现 Fake*/Stub* 前缀类 -> 违规；tests/ 豁免
 
 已知判据边界（防「引用不存在之物」，均待后续任务收紧并留变更日志）：
-- 工序目录写法：详设 §4.1/§11 为 engine/registry/workers/，§9 与规范 R24
-  判定式为 engine/workers/--两处目录都扫、两种 import 前缀都拦，
-  T10 定型后收敛
+- 工序目录写法：T10 已定型为 engine/registry/workers/（详设 §4.1/§11 口径，
+  §9/规范 R24 旧口径 engine/workers/ 已同步废弃）；本规则仍双扫两目录、
+  拦两种 import 前缀（兼容存量），后续任务可收敛为单目录并留变更日志
 - P3-1 宽松判据（T2）：AST 签名解析 + 裸 dict/内建注解拦截；注解名必须由
   本文件 import 绑定（「模块可解析」的静态代理）；「未登记 Model」的真校验
   归 T4 registry-check；EngineContext 精确类型 T9 定型后收紧
@@ -32,7 +32,7 @@ import yaml
 from .rules import Rule, Violation, parse_module, rel_posix
 
 # ---- 规则配置（对象与豁免写死于此，详设 §9 / 规范 R12 / R24）----
-# 工序目录两处都扫（见模块 docstring 判据边界，T10 定型后收敛）
+# 工序目录两处都扫（T10 定型为 registry/workers；双扫兼容旧口径，见 docstring）
 WORKER_ROOTS = ("engine/workers", "engine/registry/workers")
 # web/ 与 scripts/ 禁止 import 的模块前缀（R24；registry.workers 为目录别名写法，同拦）
 FORBIDDEN_IMPORT_PREFIXES = ("engine.workers", "engine.core", "engine.registry.workers")
