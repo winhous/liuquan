@@ -19,9 +19,12 @@
 /* 页面背景微调（Tabler 默认浅灰，更干净的白色工作区） */
 .page-wrapper { background: #f6f8fb; }
 
-/* AI 提案待审核：固定高度 + 超出滚动条（复核反馈 2026-08-28） */
+/* AI 提案待审核：等高卡片内滚动（复核反馈 2026-08-28）——
+   行 flex stretch 让两卡片等高（底端对齐）；提案列表 max-height 限制内部
+   高度，超出滚动条——内容多时列表在卡片内滚动，header 固定，底端仍对齐。 */
 .proposal-list {
-  max-height: 640px;          /* 与左栏任务列表视觉高度对齐 */
+  min-height: 240px;          /* 提案少时也保持可辨识高度 */
+  max-height: 560px;          /* 列表内部上限：超出即滚动（卡片底端仍随行等高） */
   overflow-y: auto;           /* 超出滚动 */
   overscroll-behavior: contain; /* 滚动到底不穿透页面 */
 }
