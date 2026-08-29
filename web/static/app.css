@@ -42,9 +42,8 @@
 a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
   background: #eff6ff !important; color: #000 !important; }
 
-/* 逾期行整行红底（淡红背景仅作行级提示，符合"边框色"精神——保留极淡底色便于
-   整行识别，如需彻底无色可改为仅左侧色条） */
-.table .table-danger td { background-color: #fff; border-left: 4px solid #fca5a5; }
+/* 逾期行整行样式已迁移到「表格列竖线统一」段（2026-08-28 去彩色补全）：
+   不再加行级粗条/底色，逾期提示只靠「⚠ 逾期」红字 + 顶部提醒条（用户复核） */
 
 /* ===== 复核反馈（2026-08-28）：按钮也边框化 =====
    实心彩色按钮（btn-primary/success/warning/danger/info）→ 白底 + 对应色边框
@@ -132,9 +131,11 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
 .table > :not(caption) > * > * {
   border-color: rgba(4, 32, 69, 0.1) !important;
 }
-/* 逾期行：左侧 4px 红条保留作行级提示（决策 11 修订：逾期标红），
-   但列竖线颜色与普通行一致（上一条规则已覆盖） */
-.table .table-danger td { background-color: #fff; border-left: 4px solid #fca5a5; }
+/* 逾期行：不再加任何行级粗条/底色（用户复核：逾期行 4px 粗竖线导致表格
+   样式不一致，点了完成恢复普通行即正常）——逾期提示只靠
+   「⚠ 逾期」红字 + 顶部逾期提醒条 + 统计卡（决策 11 修订：逾期标红=文字红），
+   行本身与普通行完全一致；table-danger 类的 Tabler 默认淡红底也压成白底 */
+.table .table-danger td { background-color: #fff; }
 
 /* 3) 非徽章彩色文字统一黑色（徽章类 .badge.* 已有专规覆盖，这里只处理
     text-primary/text-info/text-success 直接用在文字/图标上的情况） */
