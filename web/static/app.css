@@ -1,20 +1,88 @@
 /* 刘全 v0.2 原型自定义样式（Tabler 之上的补充：优先级/状态色等） */
 
-/* 优先级徽章 */
-.prio-P0 { background: #dc2626; color: #fff; }
-.prio-P1 { background: #ea580c; color: #fff; }
-.prio-P2 { background: #2563eb; color: #fff; }
-.prio-P3 { background: #64748b; color: #fff; }
+/* ===== 复核反馈（2026-08-28）：整体去"花花绿绿" =====
+   所有色块（徽章/标签）改为【白底 + 对应颜色边框 + 黑色文字】：
+   颜色值保持不变，只把背景填充改成边框色，文字统一黑色。 */
 
-/* 状态徽章 */
-.status-open { background: #2563eb; color: #fff; }
-.status-in_progress { background: #d97706; color: #fff; }
-.status-done { background: #16a34a; color: #fff; }
-.status-void { background: #94a3b8; color: #fff; }
-.status-blocked { background: #dc2626; color: #fff; }
+/* 优先级徽章（历史遗留类，页面已不展示 P0-P3，保留定义防回归） */
+.prio-P0 { background: #fff; border: 1px solid #dc2626; color: #000; }
+.prio-P1 { background: #fff; border: 1px solid #ea580c; color: #000; }
+.prio-P2 { background: #fff; border: 1px solid #2563eb; color: #000; }
+.prio-P3 { background: #fff; border: 1px solid #64748b; color: #000; }
 
-/* 逾期行整行红底 */
-.table .table-danger td { background-color: #fef2f2; }
+/* 状态徽章：白底 + 状态色边框 + 黑字 */
+.status-open { background: #fff; border: 1px solid #2563eb; color: #000; }
+.status-in_progress { background: #fff; border: 1px solid #d97706; color: #000; }
+.status-done { background: #fff; border: 1px solid #16a34a; color: #000; }
+.status-void { background: #fff; border: 1px solid #94a3b8; color: #000; }
+.status-blocked { background: #fff; border: 1px solid #dc2626; color: #000; }
+
+/* 来源域徽章（Tabler bg-* 色类 → 边框色 + 黑字）
+   覆盖 Tabler 的 .bg-indigo/.bg-purple/.bg-teal/.bg-cyan/.bg-orange
+   （Tabler 的 bg-* 类与 text-* 类有内联优先级，用 !important 强制统一） */
+.badge.bg-indigo { background: #fff !important; border: 1px solid #4263eb; color: #000 !important; }
+.badge.bg-purple { background: #fff !important; border: 1px solid #ae3ec9; color: #000 !important; }
+.badge.bg-teal { background: #fff !important; border: 1px solid #0ca678; color: #000 !important; }
+.badge.bg-cyan { background: #fff !important; border: 1px solid #1098ad; color: #000 !important; }
+.badge.bg-orange { background: #fff !important; border: 1px solid #f76707; color: #000 !important; }
+
+/* 风险徽章（badge-secondary/warning/danger）→ 边框色 + 黑字 */
+.badge.badge-secondary { background: #fff !important; border: 1px solid #6c757d; color: #000 !important; }
+.badge.badge-warning { background: #fff !important; border: 1px solid #f59f00; color: #000 !important; }
+.badge.badge-danger { background: #fff !important; border: 1px solid #f03e3e; color: #000 !important; }
+
+/* 其余彩色徽章（已筛选 bg-primary / 派生 bg-primary-subtle / 子任务 bg-info-subtle /
+   证据类型 bg-secondary）→ 边框色 + 黑字（含 text-primary/text-info 文字色覆盖） */
+.badge.bg-primary { background: #fff !important; border: 1px solid #3b82f6; color: #000 !important; }
+.badge.bg-primary-subtle, .badge.text-primary.bg-primary-subtle {
+  background: #fff !important; border: 1px solid #60a5fa; color: #000 !important; }
+.badge.bg-info-subtle, .badge.text-info.bg-info-subtle {
+  background: #fff !important; border: 1px solid #38bdf8; color: #000 !important; }
+.badge.bg-secondary { background: #fff !important; border: 1px solid #8b93a7; color: #000 !important; }
+
+/* 派生链接徽章（a 标签复用 .badge）保持可点击态 */
+a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
+  background: #eff6ff !important; color: #000 !important; }
+
+/* 逾期行整行红底（淡红背景仅作行级提示，符合"边框色"精神——保留极淡底色便于
+   整行识别，如需彻底无色可改为仅左侧色条） */
+.table .table-danger td { background-color: #fff; border-left: 4px solid #fca5a5; }
+
+/* ===== 复核反馈（2026-08-28）：按钮也边框化 =====
+   实心彩色按钮（btn-primary/success/warning/danger/info）→ 白底 + 对应色边框
+   + 黑字；hover 保持同色淡底便于识别可点（颜色值不变）。 */
+.page-body .btn-primary { background: #fff !important; border: 1px solid #0d6efd; color: #000 !important; }
+.page-body .btn-primary:hover { background: #eaf2ff !important; color: #000 !important; }
+.page-body .btn-success { background: #fff !important; border: 1px solid #2f9e44; color: #000 !important; }
+.page-body .btn-success:hover { background: #ebfbee !important; color: #000 !important; }
+.page-body .btn-warning { background: #fff !important; border: 1px solid #f59f00; color: #000 !important; }
+.page-body .btn-warning:hover { background: #fff4d6 !important; color: #000 !important; }
+.page-body .btn-danger { background: #fff !important; border: 1px solid #f03e3e; color: #000 !important; }
+.page-body .btn-danger:hover { background: #ffe3e3 !important; color: #000 !important; }
+.page-body .btn-info { background: #fff !important; border: 1px solid #0c8599; color: #000 !important; }
+.page-body .btn-info:hover { background: #e3fafc !important; color: #000 !important; }
+
+/* 逾期提醒条 / 消息提示条：白底 + 边框色（复核反馈：色块一律边框化） */
+.page-body .alert-danger {
+  background: #fff !important;
+  border: 1px solid #f03e3e !important;
+  color: #000 !important;
+}
+.page-body .alert-success {
+  background: #fff !important;
+  border: 1px solid #2f9e44 !important;
+  color: #000 !important;
+}
+.page-body .alert-warning {
+  background: #fff !important;
+  border: 1px solid #f59f00 !important;
+  color: #000 !important;
+}
+.page-body .alert-info {
+  background: #fff !important;
+  border: 1px solid #0c8599 !important;
+  color: #000 !important;
+}
 
 /* 页面背景微调（Tabler 默认浅灰，更干净的白色工作区） */
 .page-wrapper { background: #f6f8fb; }
