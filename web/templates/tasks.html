@@ -253,14 +253,15 @@
     </div>
   </div>
 
-  <!-- AI 提案待审核（全部人工审，决策 12；依据强制展示，决策 16） -->
+  <!-- AI 提案待审核（全部人工审，决策 12；依据强制展示，决策 16）
+       复核反馈：固定高度 + 超出滚动条展示 -->
   <div class="col-lg-4">
     <div class="card">
       <div class="card-header">
         <h3 class="card-title"><i class="ti ti-robot me-1"></i>AI 提案待审核</h3>
         <span class="text-muted small">人工批 / 驳（决策 12）</span>
       </div>
-      <div class="list-group list-group-flush">
+      <div class="list-group list-group-flush proposal-list">
         {% for p in proposals %}
         <div class="list-group-item">
           <div class="d-flex align-items-center gap-2 mb-1">

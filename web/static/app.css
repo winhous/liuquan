@@ -18,3 +18,14 @@
 
 /* 页面背景微调（Tabler 默认浅灰，更干净的白色工作区） */
 .page-wrapper { background: #f6f8fb; }
+
+/* AI 提案待审核：固定高度 + 超出滚动条（复核反馈 2026-08-28） */
+.proposal-list {
+  max-height: 640px;          /* 与左栏任务列表视觉高度对齐 */
+  overflow-y: auto;           /* 超出滚动 */
+  overscroll-behavior: contain; /* 滚动到底不穿透页面 */
+}
+/* 滚动条样式（Tabler 深色侧栏之外，内容区用细滚动条更协调） */
+.proposal-list::-webkit-scrollbar { width: 6px; }
+.proposal-list::-webkit-scrollbar-thumb { background: #d3dae6; border-radius: 3px; }
+.proposal-list::-webkit-scrollbar-thumb:hover { background: #b6c0d2; }
