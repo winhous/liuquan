@@ -2,9 +2,7 @@
 
 /* ===== 复核反馈（2026-08-28）：整体去"花花绿绿" =====
    所有色块（徽章/标签）改为【白底 + 对应颜色边框 + 黑色文字】：
-   颜色值保持不变，只把背景填充改成边框色，文字统一黑色。 */
-
-/* 优先级徽章（历史遗留类，页面已不展示 P0-P3，保留定义防回归） */
+   颜色值保持不变，只把背景填充改成边框色，文字统一黑色。 *//* 优先级徽章（历史遗留类，页面已不展示 P0-P3，保留定义防回归） */
 .prio-P0 { background: #fff; border: 1px solid #dc2626; color: #000; }
 .prio-P1 { background: #fff; border: 1px solid #ea580c; color: #000; }
 .prio-P2 { background: #fff; border: 1px solid #2563eb; color: #000; }
@@ -100,3 +98,51 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
 .proposal-list::-webkit-scrollbar { width: 6px; }
 .proposal-list::-webkit-scrollbar-thumb { background: #d3dae6; border-radius: 3px; }
 .proposal-list::-webkit-scrollbar-thumb:hover { background: #b6c0d2; }
+
+/* ===== 复核反馈（2026-08-28）：文字/线条也统一黑色（第一轮只边框化了色块背景）=====
+   1. outline 按钮（派生/阻塞/作废/开始/解除阻塞/清除筛选等）：白底 + 色边框 + 黑字
+      ——上一轮只处理了实心按钮（btn-primary 等），outline 按钮漏了，文字仍是
+      蓝色/红色/灰色等彩色；
+   2. 表格列竖线统一为 Tabler 默认浅灰（逾期行 table-danger 的竖线是粉红
+      rgb(204,181,183)，与其他行不一致——覆盖为同一浅灰）；
+   3. 页面彩色文字（text-primary/text-info/text-success 等非徽章处）统一黑色
+      （徽章已有专用规则覆盖，不重复）。 */
+
+/* 1) outline 按钮：白底 + 对应色边框 + 黑字（hover 同色淡底保持可点识别） */
+.page-body .btn-outline-primary {
+  background: #fff !important; border: 1px solid #0d6efd !important; color: #000 !important; }
+.page-body .btn-outline-primary:hover { background: #eaf2ff !important; color: #000 !important; }
+.page-body .btn-outline-success {
+  background: #fff !important; border: 1px solid #2f9e44 !important; color: #000 !important; }
+.page-body .btn-outline-success:hover { background: #ebfbee !important; color: #000 !important; }
+.page-body .btn-outline-danger {
+  background: #fff !important; border: 1px solid #f03e3e !important; color: #000 !important; }
+.page-body .btn-outline-danger:hover { background: #ffe3e3 !important; color: #000 !important; }
+.page-body .btn-outline-info {
+  background: #fff !important; border: 1px solid #0c8599 !important; color: #000 !important; }
+.page-body .btn-outline-info:hover { background: #e3fafc !important; color: #000 !important; }
+.page-body .btn-outline-secondary {
+  background: #fff !important; border: 1px solid #6c757d !important; color: #000 !important; }
+.page-body .btn-outline-secondary:hover { background: #f1f3f5 !important; color: #000 !important; }
+/* 弹窗「取消」btn-link 也统一黑字（避免蓝色链接文字） */
+.page-body .btn-link { color: #000 !important; }
+.page-body .btn-link:hover { color: #000 !important; text-decoration: underline; }
+
+/* 2) 表格列竖线统一浅灰（覆盖逾期行 table-danger 的粉红竖线，全表一致） */
+.table > :not(caption) > * > * {
+  border-color: rgba(4, 32, 69, 0.1) !important;
+}
+/* 逾期行：左侧 4px 红条保留作行级提示（决策 11 修订：逾期标红），
+   但列竖线颜色与普通行一致（上一条规则已覆盖） */
+.table .table-danger td { background-color: #fff; border-left: 4px solid #fca5a5; }
+
+/* 3) 非徽章彩色文字统一黑色（徽章类 .badge.* 已有专规覆盖，这里只处理
+    text-primary/text-info/text-success 直接用在文字/图标上的情况） */
+.page-body .text-primary:not(.badge) { color: #000 !important; }
+.page-body .text-success:not(.badge) { color: #000 !important; }
+.page-body .text-info:not(.badge) { color: #000 !important; }
+/* 提醒条内的「查看逾期任务」链接（alert-link 默认红色）也统一黑色；
+   逾期红字「⚠ 逾期」为决策 11 修订保留项，不在此列 */
+.page-body .alert-link { color: #000 !important; font-weight: 600; }
+/* 派生链接（a.badge 复用）已在徽章规则里统一黑字；统计卡图标 ti 图标继承
+   父级文字色，随上面规则一并变黑（图标本身无色语义） */
