@@ -109,6 +109,10 @@ async def test_crm_chat_chain_done(
     assert len(phases) == 18, f"phases={phases}"
     assert phases[0:6] == ["INIT", "REASON", "ACT", "OBSERVE", "VERIFY", "DONE"]
     assert len(agents) == 3  # 三工序各一次 LLM
+    # 复核反馈 #2：chat_translate prompt 含「混合文本识别发言人」指令
+    audits = await get_audit(db_engine, result.task_id)
+    prompt_text = audits[0].input_full or ""
+    assert "无角色标记" in prompt_text
 
     task = await get_task(db_engine, result.task_id)
     assert task is not None and task.status == "done"

@@ -66,14 +66,29 @@
             translated.classList.remove("text-muted");
             status.textContent = "";
             // 归入某客户（决策 23 可选）
-            archive.innerHTML =
-              '<form method="post" action="/translate/archive" id="archive-form">' +
-              '<input type="hidden" name="source_text" value="' + (form.text.value).replace(/"/g, "&quot;") + '">' +
-              '<input type="hidden" name="translated_text" value="' + (out.translated || "").replace(/"/g, "&quot;") + '">' +
-              '<div class="d-flex gap-2 align-items-end">' +
-              '<div class="flex-grow-1"><label class="form-label">归入某客户（可选）</label>' +
-              '<input name="customer_id" class="form-control" type="number" placeholder="客户 id" required></div>' +
-              '<button class="btn btn-sm btn-outline-primary">归入客户</button></div></form>';
+            // 归入某客户（决策 23 可选）：下拉搜索已有客户（#1 复核反馈）
+            fetch("/crm/api/customers").then(r => r.json()).then(cd => {
+              const customers = (cd.ok && cd.customers) || [];
+              archive.innerHTML =
+                '<form method="post" action="/translate/archive" id="archive-form">' +
+                '<input type="hidden" name="source_text" value="' + (form.text.value).replace(/"/g, "&quot;") + '">' +
+                '<input type="hidden" name="translated_text" value="' + (out.translated || "").replace(/"/g, "&quot;") + '">' +
+                '<div class="d-flex gap-2 align-items-end">' +
+                '<div class="flex-grow-1"><label class="form-label">归入某客户（可选，搜索筛选）</label>' +
+                '<input id="archive-search" class="form-control form-control-sm mb-1" placeholder="输入昵称筛选…" oninput="filterCustomers(this.value)">' +
+                '<select name="customer_id" id="archive-select" class="form-select form-select-sm" required>' +
+                '<option value="">选择客户…</option>' +
+                customers.map(c => '<option value="' + c.id + '">' + c.nickname + '（#' + c.id + '）</option>').join("") +
+                '</select></div>' +
+                '<button class="btn btn-sm btn-outline-primary">归入客户</button></div></form>';
+              window.filterCustomers = function (kw) {
+                const kwl = kw.trim().toLowerCase();
+                const sel = document.getElementById("archive-select");
+                const opts = customers.filter(c => !kwl || c.nickname.toLowerCase().includes(kwl));
+                sel.innerHTML = '<option value="">选择客户…</option>' +
+                  opts.map(c => '<option value="' + c.id + '">' + c.nickname + '（#' + c.id + '）</option>').join("");
+              };
+            });
             archive.classList.remove("d-none");
             document.getElementById("archive-form").addEventListener("submit", (ev) => {
               ev.preventDefault();

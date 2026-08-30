@@ -721,6 +721,14 @@ def create_app(
         await request.app.state.crm_store.dismiss_candidates(customer_id, ids)
         return RedirectResponse(f"/crm/{customer_id}", status_code=303)
 
+    @app.get("/crm/api/customers")
+    async def crm_api_customers(request: Request, q: str = ""):
+        """客户列表 JSON（翻译工具「归入某客户」下拉搜索用；登录保护）。"""
+        if request.cookies.get("role") not in ROLE_LABEL:
+            return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+        rows, _ = await request.app.state.crm_store.list_customers(q=q, page_size=200)
+        return JSONResponse({"ok": True, "customers": [{"id": r["id"], "nickname": r["nickname"]} for r in rows]})
+
     # ---- 翻译工具（决策 23：对话翻译子页 = 单纯翻译，可选归入客户）----
 
     @app.get("/translate")
