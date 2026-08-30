@@ -245,6 +245,11 @@ def create_app(
     app.state.tm_store = tm_store
     app.state.engine_client_factory = engine_client_factory or (lambda: EngineAPIClient())
 
+    # ---- 业务读写接口（v0.3 决策 26 接口化：引擎经 /api/biz/* 读写业务数据，不直连业务库）----
+    from web.api_biz import create_biz_router
+
+    app.include_router(create_biz_router())
+
     # ---- 登录 / 导航 / 占位页（原型保留，最小改动）----
 
     @app.get("/")
