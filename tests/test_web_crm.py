@@ -166,6 +166,7 @@ def test_crm_create_force_ok(client: TestClient, _seed, crm_engine) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_crm_delete_cascades(client: TestClient, _seed, crm_engine) -> None:
     """A36：删除客户级联清 message/snapshot/candidate/task。"""
     _login(client)
@@ -221,6 +222,7 @@ def test_crm_paste_triggers_chain(client: TestClient, _seed, engine_stub) -> Non
 
 @pytest.mark.asyncio
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_confirm_candidates_creates_task(
     client: TestClient, _seed, crm_engine, monkeypatch
 ) -> None:
@@ -267,6 +269,7 @@ async def test_confirm_candidate_twice_rejected(
 
 @pytest.mark.asyncio
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_reply_send_archives_seller_message(
     client: TestClient, _seed, crm_engine
 ) -> None:

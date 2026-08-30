@@ -20,7 +20,7 @@
 
 安全与规范（P2 零容忍 / R20 / R24）：
 - 本文件不出现 URL/IP/密钥字面量（连接串/端口都经 .env 的
-  LIUQUAN_ENGINE_API_URL / LIUQUAN_ENGINE_DB_URL / LIUQUAN_TM_DB_URL，
+  LIUQUAN_ENGINE_API_URL / LIUQUAN_ENGINE_DB_URL，
   读取走 dotenv_values 读 .env 文件，不触碰 os.environ；先例
   engine/core/db.py 与 engine/actions/tm_proposal.py）
 - 不 import web 任何代码（P3-2 / R24：引擎进程不 import web，双向零耦合）；

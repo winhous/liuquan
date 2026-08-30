@@ -1332,3 +1332,132 @@ async def test_a26_edit_snapshot_and_reopen(
     await store.transition(t2.id, "voided", actor="运营", result_note="作废")
     await store.reopen_task(t2.id, actor="运营")
     assert (await _get_task(tm_engine, t2.id)).status == "open"
+
+
+# ==================== A27-A37（v0.3 CRM 平移，详设 §11）====================
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a27_paste_chain_done_and_candidate_lands(
+    monkeypatch: pytest.MonkeyPatch, db_engine, registry, model_registry
+) -> None:
+    """A27：crm_chat_chain 真链 DONE -> 候选消费者经写接口落 crm.todo_candidate
+    （evidence 非空 / ref_id 命中白名单 / audit 可查）；端到端（FakeAgent 桩 +
+    fake provider，零网络）。"""
+    _set_env(monkeypatch)
+    from engine.core.runner import TaskRunner
+    from engine.actions.crm_candidate import consume_todo_candidates
+    from tests.fake_providers import FakeCrmChatContext
+    from test_runner import make_agent_factory
+    from test_llm import FakeAgent
+    from engine.core.db import get_last_step
+
+    factory, agents = make_agent_factory(
+        FakeAgent,
+        output=lambda ot: (
+            ot(translations=[{"source_text": "hi", "translated_text": "你好", "direction": "buyer"}])
+            if ot.__name__ == "ChatTranscriptResult"
+            else ot(
+                current_need="定制花束", summary="买家想定制"
+            )
+            if ot.__name__ == "CustomerSnapshotResult"
+            else ot(
+                todos=[
+                    {
+                        "content": "确认花材组合",
+                        "reason": "卖家答应",
+                        "evidence": [{"kind": "message", "ref_id": "1", "quote": "hi"}],
+                        "suggested_tags": ["报价"],
+                    }
+                ]
+            )
+            if ot.__name__ == "TodoCandidateResult"
+            else ot()
+        ),
+    )
+    runner = TaskRunner(
+        db_engine,
+        registry,
+        agent_factory=factory,
+        model_registry=model_registry,
+        repo_root=Path(__file__).resolve().parents[1],
+        writable_check=lambda: True,
+        backoff=0.0,
+        providers={"crm.chat_context": FakeCrmChatContext()},
+    )
+    result = await runner.run(
+        "crm_chat_chain",
+        {"customer_id": 1, "conversation_text": "Hi! I love your flowers"},
+    )
+    assert result.status == "done"
+    # 白名单 = provider 返回 id 集合（决策 16③）：customer 1 + messages 1/2 + snapshot 3
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured["body"] = _json.loads(req.content)
+        return httpx.Response(200, json={"ok": True, "id": 1, "skipped": False})
+
+    client = _biz_client_for(handler)
+    source = {
+        "customer_id": 1,
+        "chain_id": "crm_chat_chain",
+        "engine_task_id": "e-000001",
+        "worker_id": "todo_generate",
+        "audit_ids": ["1"],
+    }
+    step = await get_last_step(db_engine, result.task_id)
+    from models.workers import TodoCandidateResult
+
+    outcome = await consume_todo_candidates(
+        step.output,
+        registry=registry,
+        whitelist={"1", "2", "3"},
+        audit_lookup=lambda ids: True,
+        biz_client=client,
+        source=source,
+    )
+    assert outcome.status == "inserted"
+    assert captured["body"]["evidence"][0]["ref_id"] == "1"
+
+
+def _biz_client_for(handler) -> BizApiClient:
+    return BizApiClient(
+        base_url="http" + "://test-" + "biz",
+        token="test-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+
+@pytest.mark.version_acceptance
+def test_a35_write_api_no_db_conn_string_in_engine() -> None:
+    """A35：写入接口化静态断言——引擎包零业务库连接串读取（决策 26）。"""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "engine"
+    hits: list[str] = []
+    for py in root.rglob("*.py"):
+        if "__pycache__" in str(py):
+            continue
+        src = py.read_text(encoding="utf-8")
+        # 业务库连接串变量（LIUQUAN_TM_DB_URL）在 engine/ 出现 = 违反决策 26
+        # （引擎进程零业务库连接串）；引擎库变量 LIUQUAN_ENGINE_DB_URL 合法
+        if "LIUQUAN_TM_DB_URL" in src:
+            hits.append(str(py))
+    assert hits == [], f"engine 出现业务库连接串引用（决策 26 违反）：{hits}"
+
+
+@pytest.mark.version_acceptance
+def test_a37_four_greens_and_full_suite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A37：四绿总门 + 全量单测（A19 同款：check.sh 四门在 pre-commit/verify 真跑）。"""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "engine.lint"], cwd=REPO_ROOT, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stdout
+    assert "0 违规" in result.stdout

@@ -93,6 +93,7 @@ def test_translate_page(client: TestClient) -> None:
     assert "翻译任意文本" in resp.text
 
 
+@pytest.mark.version_acceptance
 def test_translate_triggers_chain(client: TestClient) -> None:
     _login(client)
     resp = client.post(
@@ -106,6 +107,7 @@ def test_translate_triggers_chain(client: TestClient) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_translate_archive_lands_message(client: TestClient, crm_engine) -> None:
     async with AsyncSession(crm_engine) as session, session.begin():
         session.add(Customer(nickname="Mia"))

@@ -121,6 +121,7 @@ async def _seed_task(tm_engine) -> int:
 
 
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_next_assign_changes_role(client: TestClient, _seed_task, tm_engine) -> None:
     _login(client)
     resp = client.post(
@@ -142,6 +143,7 @@ async def test_next_assign_changes_role(client: TestClient, _seed_task, tm_engin
 
 
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_next_tag_updates_tags(client: TestClient, _seed_task, tm_engine) -> None:
     _login(client)
     client.post(f"/tasks/{_seed_task}/next", data={"action": "tag", "tags": "售后,物流"}, follow_redirects=False)
@@ -172,6 +174,7 @@ async def test_next_block_requires_valid_reason(client: TestClient, _seed_task, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_next_ignore_clears_suggestion(
     client: TestClient, _seed_task, tm_engine
 ) -> None:
@@ -191,6 +194,7 @@ async def test_next_ignore_clears_suggestion(
 # ---- A34 自然语言入口（决策 28）----
 
 
+@pytest.mark.version_acceptance
 def test_next_intent_triggers_chain(client: TestClient, _seed_task) -> None:
     _login(client)
     resp = client.post(
@@ -207,6 +211,7 @@ def test_next_intent_triggers_chain(client: TestClient, _seed_task) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_next_confirm_transfer_unavailable(
     client: TestClient, _seed_task, tm_engine
 ) -> None:
@@ -228,6 +233,7 @@ async def test_next_confirm_transfer_unavailable(
 
 
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_next_confirm_assign_executes(
     client: TestClient, _seed_task, tm_engine
 ) -> None:
@@ -247,6 +253,7 @@ async def test_next_confirm_assign_executes(
 # ---- A33 标签展示 ----
 
 @pytest.mark.asyncio
+@pytest.mark.version_acceptance
 async def test_task_list_shows_tags(client: TestClient, _seed_task) -> None:
     _login(client)
     resp = client.get("/tasks")
