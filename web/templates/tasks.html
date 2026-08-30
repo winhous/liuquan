@@ -149,8 +149,11 @@
         </div>
       </div>
       <!-- 列表筛选器（决策 17 第 5 条：筛选功能一定有；先做状态+逾期+关键词）
-           复核反馈：加「已筛选」状态提示 + 清除筛选按钮，让筛选生效可见 -->
-      <div class="card-body border-bottom py-2">
+           复核反馈：加「已筛选」状态提示 + 清除筛选按钮，让筛选生效可见
+           flex:0 0 auto：卡片为 flex column，Tabler .card-body 自带 flex:1 1 auto（grow）会吞剩余空间——
+           筛选结果少时（如仅逾期 2 行）表格被挤到卡片底部上方空白（用户复核 2026-08-30）；
+           flex:0 0 auto 同时封掉 grow+shrink，高度固定为内容高 -->
+      <div class="card-body border-bottom py-2" style="flex:0 0 auto;">
         <form method="get" action="/tasks" class="row g-2 align-items-center" id="filter-form">
           <div class="col-auto">
             <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
@@ -176,8 +179,10 @@
           {% endif %}
         </form>
       </div>
-      <!-- 复核反馈 #1/#4：任务清单固定高度 + 滚动条（基准 ≈ 9 条任务行高度） -->
-      <div class="table-responsive" style="max-height:620px;overflow-y:auto;">
+      <!-- 复核反馈 #1/#4：任务清单固定高度 + 滚动条（基准 ≈ 9 条任务行高度）
+           flex:1 1 auto + min-height:0：吃掉卡片剩余空间（与提案侧等高），
+           结果少时表格贴顶渲染、空白留在表格区内部底部，不再把表格挤到卡片最下方 -->
+      <div class="table-responsive" style="max-height:620px;overflow-y:auto;flex:1 1 auto;min-height:0;">
         <table class="table table-vcenter card-table">
           <thead>
             <tr><th>任务</th><th>状态</th><th>负责人</th><th>截止</th><th>来源</th><th class="text-end">操作</th></tr>
