@@ -115,13 +115,13 @@ def create_biz_router(
             )
             existing = dup.scalar_one_or_none()
             if existing is not None:
-                return {"ok": True, "id": existing, "skipped": True}
+                return {"ok": True, "id": existing, "skipped": True, "skip_reason": "idempotent"}
             # 同事件防重（决策 17）：同 ref_id + action_id 已有待审提案/未完成任务
             for ref_id in {ev.ref_id for ev in payload.evidence}:
                 if await _proposal_pending(session, payload.action_id, ref_id):
-                    return {"ok": True, "id": None, "skipped": True}
+                    return {"ok": True, "id": None, "skipped": True, "skip_reason": "duplicate"}
                 if await _task_unfinished(session, payload.action_id, ref_id):
-                    return {"ok": True, "id": None, "skipped": True}
+                    return {"ok": True, "id": None, "skipped": True, "skip_reason": "duplicate"}
             row = TaskProposalORM(
                 title=payload.title,
                 detail=payload.detail,

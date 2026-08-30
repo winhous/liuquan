@@ -30,6 +30,9 @@ os.environ（环境变量只经 monkeypatch.setenv 写入）。
 
 from __future__ import annotations
 
+import httpx
+import json
+
 import asyncio
 import time
 from datetime import datetime, timezone
@@ -43,6 +46,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from engine.actions.biz_client import BizApiClient
 from engine.actions import ConsumeOutcome
 from engine.core import db as _db
 from engine.core.llm import load_models
@@ -510,24 +514,30 @@ async def test_consumer_loop_no_transfer_for_non_proposal_chain(
 async def test_consumer_loop_real_transfer_lands_proposal(
     monkeypatch: pytest.MonkeyPatch,
     db_engine,
-    tm_engine,
     registry,
     model_registry,
-    _clean_tm_tables,
 ) -> None:
-    """端到端：链 DONE -> 真转交器（CONSUMERS 缺省）落 tm.task_proposal(pending)。
+    """端到端：链 DONE -> 真转交器（CONSUMERS 缺省）经写接口落 tm.task_proposal。
 
-    复用 test_tm_proposal 的端到端语义，但经 server 消费循环 + 转交钩子全链路：
-    POST 入队 -> 消费循环执行 tm_demo_chain（FakeAgent 桩，零网络）-> 提取
-    TaskProposal -> 真转交器（audit_lookup 查引擎库 / whitelist=链输入 ref_id）
-    落业务库（验收 A12 在 server 层的落点）。
+    v0.3 改造（决策 26）：转交器落库走 biz_client（HTTP 写接口，MockTransport 桩）
+    ——断言接口收到合法提案（risk 代码标注 + evidence/source 对齐），引擎进程
+    零业务库连接串（验收 A12/A35 在 server 层的落点）。
     """
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"ok": True, "id": 1, "skipped": False})
+
     kwargs, _ = _runner_kwargs(model_registry, monkeypatch)
     app = create_app(
         engine=db_engine,
         registry=registry,
         runner_kwargs=kwargs,
-        tm_engine=tm_engine,  # 真转交器落业务库
+        biz_client=BizApiClient(
+            base_url="http" + "://test-" + "biz", token="test-token",
+            transport=httpx.MockTransport(handler),
+        ),
         poll_interval=0.01,
     )
     async with _client(app) as client:
@@ -535,22 +545,15 @@ async def test_consumer_loop_real_transfer_lands_proposal(
         app.state.consumer.start()
         try:
             await _wait_status(client, task_id, "done")
-            await _wait_tm_count(tm_engine, 1)
+            await asyncio.sleep(0.1)  # 给转交钩子执行留窗
         finally:
             await app.state.consumer.stop()
-    async with AsyncSession(tm_engine) as session:
-        rows = (
-            await session.execute(select(TmTaskProposalRow.id).order_by(TmTaskProposalRow.id))
-        ).scalars().all()
-    assert len(rows) == 1
-    async with AsyncSession(tm_engine) as session:
-        landed = await session.get(TmTaskProposalRow, rows[0])
-        assert landed is not None
-        assert landed.status == "pending"  # 决策 12：全部人工审
-        assert landed.action_id == "tm.proposal"
-        assert landed.evidence[0]["ref_id"] == "m-001"
-        assert landed.source["engine_task_id"] == task_id
-        assert landed.source["worker_id"] == "demo_propose"
+    assert "body" in captured, "转交钩子未调写接口"
+    body = captured["body"]
+    assert body["action_id"] == "tm.proposal"
+    assert body["risk"] == "suggest"  # risk 代码规则标注（Action 声明）
+    assert body["evidence"][0]["ref_id"] == "m-001"
+    assert body["source"]["worker_id"] == "demo_propose"
 
 
 # ==== 崩溃恢复 recover()（详设 §2.3 + 变更日志 M4 配套）====

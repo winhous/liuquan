@@ -243,7 +243,7 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
     }
     assert set(registry.context_providers) == {"demo_greeting", "crm_chat_context", "tm_task_context"}
     assert set(registry.events) == {"demo.echo_done"}
-    assert set(registry.actions) == {"demo_echo_record", "tm.proposal"}
+    assert set(registry.actions) == {"demo_echo_record", "tm.proposal", "crm.candidate"}
 
     # 工序声明字段（id/domain/risk/model 别名/retry/输入输出 Model 引用）
     echo = registry.workers["demo_echo"]

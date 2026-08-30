@@ -102,8 +102,9 @@ _STEP_REF_RE = re.compile(r"^steps\[(\d+)\]\.output(?:\.(.+))?$")
 _MODEL_SEARCH_MODULES = ("models.workers", "models.contract", "models")
 # L2 域枚举提示（运行期由枚举拼接，不写死业务词）
 _DOMAIN_LIST = "/".join(d.value for d in Domain)
-# L10 Action target 一期唯一合法值（详设 §6.3）
-_ACTION_TARGET = "tm.proposal"
+# L10 Action target 合法值（详设 §6.3 + 详设-v0.3 §5.4：v0.3 增 crm.todo_candidate——
+# crm.candidate 候选消费者落 crm.todo_candidate，决策 19/26）
+_ACTION_TARGETS = frozenset({"tm.proposal", "crm.todo_candidate"})
 
 
 class RegistryLoadError(Exception):
@@ -732,12 +733,12 @@ def _check(root: Path, models_yaml_path: Path | None) -> _CheckResult:
     # ---- L9 ----
     _check_l9(violations, root, workers, cache)
 
-    # ---- L10（§6.3）Action target 锁死 ----
+    # ---- L10（§6.3）Action target 白名单 ----
     for d in actions:
-        if d.obj.target != _ACTION_TARGET:
+        if d.obj.target not in _ACTION_TARGETS:
             violations.append(
                 f"[L10] {d.rel}:{d.line} Action {d.obj.action_id} 的 target {d.obj.target!r}"
-                f" 非法——一期唯一合法值 {_ACTION_TARGET}（详设 §6.3 loader 校验）"
+                f" 非法——合法值 {sorted(_ACTION_TARGETS)}（详设 §6.3 + 详设-v0.3 §5.4）"
             )
 
     # ---- 事件 trigger_chain 引用断裂（R22：全册引用断裂 = 拒载）----

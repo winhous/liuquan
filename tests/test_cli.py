@@ -88,12 +88,13 @@ class TestRegistryCheck:
         # customer_reply_draft/tm_intent）、链 6（含 crm_chat_chain/crm_reply_chain/
         # tm_intent_chain）、provider 3（含 crm_chat_context/tm_task_context）、
         # 事件 1、Action 2（demo_echo_record/tm.proposal；crm.candidate 待 T5）
-        for label in ("工序 8", "链 6", "Context provider 3", "事件 1", "Action 2"):
+        for label in ("工序 8", "链 6", "Context provider 3", "事件 1", "Action 3"):
             assert label in out, f"清单应包含 {label}"
         assert "demo_echo" in out and "crm_translate" in out and "demo_propose" in out
         assert "chat_translate" in out and "tm_intent" in out
         assert "crm_chat_chain" in out and "tm_intent_chain" in out
         assert "tm_demo_chain" in out and "tm.proposal" in out
+        assert "crm.candidate" in out
 
     def test_missing_models_yaml_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

@@ -83,11 +83,15 @@ def test_crm_worker_referencing_demo_provider_rejected() -> None:
 
 
 def test_unenabled_domain_rejected_in_v01() -> None:
-    """六行矩阵全定义，但 v0.1 只启用 demo/crm：其余域运行时拒（§5.2 原文）。"""
-    for domain in (Domain.TM, Domain.ERP, Domain.SEO, Domain.SCRAPE):
+    """六行矩阵全定义；v0.1 启用 demo/crm、v0.3 增启用 tm（tm_intent 工序）：
+    erp/seo/scrape 未启用，运行时拒（§5.2 原文 + 详设-v0.3 §5.1）。"""
+    for domain in (Domain.ERP, Domain.SEO, Domain.SCRAPE):
         res = check_policy(domain, Risk.READ, ())
         assert not res.ok
         assert "未启用" in res.reason
+    # tm 域 v0.3 已启用（tm_intent / tm_task_context，决策 28）
+    res = check_policy(Domain.TM, Risk.SUGGEST, ())
+    assert res.ok
 
 
 def test_matrix_defines_all_six_domains() -> None:

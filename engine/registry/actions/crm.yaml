@@ -1,0 +1,9 @@
+# crm 域 Action 登记（详设-v0.3 §5.4；决策 19 候选落库）
+# crm.candidate：todo_generate 产出 TodoCandidateResult（候选数组）关联的
+# Action——链完成由消费者 crm_candidate 校验（禁幻觉三件套）后经写接口落
+# crm.todo_candidate（决策 26 接口化）。target 白名单 {tm.proposal, crm.todo_candidate}。
+- action_id: crm.candidate
+  domain: crm
+  risk: suggest
+  output_model: TodoCandidateResult
+  target: crm.todo_candidate

@@ -22,6 +22,8 @@ sk- 字面量、不给敏感名赋非空字面量、不读 os.environ。
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 import pytest
@@ -30,7 +32,9 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+import httpx
 from engine.actions import consume_task_proposal
+from engine.actions.biz_client import BizApiClient
 from engine.core.llm import load_models
 from engine.registry import load_registry
 from fake_providers import FakeDemoInbox, load_providers, whitelist_from
@@ -136,6 +140,20 @@ def test_fake_providers_yaml_registers_demo_domain() -> None:
     assert "1" in whitelist  # FakeCrmChatContext 消息 id（v0.3）
 
 
+def _biz_client_ok(captured=None) -> BizApiClient:
+    """MockTransport 桩写接口（返回 ok；captured 可选记录请求体）。"""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if captured is not None:
+            captured["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"ok": True, "id": 1, "skipped": False})
+
+    return BizApiClient(
+        base_url="http" + "://test-" + "biz", token="test-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+
 # ==== 禁幻觉三件套反向（详设 §7.5 样本 A/B/C/D，A21 落点）====
 
 
@@ -143,17 +161,18 @@ def test_fake_providers_yaml_registers_demo_domain() -> None:
 async def test_sample_a_valid_lands_with_provider_whitelist(
     tm_engine, _clean_tm_tables, registry, inbox
 ) -> None:
-    """样本 A：ref_id 命中 fake provider 集合 + audit_id 可查 -> 落库成功。"""
+    """样本 A：ref_id 命中 fake provider 集合 + audit_id 可查 -> 写接口 inserted。"""
+    captured: dict = {}
     outcome = await consume_task_proposal(
         task_proposal_sample("valid"),
-        tm_engine=tm_engine,
         registry=registry,
         whitelist=inbox.whitelist(),  # 白名单来源 = fake provider 数据集合
         audit_lookup=lambda ids: True,  # 可查（测试注入桩 lookup）
+        biz_client=_biz_client_ok(captured),
     )
     assert outcome.status == "inserted"
     assert outcome.proposal_id is not None
-    assert await _count(tm_engine) == 1
+    assert captured["body"]["evidence"][0]["ref_id"] == "msg-001"
 
 
 @pytest.mark.asyncio
@@ -163,14 +182,12 @@ async def test_sample_b_hallucinated_ref_id_rejected(
     """样本 B：集合外 ref_id（fake provider 没喂过的对象）-> 拒落 + 幻觉证据。"""
     outcome = await consume_task_proposal(
         task_proposal_sample("hallucinated"),
-        tm_engine=tm_engine,
         registry=registry,
         whitelist=inbox.whitelist(),
         audit_lookup=lambda ids: True,
     )
     assert outcome.status == "rejected"
     assert (outcome.reason or "").startswith("幻觉证据: ref_id=msg-999")
-    assert await _count(tm_engine) == 0
 
 
 @pytest.mark.asyncio
@@ -180,14 +197,12 @@ async def test_sample_c_empty_evidence_rejected(
     """样本 C：evidence=[] -> 拒落（无依据不出建议，详设 v0.1 §6.4）。"""
     outcome = await consume_task_proposal(
         task_proposal_sample("empty_evidence"),
-        tm_engine=tm_engine,
         registry=registry,
         whitelist=inbox.whitelist(),
         audit_lookup=lambda ids: True,
     )
     assert outcome.status == "rejected"
     assert "evidence 为空" in (outcome.reason or "")
-    assert await _count(tm_engine) == 0
 
 
 @pytest.mark.asyncio
@@ -197,11 +212,9 @@ async def test_sample_d_broken_audit_rejected(
     """样本 D：audit_ids 指向不存在的引擎审计记录 -> 拒落（追溯保证）。"""
     outcome = await consume_task_proposal(
         task_proposal_sample("broken_audit"),
-        tm_engine=tm_engine,
         registry=registry,
         whitelist=inbox.whitelist(),
         audit_lookup=lambda ids: False,  # 不可查（引擎库查不到）
     )
     assert outcome.status == "rejected"
     assert "audit_ids 不可查" in (outcome.reason or "")
-    assert await _count(tm_engine) == 0

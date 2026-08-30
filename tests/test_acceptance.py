@@ -71,6 +71,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from engine.actions import consume_task_proposal
+from engine.actions.biz_client import BizApiClient
 from engine.core import db as _db
 from engine.core.db import (
     create_engine,
@@ -90,6 +91,27 @@ from engine.lint.p3 import (
 )
 from engine.registry import RegistryLoadError, load_registry
 from engine.server import _fmt_task, create_app as create_engine_app
+
+def _biz_client(tm_engine) -> BizApiClient:
+    """引擎消费者写接口 -> 真 web /api/biz 接口（ASGITransport 端到端落真业务库）。
+
+    v0.3 接口化（决策 26）：消费者 POST /api/biz/* 由 web 接口校验后落库——
+    测试用 ASGITransport 指向真 web 接口 app（create_biz_router 注入嵌入式业务
+    库），A12/A13/A14 批准流程依赖真库提案，保持端到端语义。
+    """
+    from fastapi import FastAPI
+
+    from web.api_biz import create_biz_router
+
+    biz_app = FastAPI()
+    biz_app.include_router(create_biz_router(engine=tm_engine, token="test-token"))
+    return BizApiClient(
+        base_url="http" + "://test-" + "biz",
+        token="test-token",
+        transport=httpx.ASGITransport(app=biz_app),
+    )
+
+
 from fake_providers import FakeDemoInbox
 from fixtures.tm.load import task_proposal_sample
 from models.contract.task import TaskProposal
@@ -596,7 +618,7 @@ async def test_a12_trigger_chain_lands_pending_proposal(
         engine=db_engine,
         registry=registry,
         runner_kwargs=kwargs,
-        tm_engine=tm_engine,
+        biz_client=_biz_client(tm_engine),
         poll_interval=0.01,
     )
     async with _client(app) as client:
@@ -712,7 +734,7 @@ async def test_a14_status_flow_done_at_and_trace_closure(
     proposal = TaskProposal.model_validate(step.output)
     outcome = await consume_task_proposal(
         proposal,
-        tm_engine=tm_engine,
+        biz_client=_biz_client(tm_engine),
         registry=registry,
         whitelist={"m-001"},  # 链数据白名单（决策 16）
         audit_lookup=lambda ids: True,
@@ -830,7 +852,7 @@ async def test_a17_crash_recovery_queue_not_lost(
     kwargs, _ = _runner_kwargs(model_registry, monkeypatch)
     app = create_engine_app(
         engine=db_engine, registry=registry, runner_kwargs=kwargs,
-        tm_engine=tm_engine, poll_interval=0.01,
+        biz_client=_biz_client(tm_engine), poll_interval=0.01,
     )
 
     # (a) running 无检查点（claim 后崩溃窗口）-> recover 标 failed
@@ -885,7 +907,7 @@ async def test_a17_crash_recovery_queue_not_lost(
     )
     app2 = create_engine_app(
         engine=db_engine, registry=registry, runner_kwargs=kwargs,
-        tm_engine=tm_engine, poll_interval=0.01,
+        biz_client=_biz_client(tm_engine), poll_interval=0.01,
     )
     async with _client(app2) as client:
         app2.state.consumer.start()
@@ -912,13 +934,13 @@ async def test_a18_idempotent_same_delivery_once(
     whitelist = FakeDemoInbox().whitelist()
     first = await consume_task_proposal(
         proposal,
-        tm_engine=tm_engine, registry=registry,
+        biz_client=_biz_client(tm_engine), registry=registry,
         whitelist=whitelist, audit_lookup=lambda ids: True,
     )
     assert first.status == "inserted"
     second = await consume_task_proposal(  # 模拟同链重跑（同 eid + wid）
         proposal,
-        tm_engine=tm_engine, registry=registry,
+        biz_client=_biz_client(tm_engine), registry=registry,
         whitelist=whitelist, audit_lookup=lambda ids: True,
     )
     assert second.status == "skipped_idempotent"
@@ -998,7 +1020,7 @@ async def test_a21_antihallucination_triple_reverse(
     # 反向 1：集合外 ref_id（fake provider 没喂过的对象）-> 拒落
     outcome_b = await consume_task_proposal(
         task_proposal_sample("hallucinated"),
-        tm_engine=tm_engine, registry=registry,
+        biz_client=_biz_client(tm_engine), registry=registry,
         whitelist=whitelist, audit_lookup=lambda ids: True,
     )
     assert outcome_b.status == "rejected"
@@ -1006,7 +1028,7 @@ async def test_a21_antihallucination_triple_reverse(
     # 反向 2：空 evidence -> 拒落（无依据不出建议）
     outcome_c = await consume_task_proposal(
         task_proposal_sample("empty_evidence"),
-        tm_engine=tm_engine, registry=registry,
+        biz_client=_biz_client(tm_engine), registry=registry,
         whitelist=whitelist, audit_lookup=lambda ids: True,
     )
     assert outcome_c.status == "rejected"
@@ -1014,7 +1036,7 @@ async def test_a21_antihallucination_triple_reverse(
     # 反向 3：audit_ids 不可查 -> 拒落（追溯保证）
     outcome_d = await consume_task_proposal(
         task_proposal_sample("broken_audit"),
-        tm_engine=tm_engine, registry=registry,
+        biz_client=_biz_client(tm_engine), registry=registry,
         whitelist=whitelist, audit_lookup=lambda ids: False,
     )
     assert outcome_d.status == "rejected"
@@ -1041,10 +1063,10 @@ async def test_a21_whitelist_violation_marks_chain_failed(
         # 真转交器 + 白名单收窄：模拟本链喂给 AI 的数据集合不含提案引用的对象
         return await consume_task_proposal(
             proposal,
-            tm_engine=kwargs["tm_engine"],
             registry=kwargs["registry"],
             whitelist={"other-obj-001"},  # 集合外：demo 链产出 ref_id=m-001 不命中
             audit_lookup=kwargs.get("audit_lookup"),
+            biz_client=kwargs.get("biz_client"),
         )
 
     kwargs, _ = _runner_kwargs(model_registry, monkeypatch)
@@ -1053,7 +1075,7 @@ async def test_a21_whitelist_violation_marks_chain_failed(
         registry=registry,
         runner_kwargs=kwargs,
         consumers={"tm.proposal": restricted_consumer},
-        tm_engine=tm_engine,
+        biz_client=_biz_client(tm_engine),
         poll_interval=0.01,
     )
     async with _client(app) as client:
@@ -1213,7 +1235,7 @@ async def test_a25_dedup_hang_overdue_bar_and_filters(
     whitelist = FakeDemoInbox().whitelist()
     first = await consume_task_proposal(
         task_proposal_sample("valid"),
-        tm_engine=tm_engine, registry=registry,
+        biz_client=_biz_client(tm_engine), registry=registry,
         whitelist=whitelist, audit_lookup=lambda ids: True,
     )
     assert first.status == "inserted"
@@ -1221,7 +1243,7 @@ async def test_a25_dedup_hang_overdue_bar_and_filters(
     dup.source.engine_task_id = "e-000099"  # 新链新任务（幂等键不同）
     second = await consume_task_proposal(
         dup,
-        tm_engine=tm_engine, registry=registry,
+        biz_client=_biz_client(tm_engine), registry=registry,
         whitelist=whitelist, audit_lookup=lambda ids: True,
     )
     assert second.status == "skipped_duplicate"

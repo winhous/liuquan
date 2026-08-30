@@ -50,7 +50,9 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from engine.actions import CONSUMERS, Consumer, ConsumeOutcome, create_tm_engine
+from engine.actions import CONSUMERS, Consumer, ConsumeOutcome
+from engine.actions.biz_client import BizApiClient
+from engine.providers import build_providers
 from engine.core import db as _db
 from engine.core.llm import agent_factory, load_models
 from engine.core.runner import TaskResult, TaskRunner
@@ -290,7 +292,7 @@ class QueueConsumer:
         registry: Registry,
         runner: Any,
         consumers: dict[str, Consumer],
-        tm_engine: AsyncEngine | None = None,
+        biz_client: BizApiClient | None = None,
         concurrency: int = 2,
         poll_interval: float = 0.5,
     ) -> None:
@@ -298,7 +300,7 @@ class QueueConsumer:
         self._registry = registry
         self._runner = runner
         self._consumers = consumers
-        self._tm_engine = tm_engine
+        self._biz_client = biz_client
         self._concurrency = max(1, int(concurrency))
         self._poll_interval = max(0.0, float(poll_interval))
         self._task: asyncio.Task[Any] | None = None
@@ -405,15 +407,26 @@ class QueueConsumer:
         consumer = self._consumers.get(proposal.action_id)
         if consumer is None:
             return
-        whitelist = _collect_ref_ids(task.input)
+        # v0.3 白名单正式化（决策 16③）：本链喂给 AI 的数据集合 = provider 返回
+        # id 集合（检查点 memory_state.context_data 递归收集）；缺省回退 v0.2
+        # 简化机制（链 input 递归收集）
+        whitelist = await self._context_whitelist(result.task_id)
+        if not whitelist:
+            whitelist = _collect_ref_ids(task.input)
         lookup = await self._audit_lookup_for(proposal.source.audit_ids)
         kwargs: dict[str, Any] = {
             "registry": self._registry,
             "whitelist": whitelist,
             "audit_lookup": lookup,
         }
-        if self._tm_engine is not None:
-            kwargs["tm_engine"] = self._tm_engine
+        if self._biz_client is not None:
+            kwargs["biz_client"] = self._biz_client
+        # crm.candidate：source（customer_id/chain_id/engine_task_id/worker_id/
+        # audit_ids）由链上下文构造注入（TodoCandidateResult 无 source 字段，
+        # 技术定——详设-v0.3 §5.4）
+        if proposal.action_id == "crm.candidate":
+            source = await self._candidate_source(result.task_id, task)
+            kwargs["source"] = source
         try:
             outcome = await consumer(proposal, **kwargs)
         except Exception as exc:
@@ -437,6 +450,37 @@ class QueueConsumer:
         # inserted / skipped_idempotent / skipped_duplicate：链保持 done
         # （§8 安全日志：只记任务 id 与 outcome 状态，不记提案正文）
         print(f"tm transfer task={_fmt_task(result.task_id)} outcome={outcome.status}")
+
+    async def _context_whitelist(self, task_id: int) -> set[str]:
+        """白名单正式化（决策 16③）：最后检查点 memory_state.context_data 递归收集
+        对象 id（provider 返回数据 = 本链喂给 AI 的数据集合）。"""
+        ckpt = await _db.last_checkpoint(self._engine, task_id)
+        if ckpt is None or not isinstance(ckpt.state, dict):
+            return set()
+        memory = ckpt.state.get("memory_state") or {}
+        context_data = memory.get("context_data") or {}
+        return _collect_ref_ids(context_data)
+
+    async def _candidate_source(self, task_id: int, task: Any) -> dict:
+        """crm.candidate 候选来源上下文（决策 19/26；消费者 source 注入）。"""
+        chain_id = getattr(task, "chain_id", None) or ""
+        worker_id = ""
+        if chain_id:
+            chain = self._registry.chains.get(chain_id)
+            if chain is not None and chain.steps:
+                worker_id = chain.steps[-1].worker
+        async with AsyncSession(self._engine) as session:
+            rows = await session.execute(
+                select(_db.EngineAudit.id).where(_db.EngineAudit.task_id == task_id)
+            )
+            audit_ids = [str(r) for r in rows.scalars()]
+        return {
+            "customer_id": (task.input or {}).get("customer_id"),
+            "chain_id": chain_id,
+            "engine_task_id": _fmt_task(task_id),
+            "worker_id": worker_id,
+            "audit_ids": audit_ids,
+        }
 
     async def _audit_lookup_for(self, audit_ids: list[str]) -> Callable[[list[str]], bool]:
         """查引擎库 engine_audit 的可调用（对应 TaskProposal.source.audit_ids）。
@@ -597,7 +641,7 @@ def create_app(
     runner: Any | None = None,
     runner_kwargs: dict[str, Any] | None = None,
     consumers: dict[str, Consumer] | None = None,
-    tm_engine: AsyncEngine | None = None,
+    biz_client: BizApiClient | None = None,
     concurrency: int = 2,
     poll_interval: float = 0.5,
 ) -> FastAPI:
@@ -627,7 +671,7 @@ def create_app(
         registry=registry,
         runner=runner,
         consumers=consumers if consumers is not None else CONSUMERS,
-        tm_engine=tm_engine,
+        biz_client=biz_client,
         concurrency=concurrency,
         poll_interval=poll_interval,
     )
@@ -654,7 +698,6 @@ def main() -> None:
     engine = _db.create_engine()
     registry = load_registry(repo_root)
     model_registry = load_models(repo_root / "models.yaml")
-    tm_engine = create_tm_engine()
     runner = TaskRunner(
         engine,
         registry,
@@ -662,12 +705,13 @@ def main() -> None:
         model_registry=model_registry,
         repo_root=repo_root,
         writable_check=lambda: True,
+        providers=build_providers(),  # 决策 26 读取接口化：provider = HTTP 调 web 读接口
     )
     app = create_app(
         engine=engine,
         registry=registry,
         runner=runner,
-        tm_engine=tm_engine,
+        biz_client=BizApiClient(),  # 决策 26 写入接口化：消费者经 HTTP 写接口落库
     )
     port = _engine_port(repo_root)
     import uvicorn  # noqa: PLC0415  # 常驻进程入口才需要 uvicorn
