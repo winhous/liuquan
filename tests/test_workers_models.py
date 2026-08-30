@@ -91,11 +91,11 @@ def test_new_models_roundtrip() -> None:
         SuggestedNext(action="transfer", target_domain="erp", note="流转 ERP 采购"),
         SuggestedNext(action="tag", tags=["采购"]),
         SuggestedNext(action="note", note="挂起等物料"),
-        ReplyDraftInput(),
-        ReplyDraftInput(mode="points", points="1. 感谢询价\n2. 报价如下"),
-        ReplyDraftInput(mode="literal", full_text="原文回传"),
+        ReplyDraftInput(customer_id=5),
+        ReplyDraftInput(customer_id=5, mode="points", points="1. 感谢询价\n2. 报价如下"),
+        ReplyDraftInput(customer_id=5, mode="literal", full_text="原文回传"),
         ReplyDraftResult(reply_en="Thanks for your inquiry", reply_zh="感谢您的询价"),
-        IntentInput(instruction="流转到 ERP 采购"),
+        IntentInput(task_id=9, instruction="流转到 ERP 采购"),
         IntentResult(action="assign", target_role="运营", clarity="clear"),
         IntentResult(
             action="transfer",
@@ -149,7 +149,7 @@ def test_new_model_defaults() -> None:
     assert snap.current_need == "" and snap.need_history == [] and snap.sentiment == ""
     assert snap.todos == [] and snap.summary == ""
 
-    draft = ReplyDraftInput()
+    draft = ReplyDraftInput(customer_id=5)
     assert draft.mode == "auto" and draft.points == "" and draft.full_text == ""
 
     reply = ReplyDraftResult(reply_en="hi")
@@ -194,7 +194,13 @@ def test_required_field_missing_rejected() -> None:
     with pytest.raises(ValidationError):
         IntentResult(clarity="clear")  # action 必填
     with pytest.raises(ValidationError):
-        IntentInput()  # instruction 必填
+        IntentInput()  # task_id / instruction 必填
+    with pytest.raises(ValidationError):
+        IntentInput(instruction="x")  # task_id 必填
+    with pytest.raises(ValidationError):
+        ReplyDraftInput()  # customer_id 必填
+    with pytest.raises(ValidationError):
+        ReplyDraftInput(mode="auto")  # customer_id 仍缺
     with pytest.raises(ValidationError):
         ChatTranscriptInput(conversation_text="x")  # customer_id 必填
     with pytest.raises(ValidationError):

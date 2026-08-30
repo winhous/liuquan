@@ -210,9 +210,12 @@ class TodoCandidateResult(BaseModel):
 class ReplyDraftInput(BaseModel):
     """customer_reply_draft 工序入参 / crm_reply_chain 链入参：回复台三模式。
 
-    literal 模式 reply_zh 原样回传不经模型（代码路径）；customer_id 走链 params。
+    customer_id 供 crm_chat_context provider params 引用（详设 v0.1 §4.1
+    机制：params 值来自本工序 input 字段；详设-v0.3 §5.1 技术定修订）；
+    literal 模式 reply_zh 原样回传不经模型（代码路径）。
     """
 
+    customer_id: int
     mode: Literal["auto", "points", "literal"] = "auto"
     points: str = ""
     full_text: str = ""
@@ -226,8 +229,13 @@ class ReplyDraftResult(BaseModel):
 
 
 class IntentInput(BaseModel):
-    """tm_intent 工序入参 / tm_intent_chain 链入参：自然语言流转指令；task_id 走链 params。"""
+    """tm_intent 工序入参 / tm_intent_chain 链入参：自然语言流转指令。
 
+    task_id 供 tm_task_context provider params 引用（详设 v0.1 §4.1 机制；
+    详设-v0.3 §5.1 技术定修订：input 必须带业务对象 id）。
+    """
+
+    task_id: int
     instruction: str
 
 
