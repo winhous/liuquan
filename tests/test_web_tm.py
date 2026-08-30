@@ -490,6 +490,7 @@ async def test_derive_task_keeps_parent_open(client: TestClient, tm_engine) -> N
             "domain": "crm",
             "role": "运营",
             "due": (date.today() + timedelta(days=1)).isoformat(),
+            "link_parent": "1",  # 复核反馈 #6：关联可选，测关联场景
         },
     )
     assert resp.status_code == 303

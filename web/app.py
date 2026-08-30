@@ -140,7 +140,14 @@ def _domain_meta(domain: str) -> dict[str, str]:
     return DOMAIN_META.get(domain, {"label": domain or "其他", "cls": "bg-secondary"})
 
 
-def _task_view(t: Task, *, parent_title: str | None = None, child_count: int = 0) -> dict[str, Any]:
+def _task_view(
+    t: Task,
+    *,
+    parent_title: str | None = None,
+    child_count: int = 0,
+    step_total: int = 0,
+    step_done: int = 0,
+) -> dict[str, Any]:
     """任务行视图：展示形 id / 状态标签 / 逾期标记 / 派生关联（父标题+子任务数）。"""
     overdue = t.status not in ("done", "void") and t.due < date.today()
     return {
@@ -167,6 +174,8 @@ def _task_view(t: Task, *, parent_title: str | None = None, child_count: int = 0
         "created_by": t.created_by,
         "tags": list(t.tags or []),              # v0.3 决策 25：标签展示
         "ai_suggestion": t.ai_suggestion,        # v0.3 决策 27：AI 下一步建议
+        "step_total": step_total,                # 复核反馈 #6：步骤 N/M
+        "step_done": step_done,
     }
 
 
@@ -321,7 +330,16 @@ def create_app(
             _ctx(
                 request,
                 "tm",
-                tasks=[_task_view(t.task, parent_title=t.parent_title, child_count=t.child_count) for t in tasks],
+                tasks=[
+                    _task_view(
+                        t.task,
+                        parent_title=t.parent_title,
+                        child_count=t.child_count,
+                        step_total=t.step_total,  # 复核反馈 #6：步骤 N/M
+                        step_done=t.step_done,
+                    )
+                    for t in tasks
+                ],
                 proposals=[_proposal_view(p) for p in proposals],
                 stats=stats,
                 status_options=list(STATUS_LABEL.items()),
@@ -401,6 +419,7 @@ def create_app(
         domain: str = Form(""),
         role: str = Form(...),
         due: str = Form(...),
+        link_parent: str = Form(""),
     ):
         """派生新任务（决策 17：派生≠原任务结束；task_event 记 derived）。"""
         store = _store(request)
@@ -413,6 +432,7 @@ def create_app(
                 role=role,
                 due=_parse_due(due),
                 actor=_role_label(request),
+                link_parent=str(link_parent) == "1",  # 复核反馈 #6：关联可选
             )
         except (TMWebError, ValueError) as exc:
             return _redirect(err=str(exc))
@@ -770,6 +790,40 @@ def create_app(
             return JSONResponse({"ok": False, "error": str(exc)})
         return JSONResponse({"ok": True})
 
+
+    # ---- 任务步骤（复核反馈 #6：分解清单 + 完成依赖）----
+
+    @app.post("/tasks/{task_id}/steps")
+    async def task_step_add(request: Request, task_id: int):
+        form = await request.form()
+        try:
+            step = await request.app.state.tm_store.add_step(
+                task_id, str(form.get("content", ""))
+            )
+        except TMWebError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+        return JSONResponse({"ok": True, "step": step})
+
+    @app.post("/tasks/{task_id}/steps/{step_id}/toggle")
+    async def task_step_toggle(request: Request, task_id: int, step_id: int):
+        try:
+            step = await request.app.state.tm_store.toggle_step(task_id, step_id)
+        except TMWebError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+        return JSONResponse({"ok": True, "step": step})
+
+    @app.post("/tasks/{task_id}/steps/{step_id}/delete")
+    async def task_step_delete(request: Request, task_id: int, step_id: int):
+        try:
+            await request.app.state.tm_store.delete_step(task_id, step_id)
+        except TMWebError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+        return JSONResponse({"ok": True})
+
+    @app.get("/tasks/{task_id}/steps")
+    async def task_step_list(request: Request, task_id: int):
+        steps = await request.app.state.tm_store.list_steps(task_id)
+        return JSONResponse({"ok": True, "steps": steps})
 
     # ---- 任务「下一步」区（决策 27/28：AI 建议 + 人决定 + 自然语言入口）----
 

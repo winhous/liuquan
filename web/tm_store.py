@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from models.tm import Task, TaskEvent, TaskProposal
+from models.tm import Task, TaskEvent, TaskStep, TaskProposal
 
 # 任务 + 派生关联视图（决策 17 / 用户复核反馈：展示层需要父任务标题与子任务
 # 数，增强派生任务的父子关联性——「由 t-xxx「父标题」派生」+「N 个子任务」）
@@ -56,6 +56,8 @@ class _TaskWithRel:
     task: Task
     parent_title: str | None = None
     child_count: int = 0
+    step_total: int = 0
+    step_done: int = 0
 
 # 业务库连接串变量名（R20：值只存 .env；本模块经 dotenv_values 读仓库根
 # .env 文件，不触碰 os.environ——P2 规则 4 的合法来源即「.env 文件」）
@@ -180,9 +182,27 @@ class TMStore:
                     )
                 ).all()
                 child_counts = {pid: int(cnt) for pid, cnt in cnt_rows}
+            # 步骤计数（复核反馈 #6：任务行 N/M 徽章）
+            task_ids = [t.id for t in rows]
+            step_counts: dict[int, tuple[int, int]] = {}
+            if task_ids:
+                step_rows = (
+                    await session.execute(
+                        select(
+                            TaskStep.task_id,
+                            func.count(TaskStep.id),
+                            func.count().filter(TaskStep.status == "done"),
+                        )
+                        .where(TaskStep.task_id.in_(task_ids))
+                        .group_by(TaskStep.task_id)
+                    )
+                ).all()
+                step_counts = {tid: (int(tot), int(done)) for tid, tot, done in step_rows}
         return [
             _TaskWithRel(
                 task=t,
+                step_total=step_counts.get(t.id, (0, 0))[0],
+                step_done=step_counts.get(t.id, (0, 0))[1],
                 parent_title=parent_titles.get(t.derived_from) if t.derived_from else None,
                 child_count=child_counts.get(t.id, 0),
             )
@@ -317,6 +337,21 @@ class TMStore:
                     "阻塞原因必须是 " + " / ".join(BLOCKED_REASONS) + " 之一"
                 )
             blocked_reason = reason
+        if action == "completed":
+            # 复核反馈 #6：步骤完成之后才能结束父任务（有未完成步骤时完成被拒）
+            async with self._maker() as session:
+                open_steps = (
+                    await session.execute(
+                        select(func.count(TaskStep.id)).where(
+                            TaskStep.task_id == task_id,
+                            TaskStep.status == "open",
+                        )
+                    )
+                ).scalar_one()
+            if open_steps > 0:
+                raise TMWebError(
+                    f"还有 {open_steps} 个步骤未完成——步骤完成之后才能结束任务"
+                )
         async with self._maker() as session, session.begin():
             task = await session.get(Task, task_id, with_for_update=True)
             if task is None:
@@ -362,10 +397,13 @@ class TMStore:
         role: str,
         due: date,
         actor: str,
+        link_parent: bool = False,
     ) -> Task:
-        """从原任务派生新任务：新任务 derived_from=原任务；原任务不结束。
+        """从当前任务快速新建相关任务（复核反馈 #6 弱化：关联可选）。
 
-        事件：新任务 created + 原任务 derived（note=派生出的任务 id）。
+        link_parent=True：新任务 derived_from=原任务 + 原任务 derived 事件
+        （追溯完整）；False（默认）：不挂关联，source 记 from_task_id 追溯
+        来源但不产生父子依赖。
         """
         title = (title or "").strip()
         if not title or len(title) > 80:
@@ -384,23 +422,27 @@ class TMStore:
                 domain=domain.strip() or parent.domain,
                 role=role,
                 due=due,
-                derived_from=parent.id,  # 派生来源（§3.1：派生≠原任务结束）
+                derived_from=parent.id if link_parent else None,  # 复核反馈 #6：关联可选
                 source_type="manual",
-                source={"creator": actor},
+                source={
+                    "creator": actor,
+                    "from_task_id": parent.id,  # 弱化后来源追溯（不挂父子依赖也留痕）
+                },
                 created_by=actor,
             )
             session.add(child)
             await session.flush()
             session.add(TaskEvent(task_id=child.id, event_type="created", actor=actor))
-            session.add(
-                TaskEvent(
-                    task_id=parent.id,
-                    event_type="derived",
-                    actor=actor,
-                    note=task_display_id(child.id),  # §3.3：note=派生出的任务 id
+            if link_parent:
+                session.add(
+                    TaskEvent(
+                        task_id=parent.id,
+                        event_type="derived",
+                        actor=actor,
+                        note=task_display_id(child.id),  # §3.3：note=派生出的任务 id
+                    )
                 )
-            )
-            parent.updated_at = datetime.now(timezone.utc)
+                parent.updated_at = datetime.now(timezone.utc)
         return child
 
     # ---- 编辑（§3.5.5 决策 17 第 4 条：updated 事件带 from/to 快照）----
@@ -639,6 +681,81 @@ class TMStore:
                     detail={"ai_suggestion": ai_suggestion, "human_chose": human_chose},
                 )
             )
+
+    # ---- 任务步骤（复核反馈 #6：任务分解清单 + 完成依赖）----
+
+    async def add_step(self, task_id: int, content: str) -> dict:
+        content = (content or "").strip()
+        if not content or len(content) > 200:
+            raise TMWebError("步骤内容必填且不超过 200 字")
+        async with self._maker() as session, session.begin():
+            task = await session.get(Task, task_id)
+            if task is None:
+                raise TMWebError(f"任务不存在：{task_display_id(task_id)}")
+            max_sort = (
+                await session.execute(
+                    select(func.coalesce(func.max(TaskStep.sort_order), 0)).where(
+                        TaskStep.task_id == task_id
+                    )
+                )
+            ).scalar_one()
+            step = TaskStep(task_id=task_id, content=content, sort_order=max_sort + 1)
+            session.add(step)
+            await session.flush()
+            return {"id": step.id, "content": step.content, "status": step.status}
+
+    async def toggle_step(self, task_id: int, step_id: int) -> dict:
+        async with self._maker() as session, session.begin():
+            step = await session.get(TaskStep, step_id)
+            if step is None or step.task_id != task_id:
+                raise TMWebError("步骤不存在")
+            step.status = "done" if step.status == "open" else "open"
+            await session.flush()
+            return {"id": step.id, "content": step.content, "status": step.status}
+
+    async def delete_step(self, task_id: int, step_id: int) -> None:
+        async with self._maker() as session, session.begin():
+            step = await session.get(TaskStep, step_id)
+            if step is None or step.task_id != task_id:
+                raise TMWebError("步骤不存在")
+            await session.delete(step)
+
+    async def list_steps(self, task_id: int) -> list[dict]:
+        async with self._maker() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(TaskStep)
+                        .where(TaskStep.task_id == task_id)
+                        .order_by(TaskStep.sort_order.asc(), TaskStep.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [
+            {"id": r.id, "content": r.content, "status": r.status}
+            for r in rows
+        ]
+
+    async def step_counts(self, task_id: int) -> tuple[int, int]:
+        """(总步骤数, 已完成数)。"""
+        async with self._maker() as session:
+            total = (
+                await session.execute(
+                    select(func.count(TaskStep.id)).where(TaskStep.task_id == task_id)
+                )
+            ).scalar_one()
+            done = (
+                await session.execute(
+                    select(func.count(TaskStep.id)).where(
+                        TaskStep.task_id == task_id, TaskStep.status == "done"
+                    )
+                )
+            ).scalar_one()
+        return total, done
+
+    # ---- 派生弱化（复核反馈 #6：快速新建，关联可选）----
 
 __all__ = [
     "BLOCKED_REASONS",

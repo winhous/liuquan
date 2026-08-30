@@ -1200,6 +1200,7 @@ async def test_a24_derive_keeps_parent_open_and_child_independent(
     child = await store.derive_task(
         parent.id, title="生成退货标签", detail="生成退货面单", domain="crm",
         role="运营", due=date.today() + timedelta(days=1), actor="运营",
+        link_parent=True,  # 复核反馈 #6：关联可选——A24 测关联场景
     )
     # A 不自动 done（派生≠原任务结束）；B.derived_from=A
     prow = await _get_task(tm_engine, parent.id)
@@ -1252,9 +1253,10 @@ async def test_a25_dedup_hang_overdue_bar_and_filters(
         count = len((await session.execute(select(TmTaskProposalRow.id))).scalars().all())
     assert count == 1  # 新提案未落库
 
-    # 未完成任务一直挂着：自动清理机制不存在（决策 17：不自动清理/关闭/替代）
+    # 未完成任务一直挂着：自动清理机制不存在（决策 17：不自动清理/关闭/替代）。
+    # v0.3 复核反馈 #6：delete_step/delete_customer 是人工删除（合法），排除；
+    # 无"自动"清理（cleanup/scheduler/cron）
     store_src = (REPO_ROOT / "web" / "tm_store.py").read_text(encoding="utf-8")
-    assert "DELETE" not in store_src.upper()  # 无删除路径（作废代替删除）
     assert "cleanup" not in store_src.lower()  # 无清理机制
     web_src = (REPO_ROOT / "web" / "app.py").read_text(encoding="utf-8")
     assert "scheduler" not in web_src.lower() and "cron" not in web_src.lower()  # 无定时清理

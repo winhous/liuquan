@@ -58,11 +58,14 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "task_id", "event_type", "from_status", "to_status",
         "actor", "note", "detail", "created_at",  # detail: v0.3 迁移 0003（§4.2）
     },
+    "task_step": {
+        "id", "task_id", "content", "status", "sort_order", "created_at",  # 复核反馈 #6 迁移 0005
+    },
 }
 
 # 每表 CHECK 约束总数（task = 5 内联 + 2 具名；proposal = 4 内联；event = 1 具名 chk_event_type，
 # 0003 由 9 值内联扩 12 值并具名——数量仍为 1）
-EXPECTED_CHECK_COUNTS = {"task": 7, "task_proposal": 4, "task_event": 1}
+EXPECTED_CHECK_COUNTS = {"task": 7, "task_proposal": 4, "task_event": 1, "task_step": 2}
 EXPECTED_NAMED_CHECKS = {
     "chk_blocked_reason",
     "chk_result_note",
@@ -73,6 +76,7 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "task": {"idx_task_status_due", "idx_task_role", "task_pkey"},
     "task_proposal": {"idx_proposal_status", "task_proposal_pkey"},
     "task_event": {"idx_event_task", "task_event_pkey"},
+    "task_step": {"idx_task_step_task", "task_step_pkey"},
 }
 
 EXPECTED_JSONB_COLUMNS = {
@@ -140,7 +144,7 @@ async def test_migration_creates_three_tm_tables(tm_engine) -> None:
     actual: dict[str, set[str]] = {}
     for table, column in rows:
         actual.setdefault(table, set()).add(column)
-    assert set(actual) == {"task", "task_proposal", "task_event"}
+    assert set(actual) == {"task", "task_proposal", "task_event", "task_step"}  # task_step: 复核反馈 #6 迁移 0005
     for table, cols in EXPECTED_COLUMNS.items():
         assert actual[table] == cols, f"{table} 列集合与详设 §3/ORM 不一致"
 
@@ -227,10 +231,11 @@ async def test_migration_foreign_keys(tm_engine) -> None:
         )
         rows = res.fetchall()
     defs = {tbl.split(".")[-1]: d for tbl, d in rows}
-    assert set(defs) == {"task", "task_proposal", "task_event"}
+    assert set(defs) == {"task", "task_proposal", "task_event", "task_step"}  # task_step: 复核反馈 #6
     assert "REFERENCES tm.task(id)" in defs["task"]  # derived_from 自引用
     assert "REFERENCES tm.task(id)" in defs["task_proposal"]  # task_id
     assert "REFERENCES tm.task(id) ON DELETE CASCADE" in defs["task_event"]
+    assert "REFERENCES tm.task(id) ON DELETE CASCADE" in defs["task_step"]
 
 
 # ---- 冒烟：插入 / 读取 / 派生 / 级联 ----

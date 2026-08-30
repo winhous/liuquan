@@ -192,3 +192,34 @@ class TaskEvent(TmBase):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class TaskStep(TmBase):
+    """tm.task_step：任务步骤（复核反馈 #6：任务分解清单，父任务完成依赖）。
+
+    轻量子项：content + status(open/done 勾选)；无独立负责人/截止；
+    父任务有未完成步骤时不能 done（应用层 transition 拦截）。
+    """
+
+    __tablename__ = "task_step"
+    __table_args__ = (
+        CheckConstraint("length(content) BETWEEN 1 AND 200", name="chk_step_content"),
+        CheckConstraint("status IN ('open','done')", name="chk_step_status"),
+        Index("idx_task_step_task", "task_id", "sort_order"),
+        {"schema": "tm"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tm.task.id", ondelete="CASCADE"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'open'")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

@@ -195,6 +195,14 @@
                     <i class="ti ti-corner-up-right me-1"></i>由 {{ t.derived_from_label }}「{{ t.parent_title or '父任务' }}」派生
                   </a>
                   {% endif %}
+                  {% if t.step_total > 0 %}
+                  <!-- 步骤徽章（复核反馈 #6：任务分解 N/M，可点开管理） -->
+                  <button type="button" class="btn btn-sm btn-outline-secondary px-1 py-0" data-bs-toggle="modal" data-bs-target="#modal-steps"
+                    data-steps-modal data-task-id="{{ t.id }}"
+                    title="管理步骤（步骤完成之后才能结束任务）">
+                    <i class="ti ti-checkbox me-1"></i>{{ t.step_done }}/{{ t.step_total }} 步骤
+                  </button>
+                  {% endif %}
                   {% if t.child_count > 0 %}
                   <!-- 子任务数徽章（父子关联反向可见：本任务是 N 个子任务的父） -->
                   <span class="badge bg-info-subtle text-info" title="本任务已派生 {{ t.child_count }} 个子任务（派生不结束原任务）">
@@ -424,7 +432,11 @@
       </div>
       <div class="modal-body">
         <input type="hidden" name="parent_id" id="derive-parent-id">
-        <div class="alert alert-light py-2 small">派生是"关联"不是"完成"：原任务不自动结束，要结束照常人工回复（决策 17）。</div>
+        <div class="alert alert-light py-2 small">从当前任务快速新建相关任务（复核反馈 #6 弱化：关联可选——默认不挂父子依赖，需要追溯可勾选下方选项）。</div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="link_parent" id="derive-link-parent" value="1">
+          <label class="form-check-label" for="derive-link-parent">关联原任务（派生子任务，父任务显示子任务数；派生不结束原任务）</label>
+        </div>
         <div class="mb-3">
           <label class="form-label">标题<span class="text-danger">*</span></label>
           <input type="text" name="title" class="form-control" required maxlength="80">
@@ -524,6 +536,75 @@
     </form>
   </div>
 </div>
+<!-- 步骤管理 modal（复核反馈 #6：分解清单 + 完成依赖） -->
+<div class="modal fade" id="modal-steps" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">任务步骤（步骤完成之后才能结束任务）</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="steps-list" class="mb-3"></div>
+        <div class="d-flex gap-2">
+          <input id="step-input" class="form-control form-control-sm" placeholder="添加步骤，回车确认…" maxlength="200">
+          <button class="btn btn-sm btn-primary" id="step-add">添加</button>
+        </div>
+        <div id="steps-msg" class="mt-2 small text-muted"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 任务「下一步」modal（决策 27/28：AI 建议 + 改派/忽略 + 自然语言入口） -->
+<div class="modal fade" id="modal-next" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">任务下一步</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="next-suggestion" class="alert alert-info d-none">
+          <strong>AI 建议：</strong><span id="next-suggestion-text"></span>
+          <div class="mt-2">
+            <button class="btn btn-sm btn-success" id="next-accept">同意建议</button>
+            <button class="btn btn-sm btn-outline-secondary" id="next-ignore">忽略建议</button>
+          </div>
+        </div>
+        <hr>
+        <div class="row g-2 mb-2">
+          <div class="col-4">
+            <label class="form-label">改派角色</label>
+            <select id="next-role" class="form-select form-select-sm">
+              <option value="">（不改）</option>
+              <option value="运营">运营</option>
+              <option value="采购">采购</option>
+              <option value="管理员">管理员</option>
+            </select>
+          </div>
+          <div class="col-5">
+            <label class="form-label">标签（逗号分隔）</label>
+            <input id="next-tags" class="form-control form-control-sm" placeholder="如 采购,售后">
+          </div>
+          <div class="col-3 d-flex align-items-end">
+            <button class="btn btn-sm btn-outline-primary w-100" id="next-apply">应用</button>
+          </div>
+        </div>
+        <hr>
+        <div class="mb-2">
+          <label class="form-label">用一句话指挥 AI（自然语言入口，决策 28）</label>
+          <div class="d-flex gap-2">
+            <input id="next-instruction" class="form-control form-control-sm" placeholder="如「流转到 ERP 库存」「交给采购」「挂起等物料」">
+            <button class="btn btn-sm btn-primary" id="next-intent">解析</button>
+          </div>
+          <div id="next-intent-result" class="mt-2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -628,6 +709,53 @@
 
 <script>
 (function () {
+  console.log("SECOND_SCRIPT_RUNNING");
+  let stepsTaskId = null;
+  const stepsModal = document.getElementById("modal-steps");
+  if (stepsModal) {
+    document.querySelectorAll("[data-steps-modal]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        stepsTaskId = btn.dataset.taskId;
+        loadSteps();
+      });
+    });
+    function loadSteps() {
+      fetch("/tasks/" + stepsTaskId + "/steps").then(r => r.json()).then(d => {
+        const box = document.getElementById("steps-list");
+        if (!d.ok || !d.steps.length) {
+          box.innerHTML = '<div class="text-muted small">暂无步骤——添加步骤后，全部完成才能结束任务。</div>';
+          return;
+        }
+        box.innerHTML = d.steps.map(st =>
+          '<div class="d-flex align-items-center gap-2 border-bottom py-1">' +
+          '<input type="checkbox" class="form-check-input" ' + (st.status === "done" ? "checked " : "") +
+          'onchange="toggleStep(' + st.id + ', this)">' +
+          '<span class="flex-grow-1 ' + (st.status === "done" ? "text-decoration-line-through text-muted" : "") + '">' + st.content + "</span>" +
+          '<button class="btn btn-sm btn-link text-danger p-0" onclick="deleteStep(' + st.id + ')">删</button></div>'
+        ).join("");
+      });
+    }
+    document.getElementById("step-add").addEventListener("click", addStep);
+    document.getElementById("step-input").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addStep(); } });
+    function addStep() {
+      const inp = document.getElementById("step-input");
+      const content = inp.value.trim();
+      if (!content) return;
+      fetch("/tasks/" + stepsTaskId + "/steps", {method: "POST", body: new URLSearchParams({content: content})})
+        .then(r => r.json()).then(d => {
+          inp.value = "";
+          loadSteps();
+        });
+    }
+    window.toggleStep = function (id, el) {
+      fetch("/tasks/" + stepsTaskId + "/steps/" + id + "/toggle", {method: "POST"}).then(() => loadSteps());
+    };
+    window.deleteStep = function (id) {
+      if (!confirm("删除这个步骤？")) return;
+      fetch("/tasks/" + stepsTaskId + "/steps/" + id + "/delete", {method: "POST"}).then(() => loadSteps());
+    };
+  }
+
   let nextTaskId = null;
   let nextSuggestion = null;
   let nextIntentId = null;
@@ -726,54 +854,5 @@
   });
 })();
 </script>
-
-<!-- 任务「下一步」modal（决策 27/28：AI 建议 + 改派/忽略 + 自然语言入口） -->
-<div class="modal fade" id="modal-next" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">任务下一步</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="next-suggestion" class="alert alert-info d-none">
-          <strong>AI 建议：</strong><span id="next-suggestion-text"></span>
-          <div class="mt-2">
-            <button class="btn btn-sm btn-success" id="next-accept">同意建议</button>
-            <button class="btn btn-sm btn-outline-secondary" id="next-ignore">忽略建议</button>
-          </div>
-        </div>
-        <hr>
-        <div class="row g-2 mb-2">
-          <div class="col-4">
-            <label class="form-label">改派角色</label>
-            <select id="next-role" class="form-select form-select-sm">
-              <option value="">（不改）</option>
-              <option value="运营">运营</option>
-              <option value="采购">采购</option>
-              <option value="管理员">管理员</option>
-            </select>
-          </div>
-          <div class="col-5">
-            <label class="form-label">标签（逗号分隔）</label>
-            <input id="next-tags" class="form-control form-control-sm" placeholder="如 采购,售后">
-          </div>
-          <div class="col-3 d-flex align-items-end">
-            <button class="btn btn-sm btn-outline-primary w-100" id="next-apply">应用</button>
-          </div>
-        </div>
-        <hr>
-        <div class="mb-2">
-          <label class="form-label">用一句话指挥 AI（自然语言入口，决策 28）</label>
-          <div class="d-flex gap-2">
-            <input id="next-instruction" class="form-control form-control-sm" placeholder="如「流转到 ERP 库存」「交给采购」「挂起等物料」">
-            <button class="btn btn-sm btn-primary" id="next-intent">解析</button>
-          </div>
-          <div id="next-intent-result" class="mt-2"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 {% endblock %}
