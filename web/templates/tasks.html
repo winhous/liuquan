@@ -176,7 +176,8 @@
           {% endif %}
         </form>
       </div>
-      <div class="table-responsive">
+      <!-- 复核反馈 #1/#4：任务清单固定高度 + 滚动条（基准 ≈ 9 条任务行高度） -->
+      <div class="table-responsive" style="max-height:620px;overflow-y:auto;">
         <table class="table table-vcenter card-table">
           <thead>
             <tr><th>任务</th><th>状态</th><th>负责人</th><th>截止</th><th>来源</th><th class="text-end">操作</th></tr>
@@ -218,7 +219,7 @@
                   <form method="post" action="/tasks/status" class="d-inline">
                     <input type="hidden" name="task_id" value="{{ t.id }}">
                     <input type="hidden" name="action" value="started">
-                    <button type="submit" class="btn btn-outline-primary">开始</button>
+                    <button type="submit" class="btn btn-sm btn-outline-primary">开始</button>
                   </form>
                   {% elif t.status == 'in_progress' %}
                   <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modal-status" data-status-modal="completed" data-task-id="{{ t.id }}">完成</button>
@@ -227,12 +228,12 @@
                   <form method="post" action="/tasks/status" class="d-inline">
                     <input type="hidden" name="task_id" value="{{ t.id }}">
                     <input type="hidden" name="action" value="unblocked">
-                    <button type="submit" class="btn btn-outline-success">解除阻塞</button>
+                    <button type="submit" class="btn btn-sm btn-outline-success">解除阻塞</button>
                   </form>
                   {% elif t.status in ('done', 'void') %}
                   <form method="post" action="/tasks/reopen" class="d-inline">
                     <input type="hidden" name="task_id" value="{{ t.id }}">
-                    <button type="submit" class="btn btn-warning">重开</button>
+                    <button type="submit" class="btn btn-sm btn-warning">重开</button>
                   </form>
                   {% endif %}
                   {% if t.status in ('open', 'in_progress', 'blocked') %}
@@ -241,9 +242,11 @@
                   {% if t.status in ('open', 'in_progress', 'blocked') %}
                   <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#modal-derive" data-derive-modal data-task-id="{{ t.id }}" data-domain="{{ t.domain }}">派生</button>
                   {% endif %}
+                  {% if t.status not in ('done', 'void') %}
                   <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modal-edit"
                     data-edit-modal data-task-id="{{ t.id }}" data-title="{{ t.title }}" data-role="{{ t.role }}"
                     data-due="{{ t.due_label }}" data-domain="{{ t.domain }}" data-detail="{{ t.detail }}">编辑</button>
+                  {% endif %}
                   {% if t.status in ('open', 'in_progress', 'blocked') %}
                   <button type="button" class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modal-next"
                     data-next-modal data-task-id="{{ t.id }}"
@@ -621,6 +624,7 @@
     poll();
   }
 })();
+</script>
 
 <script>
 (function () {
@@ -721,8 +725,6 @@
     });
   });
 })();
-</script>
-
 </script>
 
 <!-- 任务「下一步」modal（决策 27/28：AI 建议 + 改派/忽略 + 自然语言入口） -->
