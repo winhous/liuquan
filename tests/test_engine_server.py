@@ -514,8 +514,10 @@ async def test_consumer_loop_no_transfer_for_non_proposal_chain(
 async def test_consumer_loop_real_transfer_lands_proposal(
     monkeypatch: pytest.MonkeyPatch,
     db_engine,
+    tm_engine,
     registry,
     model_registry,
+    _clean_tm_tables,
 ) -> None:
     """端到端：链 DONE -> 真转交器（CONSUMERS 缺省）经写接口落 tm.task_proposal。
 

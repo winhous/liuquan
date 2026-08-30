@@ -545,6 +545,101 @@ class TMStore:
             prop.reject_reason = (reason or "").strip() or None
 
 
+    # ---- 任务「下一步」区（决策 27/28：AI 建议 + 人同意/改派/忽略 + 流转留痕）----
+
+    async def next_action(
+        self,
+        task_id: int,
+        *,
+        action: str,
+        target_role: str | None = None,
+        tags: list[str] | None = None,
+        note: str | None = None,
+        actor: str = "运营",
+    ) -> Task:
+        """执行「下一步」动作（v0.3 可执行：assign 改派角色 / tag 改标签 / note 记备注 /
+        block 挂起 / ignore 忽略建议）；流转留痕 transferred 事件（决策 27）。
+
+        - assign：task.role = target_role（三角色）
+        - tag：task.tags = tags（覆盖）
+        - note：task.detail 追加备注 + transferred 事件 note
+        - block：状态转 blocked（等物料/等回复，必填 blocked_reason 取 note）
+        - ignore：清 ai_suggestion（建议被忽略，不落 transferred）
+        transfer 到未接入域（erp/seo）由路由层提示不可执行并记录意图（决策 28）。
+        """
+        async with AsyncSession(self._engine) as session, session.begin():
+            task = await session.get(Task, task_id)
+            if task is None:
+                raise TMWebError("任务不存在")
+            # SQLAlchemy ORM 非 pydantic：快照关键字段（updated 事件 from/to 同款思路）
+            prev = {
+                "status": task.status,
+                "role": task.role,
+                "tags": list(task.tags or []),
+                "detail": task.detail,
+            }
+            if action == "assign":
+                if target_role not in ("运营", "采购", "管理员"):
+                    raise TMWebError(f"非法角色：{target_role!r}")
+                task.role = target_role
+            elif action == "tag":
+                task.tags = [t for t in (tags or []) if t.strip()][:20]
+            elif action == "note":
+                addition = f"\n[下一步备注] {note}".strip() if note else ""
+                task.detail = (task.detail or "") + addition
+            elif action == "block":
+                reason = (note or "等物料").strip()
+                if reason not in ("等物料", "等回复"):
+                    raise TMWebError("blocked_reason 只能填 等物料 / 等回复")
+                task.status = "blocked"
+                task.blocked_reason = reason
+            elif action == "ignore":
+                task.ai_suggestion = None
+            else:
+                raise TMWebError(f"非法下一步动作：{action!r}")
+            if action != "ignore":
+                # 流转留痕（决策 27）：transferred 事件，detail 带 action/target
+                session.add(
+                    TaskEvent(
+                        task_id=task.id,
+                        event_type="transferred",
+                        actor=actor,
+                        note=f"下一步：{action}"
+                        + (f" -> {target_role}" if target_role else ""),
+                        detail={
+                            "action": action,
+                            "target_role": target_role,
+                            "tags": tags,
+                            "note": note,
+                            "prev": prev,
+                        },
+                    )
+                )
+                if action == "assign":
+                    task.ai_suggestion = None  # 执行建议后清空
+            else:
+                task.ai_suggestion = None
+            await session.flush()
+            return task
+
+    async def record_disagreement(
+        self, task_id: int, *, ai_suggestion: dict, human_chose: str, actor: str = "运营"
+    ) -> None:
+        """分歧留痕（决策 27）：人选择与 AI 建议不同 -> disagreed 事件。"""
+        async with AsyncSession(self._engine) as session, session.begin():
+            task = await session.get(Task, task_id)
+            if task is None:
+                raise TMWebError("任务不存在")
+            session.add(
+                TaskEvent(
+                    task_id=task.id,
+                    event_type="disagreed",
+                    actor=actor,
+                    note=f"人选择：{human_chose}",
+                    detail={"ai_suggestion": ai_suggestion, "human_chose": human_chose},
+                )
+            )
+
 __all__ = [
     "BLOCKED_REASONS",
     "ROLE_VALUES",

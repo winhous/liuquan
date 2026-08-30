@@ -165,6 +165,8 @@ def _task_view(t: Task, *, parent_title: str | None = None, child_count: int = 0
         "source_type": t.source_type,
         "source": t.source or {},
         "created_by": t.created_by,
+        "tags": list(t.tags or []),              # v0.3 决策 25：标签展示
+        "ai_suggestion": t.ai_suggestion,        # v0.3 决策 27：AI 下一步建议
     }
 
 
@@ -749,6 +751,79 @@ def create_app(
         except CrmWebError as exc:
             return JSONResponse({"ok": False, "error": str(exc)})
         return JSONResponse({"ok": True})
+
+
+    # ---- 任务「下一步」区（决策 27/28：AI 建议 + 人决定 + 自然语言入口）----
+
+    @app.post("/tasks/{task_id}/next")
+    async def task_next(request: Request, task_id: int):
+        form = await request.form()
+        action = str(form.get("action", ""))
+        try:
+            await request.app.state.tm_store.next_action(
+                task_id,
+                action=action,
+                target_role=str(form.get("target_role", "")),
+                tags=[t.strip() for t in str(form.get("tags", "")).split(",") if t.strip()],
+                note=str(form.get("note", "")),
+                actor=ROLE_LABEL.get(request.cookies.get("role", "ops"), "运营"),
+            )
+        except TMWebError as exc:
+            return RedirectResponse(f"/tasks?err={urlencode({'msg': str(exc)})}", status_code=303)
+        return RedirectResponse("/tasks", status_code=303)
+
+    @app.post("/tasks/{task_id}/next-intent")
+    async def task_next_intent(request: Request, task_id: int):
+        """自然语言入口（决策 28）：触发 tm_intent_chain -> 返回 engine_task_id。"""
+        form = await request.form()
+        instruction = str(form.get("instruction", "")).strip()
+        if not instruction:
+            return JSONResponse({"ok": False, "error": "指令不能为空"})
+        try:
+            async with _engine_client(request) as client:
+                resp = await client.create_task(
+                    "tm_intent_chain",
+                    {"task_id": task_id, "instruction": instruction},
+                    trigger_ref=request.cookies.get("role", "运营"),
+                )
+        except EngineAPIError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+        return JSONResponse({"ok": True, "engine_task_id": resp["task_id"]})
+
+    @app.post("/tasks/{task_id}/next-confirm")
+    async def task_next_confirm(request: Request, task_id: int):
+        """确认解析后的流转指令并执行（决策 28：人确认后才执行；模糊不猜测）。"""
+        form = await request.form()
+        action = str(form.get("action", ""))
+        clarity = str(form.get("clarity", "clear"))
+        if clarity != "clear":
+            return RedirectResponse("/tasks?err=" + urlencode({"msg": "指令不明确，请重新描述"}), status_code=303)
+        target_domain = str(form.get("target_domain", ""))
+        if action == "transfer":
+            # 决策 28：目标域未接入（erp/seo）明确提示不可执行并记录意图
+            if target_domain in ("erp", "seo"):
+                await request.app.state.tm_store.record_disagreement(
+                    task_id,
+                    ai_suggestion={},
+                    human_chose=f"transfer -> {target_domain}（未接入域）",
+                    actor=ROLE_LABEL.get(request.cookies.get("role", "ops"), "运营"),
+                )
+                return RedirectResponse(
+                    "/tasks?err=" + urlencode({"msg": f"流转到 {target_domain} 域 v0.6/v0.5 才接入，暂不可执行（意图已记录）"}),
+                    status_code=303,
+                )
+        try:
+            await request.app.state.tm_store.next_action(
+                task_id,
+                action=action,
+                target_role=str(form.get("target_role", "")),
+                tags=[t.strip() for t in str(form.get("tags", "")).split(",") if t.strip()],
+                note=str(form.get("note", "")),
+                actor=ROLE_LABEL.get(request.cookies.get("role", "ops"), "运营"),
+            )
+        except TMWebError as exc:
+            return RedirectResponse(f"/tasks?err={urlencode({'msg': str(exc)})}", status_code=303)
+        return RedirectResponse("/tasks", status_code=303)
 
     return app
 
