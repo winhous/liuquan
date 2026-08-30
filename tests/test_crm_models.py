@@ -61,7 +61,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "todo_candidate": {
         "id", "customer_id", "content", "reason", "suggested_tags",
-        "evidence", "status", "engine_task_id", "confirmed_task_id",
+        "evidence", "suggested_next", "status", "engine_task_id", "confirmed_task_id",
         "created_at", "confirmed_at", "dismissed_at",
     },
 }

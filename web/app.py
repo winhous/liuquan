@@ -33,7 +33,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from models.tm import Task, TaskProposal
+from web.crm_store import CRMStore, CrmWebError
 from web.engineapi.client import EngineAPIError, EngineAPIClient
+from web.feishu import send_task_card
 from web.tm_store import (
     ROLE_VALUES,
     TMStore,
@@ -228,6 +230,7 @@ def _engine_client(request: Request) -> EngineAPIClient:
 def create_app(
     *,
     tm_store: TMStore | None = None,
+    crm_store: CRMStore | None = None,
     engine_client_factory: Callable[[], EngineAPIClient] | None = None,
 ) -> FastAPI:
     """建 web 应用；依赖可注入（R12：测试注入嵌入式 PG store + MockTransport 引擎桩）。"""
@@ -236,13 +239,17 @@ def create_app(
     async def _lifespan(app_: FastAPI):
         if app_.state.tm_store is None:
             app_.state.tm_store = TMStore.from_env()  # 生产：.env 连接串
+        if app_.state.crm_store is None:
+            app_.state.crm_store = CRMStore.from_env()
         yield
         await app_.state.tm_store.dispose()
+        await app_.state.crm_store.dispose()
 
     app = FastAPI(title="刘全 · 综合智能运营系统（v0.2）", lifespan=_lifespan)
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
     templates = Jinja2Templates(directory=BASE / "templates")
     app.state.tm_store = tm_store
+    app.state.crm_store = crm_store
     app.state.engine_client_factory = engine_client_factory or (lambda: EngineAPIClient())
 
     # ---- 业务读写接口（v0.3 决策 26 接口化：引擎经 /api/biz/* 读写业务数据，不直连业务库）----
@@ -520,6 +527,228 @@ def create_app(
             return JSONResponse({"status": "error", "detail": str(exc)})
         terminal = data.get("status") in ("done", "failed", "error")
         return JSONResponse({**data, "terminal": terminal})
+
+
+    # ---- CRM（v0.3，决策 19/22/23/24；活档案 + 异步链）----
+
+    @app.get("/crm")
+    async def crm_index(request: Request, q: str = "", status: str = "", page: str = "1"):
+        if request.cookies.get("role") not in ROLE_LABEL:
+            return RedirectResponse("/login", status_code=303)
+        try:
+            page_no = max(1, int(page))
+        except ValueError:
+            page_no = 1
+        rows, total = await request.app.state.crm_store.list_customers(
+            q=q, status=status, page=page_no
+        )
+        return templates.TemplateResponse(
+            request,
+            "crm/index.html",
+            {
+                "q": q,
+                "status": status,
+                "rows": rows,
+                "total": total,
+                "page": page_no,
+                "status_filters": [
+                    ("", "进行中"), ("waiting_reply", "待回复"), ("replied", "已回复"),
+                    ("closed_deal", "已成交"), ("on_hold", "搁置"), ("archived", "归档"),
+                    ("all", "全部"),
+                ],
+            },
+        )
+
+    @app.get("/crm/customers/check-name")
+    async def crm_check_name(request: Request, q: str = "", nickname: str = ""):
+        keyword = (q or nickname).strip()
+        if not keyword:
+            return JSONResponse({"matches": []})
+        matches = await request.app.state.crm_store.find_same_name(keyword)
+        return JSONResponse({"matches": matches})
+
+    @app.post("/crm/customers")
+    async def crm_create(request: Request):
+        form = await request.form()
+        try:
+            await request.app.state.crm_store.create_customer(
+                nickname=str(form.get("nickname", "")),
+                source_shop=str(form.get("source_shop", "")),
+                remark=str(form.get("remark", "")),
+                force=str(form.get("force", "")) == "1",
+            )
+        except CrmWebError as exc:
+            return RedirectResponse(f"/crm?error={urlencode({'msg': str(exc)})}", status_code=303)
+        return RedirectResponse("/crm", status_code=303)
+
+    @app.post("/crm/{customer_id}/delete")
+    async def crm_delete(request: Request, customer_id: int):
+        try:
+            await request.app.state.crm_store.delete_customer(customer_id)
+        except CrmWebError:
+            pass
+        return RedirectResponse("/crm", status_code=303)
+
+    @app.get("/crm/{customer_id}")
+    async def crm_detail(request: Request, customer_id: int, engine_task_id: str = ""):
+        if request.cookies.get("role") not in ROLE_LABEL:
+            return RedirectResponse("/login", status_code=303)
+        data = await request.app.state.crm_store.detail(customer_id)
+        if data is None:
+            return RedirectResponse("/crm", status_code=303)
+        return templates.TemplateResponse(
+            request, "crm/detail.html", {**data, "engine_task_id": engine_task_id}
+        )
+
+    @app.post("/crm/{customer_id}/messages")
+    async def crm_paste_messages(request: Request, customer_id: int):
+        form = await request.form()
+        conversation = str(form.get("conversation_text", ""))
+        if not conversation.strip():
+            return RedirectResponse(f"/crm/{customer_id}?error={urlencode({'msg': '请先粘贴对话原文'})}", status_code=303)
+        try:
+            async with _engine_client(request) as client:
+                resp = await client.create_task(
+                    "crm_chat_chain",
+                    {"customer_id": customer_id, "conversation_text": conversation},
+                    trigger_ref=request.cookies.get("role", "运营"),
+                )
+            engine_task_id = resp["task_id"]
+        except EngineAPIError as exc:
+            return RedirectResponse(
+                f"/crm/{customer_id}?error={urlencode({'msg': f'引擎触发失败: {exc}'})}",
+                status_code=303,
+            )
+        # 异步：返回任务 id，页面 JS 轮询 -> 终态后调 apply 落库
+        return RedirectResponse(f"/crm/{customer_id}?engine_task_id={engine_task_id}", status_code=303)
+
+    @app.post("/crm/{customer_id}/apply")
+    async def crm_apply_chain(request: Request, customer_id: int, engine_task_id: str = ""):
+        """轮询终态后落库：从引擎任务结果取译文/快照落 crm.message/snapshot。"""
+        if not engine_task_id:
+            return JSONResponse({"ok": False, "error": "缺 engine_task_id"})
+        try:
+            async with _engine_client(request) as client:
+                data = await client.get_task(engine_task_id)
+        except EngineAPIError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+        if data.get("status") != "done":
+            return JSONResponse({"ok": False, "status": data.get("status")})
+        output = data.get("output") or {}
+        await request.app.state.crm_store.apply_chain_result(customer_id, output)
+        return JSONResponse({"ok": True})
+
+    @app.post("/crm/{customer_id}/reply")
+    async def crm_reply(request: Request, customer_id: int):
+        form = await request.form()
+        mode = str(form.get("mode", "auto")) or "auto"
+        points = str(form.get("points", ""))
+        full_text = str(form.get("full_text", ""))
+        try:
+            async with _engine_client(request) as client:
+                resp = await client.create_task(
+                    "crm_reply_chain",
+                    {"customer_id": customer_id, "mode": mode, "points": points, "full_text": full_text},
+                    trigger_ref=request.cookies.get("role", "运营"),
+                )
+        except EngineAPIError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+        return JSONResponse({"ok": True, "engine_task_id": resp["task_id"]})
+
+    @app.post("/crm/{customer_id}/reply/send")
+    async def crm_reply_send(request: Request, customer_id: int):
+        form = await request.form()
+        try:
+            await request.app.state.crm_store.reply_send(
+                customer_id,
+                str(form.get("reply_en", "")),
+                str(form.get("reply_zh", "")),
+            )
+        except CrmWebError as exc:
+            return RedirectResponse(f"/crm/{customer_id}?error={urlencode({'msg': str(exc)})}", status_code=303)
+        return RedirectResponse(f"/crm/{customer_id}", status_code=303)
+
+    @app.post("/crm/{customer_id}/messages/{message_id}/delete")
+    async def crm_message_delete(request: Request, customer_id: int, message_id: int):
+        async with request.app.state.crm_store._engine.begin() as conn:
+            from sqlalchemy import text as _t
+
+            await conn.execute(
+                _t("DELETE FROM crm.message WHERE id = :mid AND customer_id = :cid"),
+                {"mid": message_id, "cid": customer_id},
+            )
+        return RedirectResponse(f"/crm/{customer_id}", status_code=303)
+
+    @app.post("/crm/{customer_id}/todos/confirm")
+    async def crm_todos_confirm(request: Request, customer_id: int):
+        form = await request.form()
+        ids = [
+            int(v) for v in form.getlist("candidate_ids") if str(v).isdigit()
+        ]
+        try:
+            role_key = request.cookies.get("role", "ops")
+            actor = ROLE_LABEL.get(role_key, "运营")  # cookie ASCII 键 -> 中文标签（CHECK 值域）
+            created = await request.app.state.crm_store.confirm_candidates(
+                customer_id, ids, actor=actor
+            )
+        except CrmWebError as exc:
+            return RedirectResponse(f"/crm/{customer_id}?error={urlencode({'msg': str(exc)})}", status_code=303)
+        # 决策 21：确认生成任务 -> 飞书卡片（失败静默不阻塞）
+        if created:
+            data = await request.app.state.crm_store.detail(customer_id)
+            for task_id in created:
+                task_view = next((t for t in (data or {}).get("tasks", []) if t["id"] == task_id), None)
+                if task_view:
+                    await send_task_card({**task_view, "customer": (data or {}).get("customer", {}).get("nickname", "")})
+        return RedirectResponse(f"/crm/{customer_id}", status_code=303)
+
+    @app.post("/crm/{customer_id}/todos/dismiss")
+    async def crm_todos_dismiss(request: Request, customer_id: int):
+        form = await request.form()
+        ids = [int(v) for v in form.getlist("candidate_ids") if str(v).isdigit()]
+        await request.app.state.crm_store.dismiss_candidates(customer_id, ids)
+        return RedirectResponse(f"/crm/{customer_id}", status_code=303)
+
+    # ---- 翻译工具（决策 23：对话翻译子页 = 单纯翻译，可选归入客户）----
+
+    @app.get("/translate")
+    async def translate_page(request: Request):
+        if request.cookies.get("role") not in ROLE_LABEL:
+            return RedirectResponse("/login", status_code=303)
+        return templates.TemplateResponse(request, "translate.html", {"result": None})
+
+    @app.post("/translate")
+    async def translate_run(request: Request):
+        form = await request.form()
+        text = str(form.get("text", ""))
+        source_lang = str(form.get("source_lang", "en")) or "en"
+        target_lang = str(form.get("target_lang", "zh")) or "zh"
+        try:
+            async with _engine_client(request) as client:
+                resp = await client.create_task(
+                    "crm_translate_chain",
+                    {"text": text, "source_lang": source_lang, "target_lang": target_lang},
+                    trigger_ref=request.cookies.get("role", "运营"),
+                )
+        except EngineAPIError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+        # 异步轮询：返回 engine_task_id，JS 查终态展示译文
+        return JSONResponse({"ok": True, "engine_task_id": resp["task_id"]})
+
+    @app.post("/translate/archive")
+    async def translate_archive(request: Request):
+        form = await request.form()
+        try:
+            await request.app.state.crm_store.archive_translation(
+                customer_id=int(str(form.get("customer_id", "0"))),
+                source_text=str(form.get("source_text", "")),
+                translated_text=str(form.get("translated_text", "")),
+                direction=str(form.get("direction", "buyer")),
+                language=str(form.get("language", "")),
+            )
+        except CrmWebError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+        return JSONResponse({"ok": True})
 
     return app
 

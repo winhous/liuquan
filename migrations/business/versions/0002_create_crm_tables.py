@@ -196,6 +196,7 @@ def upgrade() -> None:
             server_default=sa.text("'[]'"),
         ),
         sa.Column("evidence", sa.dialects.postgresql.JSONB(), nullable=False),
+        sa.Column("suggested_next", sa.dialects.postgresql.JSONB(), nullable=True),  # 决策 27：确认时写入 tm.task.ai_suggestion
         sa.Column(
             "status",
             sa.Text(),

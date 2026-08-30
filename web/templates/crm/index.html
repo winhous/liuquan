@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}CRM 客户 · 刘全{% endblock %}
+{% block content_title %}CRM 客户{% endblock %}
+{% block content %}
+
+{% if error %}
+<div class="alert alert-danger alert-dismissible" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ error }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">客户列表（共 {{ total }}）</h3>
+        <div class="ms-auto">
+          <form method="get" action="/crm" class="d-flex gap-2">
+            <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="搜索昵称/聊天/快照">
+            <button class="btn btn-sm btn-outline-primary">搜索</button>
+          </form>
+        </div>
+      </div>
+      <div class="card-body">
+        <ul class="nav nav-pills mb-3 flex-nowrap overflow-auto">
+          {% for value, label in status_filters %}
+          <li class="nav-item">
+            <a class="nav-link {{ 'active' if status == value else '' }}" href="/crm?status={{ value }}&q={{ q }}">{{ label }}</a>
+          </li>
+          {% endfor %}
+        </ul>
+        <div class="table-responsive">
+          <table class="table table-vcenter">
+            <thead><tr><th>客户</th><th>来源</th><th>状态</th><th>跟进</th><th>最新摘要</th><th></th></tr></thead>
+            <tbody>
+              {% for row in rows %}
+              <tr>
+                <td><a href="/crm/{{ row.id }}" class="fw-semibold text-body">{{ row.nickname }}</a></td>
+                <td>{{ row.source_shop or "—" }}</td>
+                <td><span class="badge bg-secondary-lt">{{ row.status_label }}</span></td>
+                <td>
+                  {% if row.overdue %}<span class="text-danger">⚠ {{ row.days_since }} 天无动静</span>
+                  {% elif row.days_since is not none %}{{ row.days_since }} 天前{% else %}尚无操作{% endif %}
+                </td>
+                <td class="text-muted small text-truncate" style="max-width:220px">{{ row.latest_summary }}</td>
+                <td>
+                  <form method="post" action="/crm/{{ row.id }}/delete" onsubmit="return confirm('删除客户将级联清除其对话/快照/任务，不可恢复。确认删除？')">
+                    <button class="btn btn-sm btn-outline-danger">删除</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6" class="text-center text-muted py-4">暂无客户——新建客户后在此粘贴对话开始跟进</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">新建客户</h3></div>
+      <div class="card-body">
+        <form method="post" action="/crm/customers">
+          <div class="mb-2">
+            <label class="form-label">昵称 <span class="text-danger">*</span></label>
+            <input name="nickname" class="form-control" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">来源店铺</label>
+            <input name="source_shop" class="form-control">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">备注</label>
+            <textarea name="remark" class="form-control" rows="2"></textarea>
+          </div>
+          <button class="btn btn-primary w-100">新建</button>
+        </form>
+      </div>
+    </div>
+    <div class="card mt-3">
+      <div class="card-body text-muted small">
+        <i class="ti ti-info-circle me-1"></i>
+        粘贴历史对话与正常对话同一入口（客户详情页）——AI 自动翻译、滚动更新快照、
+        提炼待办候选，确认后变成任务进任务中心（标来源 CRM）。
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

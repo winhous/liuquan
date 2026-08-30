@@ -213,6 +213,9 @@ class TodoCandidate(TmBase):
         JSONB, nullable=False, server_default=text("'[]'")
     )  # AI 建议标签 list[str]（决策 25，确认时写入 tm.task.tags）
     evidence: Mapped[list] = mapped_column(JSONB, nullable=False)  # EvidenceRef[]（type/ref_id/quote，决策 16）
+    suggested_next: Mapped[dict | None] = mapped_column(
+        JSONB
+    )  # AI 对任务生成后的下一步建议（决策 27 闭环：确认时写入 tm.task.ai_suggestion）
     status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'pending'")
     )

@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}{{ customer.nickname }} · CRM · 刘全{% endblock %}
+{% block content_title %}客户：{{ customer.nickname }}{% endblock %}
+{% block content %}
+
+{% if error %}
+<div class="alert alert-danger alert-dismissible" role="alert"><i class="ti ti-alert-triangle me-1"></i>{{ error }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+{% endif %}
+
+<div class="row g-3">
+  <!-- 快照通栏 -->
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">客户快照</h3>
+        <div class="ms-auto text-muted small">
+          <span class="badge bg-secondary-lt me-2">{{ customer.status_label }}</span>
+          {{ customer.stage_label }}
+          {% if customer.overdue %}<span class="text-danger ms-2">⚠ {{ customer.days_since }} 天无动静</span>{% endif %}
+        </div>
+      </div>
+      <div class="card-body">
+        {% if snapshot %}
+        <div class="row">
+          <div class="col-md-4"><strong>当前需求</strong><div class="text-muted">{{ snapshot.current_need or "—" }}</div></div>
+          <div class="col-md-4"><strong>情绪/意向</strong><div class="text-muted">{{ snapshot.sentiment or "—" }}</div></div>
+          <div class="col-md-4"><strong>最新动态</strong><div class="text-muted">{{ snapshot.summary or "—" }}</div></div>
+        </div>
+        {% if snapshot.need_history %}
+        <div class="mt-2"><strong>需求变更史</strong>
+          <ul class="mb-0">
+            {% for h in snapshot.need_history %}<li class="small text-muted">{{ h }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="text-muted">尚无快照——粘贴一段对话后 AI 自动生成。</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 收件粘贴 + 回复台 -->
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">粘贴对话（历史记录同一入口）</h3></div>
+      <div class="card-body">
+        <form method="post" action="/crm/{{ customer.id }}/messages">
+          <textarea name="conversation_text" class="form-control mb-2" rows="6" placeholder="粘贴买家对话原文（英文/多语种）…"></textarea>
+          <button class="btn btn-primary w-100">翻译并归档</button>
+        </form>
+        <div id="paste-progress" class="mt-2 small text-muted"></div>
+      </div>
+      <div class="card-footer">
+        <h5 class="mb-2">回复台</h5>
+        <form method="post" action="/crm/{{ customer.id }}/reply">
+          <select name="mode" class="form-select form-select-sm mb-2">
+            <option value="auto">auto：AI 看上下文自拟</option>
+            <option value="points">points：按要点组织</option>
+            <option value="literal">literal：中文全文直译</option>
+          </select>
+          <textarea name="points" class="form-control form-control-sm mb-2" rows="2" placeholder="points 模式：回复要点（一行一条）"></textarea>
+          <textarea name="full_text" class="form-control form-control-sm mb-2" rows="2" placeholder="literal 模式：中文回复全文"></textarea>
+          <button class="btn btn-sm btn-outline-primary w-100">生成回复</button>
+        </form>
+        <div id="reply-result" class="mt-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 时间线 -->
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">对话时间线（{{ messages|length }} 条）</h3></div>
+      <div class="card-body" style="max-height:420px;overflow:auto">
+        {% for m in messages %}
+        <div class="d-flex gap-2 mb-2">
+          <span class="badge {{ 'bg-blue-lt' if m.direction == 'buyer' else 'bg-green-lt' }}">{{ m.direction_label }}</span>
+          <div class="flex-grow-1">
+            <div>{{ m.source_text }}</div>
+            {% if m.translated_text %}<div class="text-muted small">{{ m.translated_text }}</div>{% endif %}
+          </div>
+          <form method="post" action="/crm/{{ customer.id }}/messages/{{ m.id }}/delete" onsubmit="return confirm('删除这条消息？')">
+            <button class="btn btn-sm btn-link text-muted">删</button>
+          </form>
+        </div>
+        {% else %}
+        <div class="text-muted text-center py-3">暂无对话——粘贴历史对话后开始。</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card mt-3">
+      <div class="card-header"><h3 class="card-title">AI 待办候选（确认 = 人工审核 → 任务进任务中心）</h3></div>
+      <div class="card-body">
+        {% if candidates %}
+        <form method="post" action="/crm/{{ customer.id }}/todos/confirm">
+          {% for c in candidates %}
+          <div class="border rounded p-2 mb-2">
+            <label class="form-check">
+              <input class="form-check-input" type="checkbox" name="candidate_ids" value="{{ c.id }}">
+              <span class="form-check-label fw-semibold">{{ c.content }}</span>
+              {% for t in c.suggested_tags %}<span class="badge bg-orange-lt ms-1">{{ t }}</span>{% endfor %}
+            </label>
+            {% if c.reason %}<div class="small text-muted ms-4">{{ c.reason }}</div>{% endif %}
+            <div class="small ms-4">
+              {% for ev in c.evidence %}
+              <span class="badge bg-secondary-lt me-1">依据 {{ ev.kind }} #{{ ev.ref_id }}{% if ev.quote %}：{{ ev.quote }}{% endif %}</span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary btn-sm">确认生成任务</button>
+            <button class="btn btn-outline-secondary btn-sm" formaction="/crm/{{ customer.id }}/todos/dismiss">忽略所选</button>
+          </div>
+        </form>
+        {% else %}
+        <div class="text-muted">粘贴对话后 AI 自动提炼待办候选（带对话依据，无依据候选不可确认）。</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card mt-3">
+      <div class="card-header"><h3 class="card-title">本客户任务（domain=crm，任务只按来源系统区分）</h3></div>
+      <div class="card-body">
+        {% for t in tasks %}
+        <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+          <div>
+            <span class="fw-semibold">{{ t.title }}</span>
+            {% for tag in t.tags %}<span class="badge bg-cyan-lt ms-1">{{ tag }}</span>{% endfor %}
+            {% if t.ai_suggestion %}
+            <div class="small text-muted">AI 建议：{{ t.ai_suggestion.note or t.ai_suggestion.action }}</div>
+            {% endif %}
+          </div>
+          <div class="text-end small">
+            <span class="badge bg-secondary-lt">{{ t.status }}</span>
+            <div class="text-muted">{{ t.role }} · 截止 {{ t.due }}</div>
+          </div>
+        </div>
+        {% else %}
+        <div class="text-muted">暂无任务——确认待办候选后任务出现在任务中心（标来源 CRM）。</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // 粘贴对话异步轮询：提交后页面带 engine_task_id -> 轮询引擎 -> 终态后 apply 落库 -> 刷新
+  const params = new URLSearchParams(location.search);
+  const engineTaskId = params.get("engine_task_id");
+  if (engineTaskId) {
+    const box = document.getElementById("paste-progress");
+    box.textContent = "正在处理对话（翻译 + 快照 + 待办提炼）…";
+    const poll = () => {
+      fetch("/tasks/engine/" + engineTaskId).then(r => r.json()).then(data => {
+        if (data.status === "done") {
+          fetch("/crm/{{ customer.id }}/apply?engine_task_id=" + engineTaskId,
+            {method: "POST"}).then(() => location.href = "/crm/{{ customer.id }}");
+        } else if (data.status === "failed" || data.status === "error") {
+          box.textContent = "处理失败：" + (data.error || data.detail || data.status);
+        } else {
+          box.textContent = "处理中（" + data.status + "）…";
+          setTimeout(poll, 1500);
+        }
+      });
+    };
+    setTimeout(poll, 800);
+  }
+
+  // 回复台异步：POST -> engine_task_id -> 轮询 -> 展示双栏
+  const replyForm = document.querySelector('#reply-result') && document.querySelector('form[action="/crm/{{ customer.id }}/reply"]');
+  if (replyForm) {
+    replyForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const box = document.getElementById("reply-result");
+      box.innerHTML = "生成中…";
+      const fd = new FormData(replyForm);
+      fetch(replyForm.action, {method: "POST", body: fd}).then(r => r.json()).then(data => {
+        if (!data.ok) { box.textContent = "失败：" + data.error; return; }
+        const poll = () => {
+          fetch("/tasks/engine/" + data.engine_task_id).then(r => r.json()).then(d => {
+            if (d.status === "done") {
+              const out = d.output || {};
+              box.innerHTML =
+                '<div class="border rounded p-2"><div class="fw-semibold">英文回复</div><div>' + (out.reply_en || "") + "</div>" +
+                '<div class="fw-semibold mt-2">中文回述</div><div class="text-muted">' + (out.reply_zh || "") + "</div>" +
+                '<form method="post" action="/crm/{{ customer.id }}/reply/send" class="mt-2">' +
+                '<input type="hidden" name="reply_en" value="' + (out.reply_en || "").replace(/"/g, "&quot;") + '">' +
+                '<input type="hidden" name="reply_zh" value="' + (out.reply_zh || "").replace(/"/g, "&quot;") + '">' +
+                '<button class="btn btn-sm btn-success">已发送，归档</button></form></div>';
+            } else if (d.status === "failed" || d.status === "error") {
+              box.textContent = "生成失败：" + (d.error || d.status);
+            } else { setTimeout(poll, 1500); }
+          });
+        };
+        setTimeout(poll, 800);
+      });
+    });
+  }
+})();
+</script>
+{% endblock %}

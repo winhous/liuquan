@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}对话翻译 · 刘全{% endblock %}
+{% block content_title %}对话翻译（单纯翻译工具）{% endblock %}
+{% block content %}
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">翻译任意文本</h3></div>
+      <div class="card-body">
+        <form method="post" action="/translate" id="translate-form">
+          <textarea name="text" class="form-control mb-2" rows="6" required placeholder="粘贴任意文本（产品描述/邮件/对话片段…）"></textarea>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label">源语言</label>
+              <select name="source_lang" class="form-select">
+                <option value="en">英语 en</option>
+                <option value="auto">自动识别</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label">目标语言</label>
+              <select name="target_lang" class="form-select">
+                <option value="zh">中文 zh</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary w-100">翻译</button>
+        </form>
+        <div id="status" class="mt-2 small text-muted"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">译文（可复制）</h3></div>
+      <div class="card-body">
+        <div id="translated" class="text-muted">译文将显示在这里——翻译不进客户档案；需要存档时点「归入某客户」。</div>
+        <div id="archive-box" class="mt-3 d-none"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById("translate-form");
+  if (!form) return;
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const status = document.getElementById("status");
+    const translated = document.getElementById("translated");
+    const archive = document.getElementById("archive-box");
+    archive.classList.add("d-none");
+    status.textContent = "翻译中…";
+    const fd = new FormData(form);
+    fetch("/translate", {method: "POST", body: fd}).then(r => r.json()).then(data => {
+      if (!data.ok) { status.textContent = "失败：" + data.error; return; }
+      const poll = () => {
+        fetch("/tasks/engine/" + data.engine_task_id).then(r => r.json()).then(d => {
+          if (d.status === "done") {
+            const out = d.output || {};
+            translated.textContent = out.translated || "（无译文）";
+            translated.classList.remove("text-muted");
+            status.textContent = "";
+            // 归入某客户（决策 23 可选）
+            archive.innerHTML =
+              '<form method="post" action="/translate/archive" id="archive-form">' +
+              '<input type="hidden" name="source_text" value="' + (form.text.value).replace(/"/g, "&quot;") + '">' +
+              '<input type="hidden" name="translated_text" value="' + (out.translated || "").replace(/"/g, "&quot;") + '">' +
+              '<div class="d-flex gap-2 align-items-end">' +
+              '<div class="flex-grow-1"><label class="form-label">归入某客户（可选）</label>' +
+              '<input name="customer_id" class="form-control" type="number" placeholder="客户 id" required></div>' +
+              '<button class="btn btn-sm btn-outline-primary">归入客户</button></div></form>';
+            archive.classList.remove("d-none");
+            document.getElementById("archive-form").addEventListener("submit", (ev) => {
+              ev.preventDefault();
+              const afd = new FormData(ev.target);
+              fetch("/translate/archive", {method: "POST", body: afd}).then(r => r.json()).then(a => {
+                status.textContent = a.ok ? "已归入客户档案。" : "归入失败：" + a.error;
+              });
+            });
+          } else if (d.status === "failed" || d.status === "error") {
+            status.textContent = "翻译失败：" + (d.error || d.status);
+          } else { setTimeout(poll, 1200); }
+        });
+      };
+      setTimeout(poll, 800);
+    });
+  });
+})();
+</script>
+{% endblock %}
