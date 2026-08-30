@@ -667,7 +667,7 @@ def test_collect_ref_ids_recursive() -> None:
     }
     assert _collect_ref_ids(data) == {"m-001", "o-2", "m-003"}
     assert _collect_ref_ids({"nested": {"x": {"id": "deep-9"}}}) == {"deep-9"}
-    assert _collect_ref_ids({"count": 3, "nested": {"id": 7}}) == set()  # 非字符串不收集
+    assert _collect_ref_ids({"count": 3, "nested": {"id": 7}}) == {"7"}  # v0.3：int id 统一转 str（MessageBrief.id 白名单）
 
 
 def test_extract_proposal_judges_keys() -> None:

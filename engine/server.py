@@ -143,13 +143,28 @@ def _collect_ref_ids(value: Any, out: set[str] | None = None) -> set[str]:
         out = set()
     if isinstance(value, dict):
         for key, item in value.items():
-            if key in _REF_ID_KEYS and isinstance(item, str):
-                out.add(item)
+            # v0.3：provider 返回 id 为 int（MessageBrief.id），统一转 str 收集
+            # （evidence ref_id 是 str；白名单与引用必须同形态，决策 16③）
+            if key in _REF_ID_KEYS and item is not None:
+                out.add(str(item))
             _collect_ref_ids(item, out)
     elif isinstance(value, list):
         for item in value:
             _collect_ref_ids(item, out)
     return out
+
+
+def _extract_candidate(output: dict[str, Any] | None) -> dict[str, Any] | None:
+    """从链末步 output 提取 TodoCandidateResult（详设-v0.3 §5.4：候选消费者）。
+
+    判据：dict 含 "todos" 列表 -> 候选产出（crm.candidate 消费者处理）；
+    缺键/类型错返回 None（宁失败不假成功）。
+    """
+    if not isinstance(output, dict):
+        return None
+    if not isinstance(output.get("todos"), list):
+        return None
+    return output
 
 
 def _extract_proposal(output: dict[str, Any] | None) -> TaskProposal | None:
@@ -231,7 +246,8 @@ class TaskDetailResponse(BaseModel):
     status: str
     current_step: int
     error: str | None
-    output: dict[str, Any] | None  # 终态后：链产物（含 TaskProposal）
+    output: dict[str, Any] | None
+    steps_output: list[dict[str, Any]] = [],  # 终态后：链产物（含 TaskProposal）
     finished_at: datetime | None
     audits: list[AuditSummaryItem]
 
@@ -401,10 +417,20 @@ class QueueConsumer:
         if task is None:
             return
         step = await _db.get_last_step(self._engine, result.task_id)
-        proposal = _extract_proposal(step.output if step is not None else None)
+        step_output = step.output if step is not None else None
+        # v0.3：链末步产出两种——TaskProposal（tm.proposal 转交器）或
+        # TodoCandidateResult（crm.candidate 候选消费者，决策 19/26）
+        proposal = _extract_proposal(step_output)
+        candidate = None
         if proposal is None:
-            return  # 非 suggest 链（无提案产物），无转交
-        consumer = self._consumers.get(proposal.action_id)
+            candidate = _extract_candidate(step_output)
+            if candidate is None:
+                return  # 非 suggest 链（无提案/候选产物），无转交
+        consumer = (
+            self._consumers.get(proposal.action_id)
+            if proposal is not None
+            else self._consumers.get("crm.candidate")
+        )
         if consumer is None:
             return
         # v0.3 白名单正式化（决策 16③）：本链喂给 AI 的数据集合 = provider 返回
@@ -413,7 +439,8 @@ class QueueConsumer:
         whitelist = await self._context_whitelist(result.task_id)
         if not whitelist:
             whitelist = _collect_ref_ids(task.input)
-        lookup = await self._audit_lookup_for(proposal.source.audit_ids)
+        audit_ids = proposal.source.audit_ids if proposal is not None else []
+        lookup = await self._audit_lookup_for(audit_ids)
         kwargs: dict[str, Any] = {
             "registry": self._registry,
             "whitelist": whitelist,
@@ -421,14 +448,14 @@ class QueueConsumer:
         }
         if self._biz_client is not None:
             kwargs["biz_client"] = self._biz_client
-        # crm.candidate：source（customer_id/chain_id/engine_task_id/worker_id/
-        # audit_ids）由链上下文构造注入（TodoCandidateResult 无 source 字段，
-        # 技术定——详设-v0.3 §5.4）
-        if proposal.action_id == "crm.candidate":
-            source = await self._candidate_source(result.task_id, task)
-            kwargs["source"] = source
+        if candidate is not None:
+            # crm.candidate：source 由链上下文构造注入（TodoCandidateResult 无
+            # source 字段，技术定——详设-v0.3 §5.4）
+            kwargs["source"] = await self._candidate_source(result.task_id, task)
         try:
-            outcome = await consumer(proposal, **kwargs)
+            outcome = await consumer(
+                proposal if proposal is not None else candidate, **kwargs
+            )
         except Exception as exc:
             await _db.update_task(
                 self._engine,
@@ -587,6 +614,11 @@ def _register_routes(app: FastAPI, engine: AsyncEngine, registry: Registry) -> N
             current_step=row.current_step,
             error=row.error,
             output=step.output if step is not None else None,
+            # v0.3：链各步骤输出（译文/快照在中间步骤，web apply 落库用）
+            steps_output=[
+                {"worker_id": s.worker_id, "output": s.output}
+                for s in await _db.list_steps(engine, row.id)
+            ],
             finished_at=row.finished_at,
             audits=[_audit_item(a) for a in audits],
         )

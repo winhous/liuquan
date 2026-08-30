@@ -93,8 +93,11 @@ async def test_crm_context_404_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_missing_config_raises() -> None:
-    """base_url/token 缺省从 .env 读；测试环境未配置 -> BizReadError（fail-closed）。"""
+async def test_provider_missing_config_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """base_url/token 缺省从 .env 读；未配置 -> BizReadError（fail-closed）。"""
+    import engine.providers as providers_mod
+
+    monkeypatch.setattr(providers_mod, "dotenv_values", lambda path: {})
     provider = CrmChatContextHTTP(base_url="", token="")
     with pytest.raises(BizReadError):
         await provider(ChatContextParams(customer_id=1))

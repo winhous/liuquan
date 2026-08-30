@@ -437,6 +437,24 @@ async def get_step(engine: AsyncEngine, step_id: int) -> StepRow | None:
         return _step_row(step) if step is not None else None
 
 
+async def list_steps(engine: AsyncEngine, task_id: int) -> list[StepRow]:
+    """任务全部步骤（v0.3：GET /api/engine/tasks/{id} 的 steps_output，供 web 取
+    链各步骤输出——译文/快照在中间步骤，apply 落库需要）。"""
+    async with AsyncSession(engine) as session:
+        rows = (
+            (
+                await session.execute(
+                    select(EngineStep)
+                    .where(EngineStep.task_id == task_id)
+                    .order_by(EngineStep.step_index.asc(), EngineStep.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [_step_row(r) for r in rows]
+
+
 async def get_last_step(engine: AsyncEngine, task_id: int) -> StepRow | None:
     """取该任务最后一条工序实例（链产物定位：末步 output = 链产物，v0.2 T5）。
 

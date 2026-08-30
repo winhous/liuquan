@@ -131,12 +131,52 @@ def test_todo_generate_keeps_evidence_items() -> None:
     assert result.todos[0].suggested_next is not None
 
 
-def test_todo_generate_all_unfounded_rejected() -> None:
+def test_todo_generate_all_unfounded_empty_array() -> None:
+    """无消息可引用时全无依据 -> 空候选数组（合法产出，不产假建议，决策 16）。"""
     run = _load("crm", "todo_generate").run
     out = TodoCandidateResult(todos=[TodoCandidateItem(content="无依据", reason="x")])
     inputs = TodoGenerateInput(snapshot=CustomerSnapshotResult(summary="s"), customer_id=1)
-    with pytest.raises(ValueError):
-        run(inputs, _ctx(inputs, out))
+    ctx = _ctx(inputs, out)
+    ctx = EngineContext(
+        worker_id="todo_generate", domain="crm", inputs=inputs,
+        config={}, context_data={"crm_chat_context": _FakeChatContext(no_messages=True)},
+        llm_output=out,
+    )
+    result = run(inputs, ctx)
+    assert result.todos == []
+
+
+class _FakeChatContext:
+    """最小 ChatContextData 形状（测试用；含/不含消息两种）。"""
+
+    def __init__(self, no_messages: bool = False) -> None:
+        self.messages = [] if no_messages else [_FakeChatContext._FakeMsg(1, "buyer", "hi")]
+
+    class _FakeMsg:
+        def __init__(self, id, direction, source_text) -> None:
+            self.id = id
+            self.direction = direction
+            self.source_text = source_text
+
+
+def test_todo_generate_fallback_evidence_from_recent_message() -> None:
+    """缺 evidence 的候选由代码补引用最近买家消息（技术定：白名单内机器可追溯）。"""
+    run = _load("crm", "todo_generate").run
+    out = TodoCandidateResult(
+        todos=[
+            TodoCandidateItem(content="准备批发价目表", reason="卖家答应明天发", suggested_tags=["报价"])
+        ]
+    )
+    inputs = TodoGenerateInput(snapshot=CustomerSnapshotResult(summary="s"), customer_id=1)
+    ctx = EngineContext(
+        worker_id="todo_generate", domain="crm", inputs=inputs,
+        config={}, context_data={"crm_chat_context": _FakeChatContext()},
+        llm_output=out,
+    )
+    result = run(inputs, ctx)
+    assert len(result.todos) == 1
+    assert result.todos[0].evidence[0].ref_id == "1"
+    assert result.todos[0].evidence[0].kind == "message"
 
 
 # ==== customer_reply_draft ====

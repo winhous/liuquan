@@ -56,4 +56,10 @@ class BizApiClient:
             raise BizApiError(f"业务写接口网络异常：{exc.__class__.__name__}: {exc}") from exc
 
 
+def _env_value(name: str) -> str | None:
+    """读仓库根 .env（P2 规则 4 合法来源，不触碰 os.environ）。"""
+    value = (dotenv_values(_DOTENV_PATH) or {}).get(name)
+    return value or None
+
+
 __all__ = ["BizApiClient", "BizApiError"]

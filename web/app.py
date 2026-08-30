@@ -636,8 +636,16 @@ def create_app(
             return JSONResponse({"ok": False, "error": str(exc)})
         if data.get("status") != "done":
             return JSONResponse({"ok": False, "status": data.get("status")})
-        output = data.get("output") or {}
-        await request.app.state.crm_store.apply_chain_result(customer_id, output)
+        # v0.3：链各步骤输出——translations 在 chat_translate、snapshot 在
+        # snapshot_update（中间步骤）；合并传给落库
+        merged: dict[str, Any] = {}
+        for step in data.get("steps_output") or []:
+            step_out = step.get("output") or {}
+            if "translations" in step_out:
+                merged["translations"] = step_out["translations"]
+            if "current_need" in step_out or "summary" in step_out:
+                merged["snapshot"] = step_out
+        await request.app.state.crm_store.apply_chain_result(customer_id, merged)
         return JSONResponse({"ok": True})
 
     @app.post("/crm/{customer_id}/reply")
