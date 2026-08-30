@@ -1,0 +1,9 @@
+# tm_intent_chain 链声明（详设-v0.3 §5.3）
+# 流转自然语言入口单工序链：tm_intent（解析指令为结构化流转指令，决策 28）。
+id: tm_intent_chain
+domain: tm
+description: 流转自然语言入口链：tm_intent 意图解析（决策 28）
+input:
+  model: IntentInput
+steps:
+  - worker: tm_intent

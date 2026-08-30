@@ -12,3 +12,5 @@
 
 demo.greeting: tests.fake_providers:FakeDemoGreeting
 demo.inbox:    tests.fake_providers:FakeDemoInbox
+crm.chat_context: tests.fake_providers:FakeCrmChatContext
+tm.task_context:  tests.fake_providers:FakeTmTaskContext

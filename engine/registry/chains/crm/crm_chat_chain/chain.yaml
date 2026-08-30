@@ -1,0 +1,21 @@
+# crm_chat_chain 链声明（详设-v0.3 §5.3）
+# 粘贴对话主链：chat_translate（逐条翻译）-> snapshot_update（滚动快照）->
+# todo_generate（待办候选）。
+# 注意：snapshot_update/todo_generate 的工序输入需显式透传 customer_id
+# （context params 引用 input.customer_id；链入参 ChatTranscriptInput 含
+# customer_id，task.input.customer_id 可解析）。
+id: crm_chat_chain
+domain: crm
+description: 粘贴对话主链：翻译 -> 滚动快照 -> 待办候选（决策 19/23）
+input:
+  model: ChatTranscriptInput
+steps:
+  - worker: chat_translate
+  - worker: snapshot_update
+    input:
+      translations: steps[0].output.translations
+      customer_id: task.input.customer_id
+  - worker: todo_generate
+    input:
+      snapshot: steps[1].output
+      customer_id: task.input.customer_id

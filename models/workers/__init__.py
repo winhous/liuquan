@@ -152,9 +152,11 @@ class ChatTranscriptResult(BaseModel):
 
 
 class SnapshotUpdateInput(BaseModel):
-    """snapshot_update 工序入参：新译文（旧快照 + recent_messages 走 provider）。"""
+    """snapshot_update 工序入参：新译文 + customer_id（供 crm_chat_context provider
+    params 引用——详设-v0.3 §5.1 技术定：工序 input 必须带业务对象 id）。"""
 
     translations: list[TranslationItem]
+    customer_id: int
 
 
 class CustomerSnapshotResult(BaseModel):
@@ -168,9 +170,11 @@ class CustomerSnapshotResult(BaseModel):
 
 
 class TodoGenerateInput(BaseModel):
-    """todo_generate 工序入参：当前滚动快照（recent_messages/existing_open_todos 走 provider）。"""
+    """todo_generate 工序入参：当前滚动快照 + customer_id（供 crm_chat_context
+    provider params 引用——详设-v0.3 §5.1 技术定：工序 input 必须带业务对象 id）。"""
 
     snapshot: CustomerSnapshotResult
+    customer_id: int
 
 
 class SuggestedNext(BaseModel):

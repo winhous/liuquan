@@ -1,0 +1,22 @@
+# todo_generate 工序声明（详设-v0.3 §5.1；决策 19/22/25/27）
+# 待办候选提炼：content/reason/suggested_tags/suggested_next/evidence（证据引用
+# 上文消息 id，数据引用封闭性决策 16③）；跟进候选并入本工序（决策 22）。
+id: todo_generate
+domain: crm
+version: 1
+risk: suggest
+description: 待办候选提炼（带依据 evidence、建议标签、任务生成后的下一步建议）
+input:
+  model: TodoGenerateInput
+output:
+  model: TodoCandidateResult
+model: default
+retry:
+  max_attempts: 2
+  timeout_s: 30
+context:
+  - id: crm_chat_context
+    params:
+      customer_id: input.customer_id
+prompt: prompt.md
+config_dir: config/

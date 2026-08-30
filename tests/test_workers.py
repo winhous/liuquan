@@ -223,9 +223,25 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
     assert validate(REPO_ROOT) == []
     registry = load_registry(REPO_ROOT)
 
-    assert set(registry.workers) == {"demo_echo", "crm_translate", "demo_propose"}
-    assert set(registry.chains) == {"demo_echo_chain", "crm_translate_chain", "tm_demo_chain"}
-    assert set(registry.context_providers) == {"demo_greeting"}
+    assert set(registry.workers) == {
+        "demo_echo",
+        "crm_translate",
+        "demo_propose",
+        "chat_translate",
+        "snapshot_update",
+        "todo_generate",
+        "customer_reply_draft",
+        "tm_intent",
+    }
+    assert set(registry.chains) == {
+        "demo_echo_chain",
+        "crm_translate_chain",
+        "tm_demo_chain",
+        "crm_chat_chain",
+        "crm_reply_chain",
+        "tm_intent_chain",
+    }
+    assert set(registry.context_providers) == {"demo_greeting", "crm_chat_context", "tm_task_context"}
     assert set(registry.events) == {"demo.echo_done"}
     assert set(registry.actions) == {"demo_echo_record", "tm.proposal"}
 

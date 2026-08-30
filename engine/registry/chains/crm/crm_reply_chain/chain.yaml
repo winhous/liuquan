@@ -1,0 +1,9 @@
+# crm_reply_chain 链声明（详设-v0.3 §5.3）
+# 回复台单工序链：customer_reply_draft（auto/points/literal 三模式）。
+id: crm_reply_chain
+domain: crm
+description: 回复台草稿链：customer_reply_draft 三模式（决策 23）
+input:
+  model: ReplyDraftInput
+steps:
+  - worker: customer_reply_draft

@@ -123,12 +123,17 @@ def test_fixture_samples_load_with_type_validation() -> None:
 
 
 def test_fake_providers_yaml_registers_demo_domain() -> None:
-    """fake_providers.yaml 注册 demo 域两 provider；inbox 数据集合 = 白名单来源。"""
+    """fake_providers.yaml 注册 demo 域两 provider + v0.3 crm/tm 两 provider；
+    inbox 数据集合 = 白名单来源（demo 域语义不变）。"""
     providers = load_providers()
-    assert set(providers) == {"demo.greeting", "demo.inbox"}
-    assert whitelist_from(providers) == FakeDemoInbox().whitelist()
-    assert "msg-001" in whitelist_from(providers)  # 集合内对象 id
-    assert "msg-999" not in whitelist_from(providers)  # 集合外（样本 B 构造）
+    assert set(providers) == {
+        "demo.greeting", "demo.inbox", "crm.chat_context", "tm.task_context",
+    }
+    whitelist = whitelist_from(providers)
+    assert set(FakeDemoInbox().whitelist()) <= whitelist
+    assert "msg-001" in whitelist  # 集合内对象 id
+    assert "msg-999" not in whitelist  # 集合外（样本 B 构造）
+    assert "1" in whitelist  # FakeCrmChatContext 消息 id（v0.3）
 
 
 # ==== 禁幻觉三件套反向（详设 §7.5 样本 A/B/C/D，A21 落点）====

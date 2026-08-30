@@ -1,0 +1,21 @@
+# snapshot_update 工序声明（详设-v0.3 §5.1）
+# 滚动快照：旧快照（crm_chat_context.snapshot）+ 新译文（input.translations）-> 新快照，
+# need_history 只增不减（需求变更史）。
+id: snapshot_update
+domain: crm
+version: 1
+risk: read
+description: 滚动快照更新（旧快照 + 新译文 -> 新快照，need_history 只增不减）
+input:
+  model: SnapshotUpdateInput
+output:
+  model: CustomerSnapshotResult
+model: default
+retry:
+  max_attempts: 2
+  timeout_s: 30
+context:
+  - id: crm_chat_context
+    params:
+      customer_id: input.customer_id
+prompt: prompt.md

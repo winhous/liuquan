@@ -1,0 +1,22 @@
+# customer_reply_draft 工序声明（详设-v0.3 §5.1；决策 23 回复台）
+# 三模式回复草稿：auto（AI 自拟）/ points（按要点组织）/ literal（逐句直译，
+# reply_zh 原样回传卖家全文不经模型——run.py 代码路径）。
+id: customer_reply_draft
+domain: crm
+version: 1
+risk: read
+description: 客户回复草稿（auto/points/literal 三模式，中英双栏）
+input:
+  model: ReplyDraftInput
+output:
+  model: ReplyDraftResult
+model: default
+retry:
+  max_attempts: 2
+  timeout_s: 30
+context:
+  - id: crm_chat_context
+    params:
+      customer_id: input.customer_id
+prompt: prompt.md
+config_dir: config/

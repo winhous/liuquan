@@ -23,13 +23,25 @@ from typing import Any
 import yaml
 from pydantic import BaseModel
 
-from models.workers import DemoGreeting
+from models.workers import (
+    ChatContextData,
+    ChatContextParams,
+    CustomerBrief,
+    DemoGreeting,
+    EventBrief,
+    MessageBrief,
+    SnapshotBrief,
+    TaskContextData,
+    TaskContextParams,
+)
 
 __all__ = [
     "DemoInboxData",
     "DemoInboxObject",
+    "FakeCrmChatContext",
     "FakeDemoGreeting",
     "FakeDemoInbox",
+    "FakeTmTaskContext",
     "load_providers",
     "whitelist_from",
 ]
@@ -116,3 +128,60 @@ def whitelist_from(providers: dict[str, Any]) -> set[str]:
         if hasattr(impl, "whitelist"):
             whitelist |= set(impl.whitelist())
     return whitelist
+
+class FakeCrmChatContext:
+    """crm.chat_context 测试桩：返回固定客户上下文（消息 id 1/2 + 快照 id 3）。
+
+    白名单（决策 16③）来源 = 返回数据 id 集合：{customer.id=1, *messages[].id,
+    snapshot.id}。测试用 whitelist_from 取集合做 evidence ref_id 校验。
+    """
+
+    async def __call__(self, params: ChatContextParams) -> ChatContextData:
+        """可调用（runner._pull_context: await impl(params)）。"""
+        return ChatContextData(
+            customer=CustomerBrief(id=1, nickname="Mia", latest_summary="想要定制花束"),
+            messages=[
+                MessageBrief(
+                    id=1,
+                    source_text="Hi! I love your flowers",
+                    translated_text="你好！我很喜欢你的花",
+                    direction="buyer",
+                ),
+                MessageBrief(
+                    id=2,
+                    source_text="Can you make it smaller?",
+                    translated_text="能做小一点吗？",
+                    direction="buyer",
+                ),
+            ],
+            snapshot=SnapshotBrief(
+                id=3,
+                current_need="定制小花束",
+                need_history=["首次联系：询问定制"],
+                sentiment="积极",
+                todos=[],
+                summary="买家想定制",
+            ),
+            existing_open_todos=["确认花材组合及婚礼日期"],
+        )
+
+    def whitelist(self) -> list[str]:
+        return ["1", "2", "3", "1"]  # 消息 1/2 + 快照 3 + 客户 1
+
+
+class FakeTmTaskContext:
+    """tm.task_context 测试桩：返回固定任务上下文（白名单 = {task_id=9}）。"""
+
+    async def __call__(self, params: TaskContextParams) -> TaskContextData:
+        """可调用（runner._pull_context: await impl(params)）。"""
+        return TaskContextData(
+            task_id=9,
+            title="处理退货",
+            domain="crm",
+            status="open",
+            tags=["售后"],
+            recent_events=[EventBrief(event_type="created", note="任务创建")],
+        )
+
+    def whitelist(self) -> list[str]:
+        return ["9"]

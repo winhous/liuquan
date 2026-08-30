@@ -1,0 +1,14 @@
+# crm 域 Context provider 登记（详设-v0.3 §5.2；v0.1 机制正式启用）
+# 白名单正式化（决策 16③）：crm_chat_context 返回数据 id 集合 =
+# {customer.id, *messages[].id, snapshot.id}——todo_generate 候选 evidence 的
+# ref_id 必须命中此集合（机器校验在消费者层）。
+# provider 实现标识（provider 字段）crm.chat_context = 引擎侧 HTTP 实现
+# （engine/providers/，调 web /api/biz/crm/context/{id} 读接口，决策 26）。
+- id: crm_chat_context
+  domain: crm
+  description: crm 客户上下文（customer/messages/snapshot/existing_open_todos；白名单来源）
+  params:
+    model: ChatContextParams
+  returns:
+    model: ChatContextData
+  provider: crm.chat_context

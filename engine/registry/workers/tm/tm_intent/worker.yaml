@@ -1,0 +1,22 @@
+# tm_intent 工序声明（详设-v0.3 §5.1；决策 28 流转自然语言入口）
+# 把用户自然语言指令解析为结构化流转指令（action/target/clarity）；任务上下文
+# 走 tm_task_context provider；模糊时 clarity=unclear + candidates 澄清选项。
+id: tm_intent
+domain: tm
+version: 1
+risk: suggest
+description: 流转自然语言入口：解析指令为结构化流转指令（模糊澄清不猜测）
+input:
+  model: IntentInput
+output:
+  model: IntentResult
+model: default
+retry:
+  max_attempts: 2
+  timeout_s: 30
+context:
+  - id: tm_task_context
+    params:
+      task_id: input.task_id
+prompt: prompt.md
+config_dir: config/

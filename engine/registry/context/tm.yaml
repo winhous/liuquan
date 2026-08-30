@@ -1,0 +1,12 @@
+# tm 域 Context provider 登记（详设-v0.3 §5.2）
+# tm_task_context：任务上下文（task/tags/recent_events）供 tm_intent 意图解析；
+# 白名单 = {task_id}。实现标识 tm.task_context = 引擎侧 HTTP 实现
+# （engine/providers/，调 web /api/biz/tm/task-context/{id} 读接口，决策 26）。
+- id: tm_task_context
+  domain: tm
+  description: tm 任务上下文（task/tags/recent_events；tm_intent 数据来源）
+  params:
+    model: TaskContextParams
+  returns:
+    model: TaskContextData
+  provider: tm.task_context

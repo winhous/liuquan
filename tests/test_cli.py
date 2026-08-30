@@ -84,11 +84,15 @@ class TestRegistryCheck:
         assert rc == 0
         assert "[L4]" not in out
         assert "0 违规" in out
-        # 清单随声明：工序 demo_echo/crm_translate/demo_propose、链 ×3、
-        # provider/事件 各 1、Action demo_echo_record/tm.proposal（v0.2 T4）
-        for label in ("工序 3", "链 3", "Context provider 1", "事件 1", "Action 2"):
+        # 清单随声明：v0.3 T4 后工序 8（含 chat_translate/snapshot_update/todo_generate/
+        # customer_reply_draft/tm_intent）、链 6（含 crm_chat_chain/crm_reply_chain/
+        # tm_intent_chain）、provider 3（含 crm_chat_context/tm_task_context）、
+        # 事件 1、Action 2（demo_echo_record/tm.proposal；crm.candidate 待 T5）
+        for label in ("工序 8", "链 6", "Context provider 3", "事件 1", "Action 2"):
             assert label in out, f"清单应包含 {label}"
         assert "demo_echo" in out and "crm_translate" in out and "demo_propose" in out
+        assert "chat_translate" in out and "tm_intent" in out
+        assert "crm_chat_chain" in out and "tm_intent_chain" in out
         assert "tm_demo_chain" in out and "tm.proposal" in out
 
     def test_missing_models_yaml_rejected(

@@ -61,8 +61,10 @@ DOMAIN_PERMISSIONS: dict[Domain, DomainPermission] = {
     Domain.SCRAPE: DomainPermission("scrape.", "scrape schema", Risk.WRITE),
 }
 
-# v0.1 实际启用 demo/crm 两行（详设 §5.2 原文），其余域行已定义未启用
-ENABLED_DOMAINS: frozenset[Domain] = frozenset({Domain.DEMO, Domain.CRM})
+# v0.1 实际启用 demo/crm 两行（详设 §5.2 原文）；v0.3 增启用 tm——
+# tm_intent 工序（流转自然语言入口，决策 28）与 tm_task_context provider 属 tm 域，
+# 需要 tm 域放行（详设-v0.3 §5.1；tm 域风险上限 suggest，无真实业务写）。
+ENABLED_DOMAINS: frozenset[Domain] = frozenset({Domain.DEMO, Domain.CRM, Domain.TM})
 
 # 风险序：read < suggest < write（transaction 恒拒，不进序表）
 _RISK_LEVEL: dict[Risk, int] = {

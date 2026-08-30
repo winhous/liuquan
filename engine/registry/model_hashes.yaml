@@ -2,12 +2,21 @@
 # hash = Model 字段名+类型结构摘要；version = 引用工序 version
 # （同一 Model 被多个工序引用时，记录为其中最大 version，各工序须一致）
 models:
+  ChatTranscriptInput:
+    version: 1
+    hash: b7340a728e0d4c0458616f5d66baddadf433eebd8b60794c76b8119f1cac264a
+  ChatTranscriptResult:
+    version: 1
+    hash: cf46b0f1c8b566ee3557c550a4e3368c2c2b137e91d9d0905b42065e37327154
   ChatTranslateInput:
     version: 1
     hash: 7a44c2b377912c78376c04c5830dd38c8fe920d9d9fcaecabfdfcb92601eadeb
   ChatTranslateResult:
     version: 1
     hash: 2eb1141a7bc77267c103c9b851592f662b6148627b065399a2951153667c4579
+  CustomerSnapshotResult:
+    version: 1
+    hash: e527e7a07fcfdee21bd35094d05ec5e361f34c24678d6b41085cb5c5573b246a
   DemoEchoInput:
     version: 1
     hash: 6899a551b2315d420f3c3bfcc304e10bdd7bd71ed53d0b45ccc63402443c715d
@@ -17,6 +26,27 @@ models:
   DemoProposeInput:
     version: 1
     hash: 20185638483658f3a2d26f96c9a0ac76921586f42c89a115ae6e98511fd36f02
+  IntentInput:
+    version: 1
+    hash: bee836328347f34c95276e6f36e6f16d8c4867a957c7ad1a881b2130915c9607
+  IntentResult:
+    version: 1
+    hash: 486808bb1d48348a0f38e815ce4225aec7d5938f79e5b774a6b67a4c357c9df5
+  ReplyDraftInput:
+    version: 1
+    hash: 3dd997fe36927566ce7c5c13d2f1accd1bc0d1f6f3809b66ae4655a2c57e5a5a
+  ReplyDraftResult:
+    version: 1
+    hash: 3ae24d2bdca322e7a4459c014c2a0204f470242ee8e6255ef1d2641de85eb3fb
+  SnapshotUpdateInput:
+    version: 1
+    hash: a4aedb0d719f434025aa72aba6e39252179c5dee6e32fe62b538065fbd8eebe7
   TaskProposal:
     version: 1
     hash: 3f6716b309cf826eb8e5f894635149d5b28eae45be075d4d2a1f7b2ae8016e4e
+  TodoCandidateResult:
+    version: 1
+    hash: 4ab3c5ac2b88e3c91302a5b00689b839dc5b7e6468f7e11d48e71e82eb8211d5
+  TodoGenerateInput:
+    version: 1
+    hash: b652c1c83128ca4fc9c71e0d782e1210237d62da74619fb1a5b241db0f414918
