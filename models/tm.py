@@ -5,6 +5,10 @@
 migrations/business/versions/ 的 DDL 逐列同源（R22：结构漂移活不过启动；
 tests/test_tm_models.py 的 schema 测试锁死）。
 
+v0.3 扩展（迁移 0003，详设-v0.3 §4）：task +tags/+ai_suggestion（决策 25/27）；
+task_event +detail + event_type 扩 12 值（suggested/transferred/disagreed，
+决策 27/28 流转留痕）。crm 四表 ORM 见 models/crm.py（复用本模块 TmBase）。
+
 来源追溯结构（详设-v0.2 §3.4，JSONB）：
 - source_type='ai'   : {"chain_id", "engine_task_id", "worker_id",
                         "audit_ids": [...], "proposal_id"}   # proposal_id 批准时回填
@@ -96,6 +100,12 @@ class Task(TmBase):
     done_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )  # 勾选完成时写入（统计/回流用）
+    tags: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'")
+    )  # 开放标签 list[str]（决策 25；1-30 字符/去重/最多 20 个，应用层校验）
+    ai_suggestion: Mapped[dict | None] = mapped_column(
+        JSONB
+    )  # AI 下一步建议（决策 27，详设 §4.1 结构；来源 = 候选 suggested_next）
 
 
 class TaskProposal(TmBase):
@@ -145,15 +155,21 @@ class TaskProposal(TmBase):
 class TaskEvent(TmBase):
     """tm.task_event：状态流水表（详设-v0.2 §3.3，事件写入点代码写死，不依赖 AI）。
 
-    event_type 九态：created/approved/started/completed/voided/blocked/unblocked/
-    derived/updated（derived = 本任务派生出新任务，§3.3 事件写入点表 + 验收 A24）。
+    event_type 十二态：created/approved/started/completed/voided/blocked/unblocked/
+    derived/updated（v0.2 九态）+ suggested/transferred/disagreed（v0.3 流转留痕，
+    决策 27/28，详设-v0.3 §4.2）：
+    - suggested：AI 建议写入 ai_suggestion 时（note=建议摘要，detail=ai_suggestion 快照）
+    - transferred：人执行流转时（from/to_status 沿用；detail={action, target, note}）
+    - disagreed：人选择与 AI 建议不同时（detail={ai_suggestion, human_chose}）
     """
 
     __tablename__ = "task_event"
     __table_args__ = (
         CheckConstraint(
             "event_type IN ('created','approved','started','completed','voided',"
-            "'blocked','unblocked','derived','updated')"
+            "'blocked','unblocked','derived','updated','suggested','transferred',"
+            "'disagreed')",
+            name="chk_event_type",
         ),
         Index("idx_event_task", "task_id", "created_at"),
         {"schema": "tm"},
@@ -170,6 +186,9 @@ class TaskEvent(TmBase):
     to_status: Mapped[str | None] = mapped_column(Text)  # 迁移后状态
     actor: Mapped[str | None] = mapped_column(Text)  # 操作者角色
     note: Mapped[str | None] = mapped_column(Text)  # 备注（如 blocked_reason / result_note）
+    detail: Mapped[dict | None] = mapped_column(
+        JSONB
+    )  # 结构化详情（from/to/note/指令解析，决策 27/28，详设 §4.2）
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -28,6 +28,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from models.tm import TmBase  # noqa: E402  （sys.path 注入后导入）
+from models import crm  # noqa: E402,F401  （注册 crm 四表进 TmBase.metadata，R22 同源）
 
 _DB_URL_ENV = "LIUQUAN_TM_DB_URL"
 

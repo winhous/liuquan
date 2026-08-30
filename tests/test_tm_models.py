@@ -5,12 +5,16 @@
 ORM 的逐字段同源 + 三表落地 + 约束/索引生效（真 SQL 真事务，不桩）。
 
 覆盖：
-- schema 同源：三表列集合、JSONB/DATE 类型、CHECK（含具名 chk_blocked_reason /
-  chk_result_note）、索引（含 idx_proposal_status 的 created_at DESC）、外键
+- schema 同源：三表列集合（含 v0.3 迁移 0003 新增列：task.tags/ai_suggestion、
+  task_event.detail）、JSONB/DATE 类型、CHECK（含具名 chk_blocked_reason /
+  chk_result_note / chk_event_type）、索引（含 idx_proposal_status 的 created_at
+  DESC）、外键
 - 冒烟：task / task_proposal / task_event 插入读取往返、derived_from 自引用 FK、
   task_event 的 ON DELETE CASCADE
 - 决策 17 反向：done/void 无 result_note 被 CHECK 拒（A23 的 DB 层）、blocked 无
   blocked_reason 被拒、非法状态/超长标题/非法事件类型被拒
+
+v0.3 新增列/12 值事件类型的行为冒烟见 tests/test_crm_models.py（tm 扩展部分）。
 
 注意（本文件自身在 P2 扫描对象内，tests/ 只有 fixtures/ 豁免）：
 - 回环地址与连接串一律运行期拼接（"127." 加 "0.0.1"），任何单一字符串常量
@@ -42,6 +46,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "title", "detail", "domain", "role", "due", "status",
         "blocked_reason", "result_note", "derived_from", "source_type",
         "source", "created_by", "created_at", "updated_at", "done_at",
+        "tags", "ai_suggestion",  # v0.3 迁移 0003（详设-v0.3 §4.1）
     },
     "task_proposal": {
         "id", "title", "detail", "domain", "action_id", "risk",
@@ -51,13 +56,18 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "task_event": {
         "id", "task_id", "event_type", "from_status", "to_status",
-        "actor", "note", "created_at",
+        "actor", "note", "detail", "created_at",  # detail: v0.3 迁移 0003（§4.2）
     },
 }
 
-# 每表 CHECK 约束总数（task = 5 内联 + 2 具名；proposal = 4 内联；event = 1 内联）
+# 每表 CHECK 约束总数（task = 5 内联 + 2 具名；proposal = 4 内联；event = 1 具名 chk_event_type，
+# 0003 由 9 值内联扩 12 值并具名——数量仍为 1）
 EXPECTED_CHECK_COUNTS = {"task": 7, "task_proposal": 4, "task_event": 1}
-EXPECTED_NAMED_CHECKS = {"chk_blocked_reason", "chk_result_note"}
+EXPECTED_NAMED_CHECKS = {
+    "chk_blocked_reason",
+    "chk_result_note",
+    "chk_event_type",  # v0.3 迁移 0003（§4.2）
+}
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
     "task": {"idx_task_status_due", "idx_task_role", "task_pkey"},
@@ -67,8 +77,11 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
 
 EXPECTED_JSONB_COLUMNS = {
     ("task", "source"),
+    ("task", "tags"),  # v0.3 迁移 0003（§4.1）
+    ("task", "ai_suggestion"),  # v0.3 迁移 0003（§4.1）
     ("task_proposal", "evidence"),
     ("task_proposal", "source"),
+    ("task_event", "detail"),  # v0.3 迁移 0003（§4.2）
 }
 EXPECTED_DATE_COLUMNS = {("task", "due")}
 

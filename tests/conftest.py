@@ -216,8 +216,10 @@ def tm_pg_cluster(engine_pg_cluster: PgCluster) -> PgCluster:
     依赖 engine_pg_cluster（保证 PG 实例已启动、引擎迁移已跑）：
     - createdb liuquan（业务库）；
     - CREATE SCHEMA tm（详设 §2.1：schema 由部署侧建，迁移内不建——此处模拟部署侧）；
+    - CREATE SCHEMA crm（v0.3 详设 §2.1：crm schema 新建，同 tm 模式由部署侧建，
+      迁移内不建——此处模拟部署侧，迁移 0002 四表落此 schema）；
     - alembic upgrade head（migrations/business/，经 `-x db_url=` 传连接串，
-      不注入环境变量，P2 规则4 合法）。
+      不注入环境变量，P2 规则4 合法；upgrade head 自动包含 0002/0003）。
     yield 业务库 PgCluster（url 指向 liuquan 库；PG 实例生命周期归 engine_pg_cluster）。
     """
     cluster = engine_pg_cluster
@@ -248,6 +250,22 @@ def tm_pg_cluster(engine_pg_cluster: PgCluster) -> PgCluster:
             _TM_DB_NAME,
             "-c",
             "CREATE SCHEMA tm",
+        ]
+    )
+    # v0.3：crm schema 由部署侧建（迁移内不建，承 tm 模式）——此处模拟部署侧
+    _run(
+        [
+            str(_PGBIN / "psql"),
+            "-h",
+            _HOST,
+            "-p",
+            str(cluster.port),
+            "-U",
+            user,
+            "-d",
+            _TM_DB_NAME,
+            "-c",
+            "CREATE SCHEMA crm",
         ]
     )
     repo_root = Path(__file__).resolve().parents[1]
