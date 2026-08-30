@@ -547,18 +547,20 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "crm/index.html",
-            {
-                "q": q,
-                "status": status,
-                "rows": rows,
-                "total": total,
-                "page": page_no,
-                "status_filters": [
+            _ctx(
+                request,
+                "crm-customers",
+                q=q,
+                status=status,
+                rows=rows,
+                total=total,
+                page=page_no,
+                status_filters=[
                     ("", "进行中"), ("waiting_reply", "待回复"), ("replied", "已回复"),
                     ("closed_deal", "已成交"), ("on_hold", "搁置"), ("archived", "归档"),
                     ("all", "全部"),
                 ],
-            },
+            ),
         )
 
     @app.get("/crm/customers/check-name")
@@ -599,7 +601,7 @@ def create_app(
         if data is None:
             return RedirectResponse("/crm", status_code=303)
         return templates.TemplateResponse(
-            request, "crm/detail.html", {**data, "engine_task_id": engine_task_id}
+            request, "crm/detail.html", _ctx(request, "crm-customers", **data, engine_task_id=engine_task_id)
         )
 
     @app.post("/crm/{customer_id}/messages")
@@ -725,7 +727,7 @@ def create_app(
     async def translate_page(request: Request):
         if request.cookies.get("role") not in ROLE_LABEL:
             return RedirectResponse("/login", status_code=303)
-        return templates.TemplateResponse(request, "translate.html", {"result": None})
+        return templates.TemplateResponse(request, "translate.html", _ctx(request, "crm-translate", result=None))
 
     @app.post("/translate")
     async def translate_run(request: Request):
