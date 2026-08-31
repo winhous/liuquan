@@ -21,6 +21,8 @@ P2 规则4 拦的是 os.environ/os.getenv 的读取，putenv 属合法写入路�
   完整 IPv4 四段或 URL scheme（判据见 engine/lint/p2.py 模块 docstring）
 - 不读 os.environ / os.getenv（P2 规则4）：环境传递只经 os.putenv 写
   LD_LIBRARY_PATH（子进程用）+ alembic URL 走命令行 -x 参数
+- v0.5 批 3 修复：照 engine/cli.py 先例 load_dotenv（dotenv 写进程环境属合法
+  路径，P2 规则4 拦的是 os.environ/os.getenv 的读取）——见文件底部
 """
 
 from __future__ import annotations
@@ -34,6 +36,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+# ---- v0.5 批 3 修复：pytest 进程与 CLI 环境对齐（2026-09-01）----
+# engine/cli.py 的 registry-check/verify 先 load_dotenv 再加载注册表；而
+# `uv run pytest` 不自动加载 .env，导致 load_registry 校验 models.yaml env
+# 引用（DEEPSEEK_BASE_URL 等）拒载——A49 等触发消费者内二次 load_registry 的
+# 测试失败。此处 load_dotenv 使 pytest 与 CLI 行为一致（不读 os.environ，
+# 不违反 P2 规则4；照 engine/cli.py 同款写法）。
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 # ---- 本机 PG16 部署位（Wave 0 T3：apt download + dpkg -x 解压，无 root）----
 _PGROOT = Path.home() / ".local" / "pg16"
