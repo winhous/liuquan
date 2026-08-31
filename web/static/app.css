@@ -153,7 +153,8 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
 .navbar-vertical .nav-item-header {
   margin-top: 0.625rem;              /* 与上一组/叶子拉开距离 */
   padding: 0.25rem 0.875rem;
-  font-size: 0.6875rem;              /* 小号（一级菜单 0.9375rem） */
+  text-align: center;                /* 复核反馈：分类标题居中 */
+  font-size: 0.625rem;               /* 复核反馈：字体再调小（10px，一级菜单 0.9375rem） */
   font-weight: 600;
   letter-spacing: 0.06em;            /* 字距拉开，类目感 */
   text-transform: uppercase;
