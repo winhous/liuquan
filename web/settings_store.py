@@ -28,7 +28,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DOTENV_PATH = _REPO_ROOT / ".env"
 _TM_DB_URL_ENV = "LIUQUAN_TM_DB_URL"
 
-# ---- 类型解析注册表（详设 §7.3 键清单）----
+# ---- 类型解析注册表（详设 §7.3 键清单 + v0.5 §8 新键）----
 # key -> 类型标识；不在注册表的 key 视为 str
 _TYPE_REGISTRY: dict[str, str] = {
     "crm.follow_up_days": "int",
@@ -38,6 +38,11 @@ _TYPE_REGISTRY: dict[str, str] = {
     "engine.timeout_s": "float",
     "engine.backoff_cap": "int",
     "notify.feishu_enabled": "bool",
+    # v0.5 §8 新键
+    "seo.healthcheck_keywords": "json",  # JSON 数组：体检关键词列表
+    "ai.llm_model": "str",  # 语言模型名
+    "ai.vision_model": "str",  # 识图模型名
+    "scrape.storage_dir": "str",  # 扒图存储目录
 }
 
 
@@ -46,7 +51,12 @@ class SettingsError(Exception):
 
 
 def _parse_value(raw: str, key: str) -> object:
-    """按 key 注册类型解析 value 字符串；失败返回 None（调用方回退 default）。"""
+    """按 key 注册类型解析 value 字符串；失败返回 None（调用方回退 default）。
+
+    v0.5 §8：新增 json 类型解析（JSON 解析失败回退默认）。
+    """
+    import json as _json  # 延迟导入，避免循环依赖
+
     type_kind = _TYPE_REGISTRY.get(key, "str")
     if type_kind == "int":
         try:
@@ -70,6 +80,13 @@ def _parse_value(raw: str, key: str) -> object:
             parts = raw.strip().split(":")
             return time(int(parts[0]), int(parts[1]))
         except (ValueError, IndexError, TypeError):
+            return None
+    if type_kind == "json":
+        # v0.5 §8：JSON 解析失败回退默认（返回 None，调用方用 default）
+        try:
+            parsed = _json.loads(raw)
+            return parsed
+        except (_json.JSONDecodeError, ValueError, TypeError):
             return None
     # str
     return raw

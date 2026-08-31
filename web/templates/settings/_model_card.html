@@ -1,0 +1,90 @@
+{# 模型选择卡片块（整页 include + HTMX 局部刷新片段共用） #}
+
+{# 语言模型块 #}
+<div class="card mb-4" id="llm-model-card">
+  <div class="card-header">
+    <h3 class="card-title">语言模型</h3>
+  </div>
+  <div class="card-body">
+    <form hx-post="/settings/ai/model" hx-target="#llm-model-card" hx-swap="outerHTML">
+      <div class="mb-3">
+        <label class="form-label">API Key</label>
+        <input name="llm_api_key" type="password" class="form-control" placeholder="sk-...">
+        {% if llm_key_configured %}
+          <small class="text-success"><i class="ti ti-check me-1"></i>已配置</small>
+        {% else %}
+          <small class="text-warning"><i class="ti ti-alert-triangle me-1"></i>未配置</small>
+        {% endif %}
+      </div>
+      <div class="mb-3">
+        <label class="form-label">模型</label>
+        <select name="llm_model" class="form-select">
+          <option value="deepseek-chat" {% if llm_model == 'deepseek-chat' %}selected{% endif %}>DeepSeek Chat</option>
+          <option value="deepseek-reasoner" {% if llm_model == 'deepseek-reasoner' %}selected{% endif %}>DeepSeek Reasoner</option>
+        </select>
+      </div>
+      <p class="text-muted small">
+        <i class="ti ti-info-circle me-1"></i>
+        密钥存 .env（R20），模型名存设置表，保存后<strong>重启引擎</strong>生效。
+      </p>
+      <button class="btn btn-primary">保存语言模型设置</button>
+    </form>
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{# 识图模型块 #}
+<div class="card" id="vision-model-card">
+  <div class="card-header">
+    <h3 class="card-title">识图模型</h3>
+  </div>
+  <div class="card-body">
+    <form hx-post="/settings/ai/model" hx-target="#vision-model-card" hx-swap="outerHTML">
+      <div class="mb-3">
+        <label class="form-label">API Key</label>
+        <input name="vision_api_key" type="password" class="form-control" placeholder="sk-...">
+        {% if vision_key_configured %}
+          <small class="text-success"><i class="ti ti-check me-1"></i>已配置</small>
+        {% else %}
+          <small class="text-warning"><i class="ti ti-alert-triangle me-1"></i>未配置</small>
+        {% endif %}
+      </div>
+      <div class="mb-3">
+        <label class="form-label">接口地址（可空，默认 dashscope 兼容地址）</label>
+        <input name="vision_base_url" type="text" class="form-control" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">模型</label>
+        <select name="vision_model" class="form-select">
+          <option value="qwen-vl-max" {% if vision_model == 'qwen-vl-max' %}selected{% endif %}>Qwen-VL-Max</option>
+          <option value="qwen-vl-plus" {% if vision_model == 'qwen-vl-plus' %}selected{% endif %}>Qwen-VL-Plus</option>
+          <option value="glm-4v" {% if vision_model == 'glm-4v' %}selected{% endif %}>GLM-4V</option>
+        </select>
+      </div>
+      <p class="text-muted small">
+        <i class="ti ti-info-circle me-1"></i>
+        密钥存 .env（R20），模型名存设置表，保存后<strong>重启引擎</strong>生效。
+      </p>
+      <button class="btn btn-primary">保存识图模型设置</button>
+    </form>
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>

@@ -65,10 +65,12 @@ STATUS_LABEL = {
 RISK_LABEL = {"read": "只读分析", "suggest": "建议", "write": "写操作"}
 
 # 来源徽章 = domain（决策 16：任务来源标徽章，一眼可见"这任务是谁提的"）
+# v0.5 §3.1：补 scrape 徽章
 DOMAIN_META: dict[str, dict[str, str]] = {
     "crm": {"label": "CRM", "cls": "bg-indigo"},
     "erp": {"label": "ERP", "cls": "bg-purple"},
     "seo": {"label": "SEO", "cls": "bg-teal"},
+    "scrape": {"label": "扒图", "cls": "bg-orange"},
     "tm": {"label": "TM", "cls": "bg-cyan"},
     "demo": {"label": "演示", "cls": "bg-orange"},
 }
@@ -130,10 +132,16 @@ MODULES: list[dict[str, Any]] = [
          {"id": "erp-replenish", "name": "补货建议", "icon": "ti ti-shopping-cart", "href": "/modules/erp"},
          {"id": "erp-alert", "name": "异常预警", "icon": "ti ti-alert-triangle", "href": "/modules/erp"},
      ]},
-    {"id": "seo", "name": "SEO", "icon": "ti ti-chart-line", "href": "/modules/seo",
-     "desc": "关键词研究 / 标题优化 / 体检（v0.5，数据源 eHunt）"},
-    {"id": "scrape", "name": "扒图", "icon": "ti ti-photo", "href": "/modules/scrape",
-     "desc": "选品扒图 / 图片体检（v0.5，建设中）"},
+    # v0.5 §3.1：SEO 一级菜单下挂二级（扒图第一/关键词研究/SEO 优化/listing 体检）
+    # 一级「扒图」菜单移除
+    {"id": "seo", "name": "SEO", "icon": "ti ti-chart-line", "href": "/seo/keywords",
+     "desc": "关键词研究 / 标题优化 / 体检（v0.5，数据源 eHunt）",
+     "children": [
+         {"id": "seo-scrape", "name": "扒图", "icon": "ti ti-photo", "href": "/scrape"},
+         {"id": "seo-keywords", "name": "关键词研究", "icon": "ti ti-keyboard", "href": "/seo/keywords"},
+         {"id": "seo-optimize", "name": "SEO 优化", "icon": "ti ti-edit", "href": "/seo/optimize"},
+         {"id": "seo-healthcheck", "name": "listing 体检", "icon": "ti ti-chart-line", "href": "/seo/healthcheck"},
+     ]},
     # ---- 设置一级菜单（v0.4 批 2a，详设 §7.1；复核反馈 2026-09-01：三分组——
     # 基础设置/AI 设置/系统设置，所有设置项归组，分组标题不可点）----
     {"id": "settings", "name": "设置", "icon": "ti ti-settings", "href": "/settings/params",
@@ -149,8 +157,9 @@ MODULES: list[dict[str, Any]] = [
           "children": [
               {"id": "settings-ai-key", "name": "API 密钥", "icon": "ti ti-key",
                "href": "/settings/ai/api-key"},
+              # v0.5 §3.5：模型选择页 placeholder 移除改真页
               {"id": "settings-ai-model", "name": "模型选择", "icon": "ti ti-brain",
-               "href": "/settings/ai/model", "placeholder": True},
+               "href": "/settings/ai/model"},
               {"id": "settings-ai-style", "name": "风格指南术语表", "icon": "ti ti-file-text",
                "href": "/settings/ai/style", "placeholder": True},
           ]},
@@ -161,6 +170,9 @@ MODULES: list[dict[str, Any]] = [
                "href": "/settings/schedule"},
               {"id": "settings-notify", "name": "通知配置", "icon": "ti ti-bell",
                "href": "/settings/notify"},
+              # v0.5 §3.5：新增「扒图设置」叶子
+              {"id": "settings-scrape", "name": "扒图设置", "icon": "ti ti-photo",
+               "href": "/settings/scrape"},
               {"id": "settings-params", "name": "系统参数", "icon": "ti ti-adjustments",
                "href": "/settings/params"},
           ]},
@@ -978,12 +990,58 @@ def create_app(
             _ctx(request, "settings-shops", shops=shops, msg=msg, err=err),
         )
 
+    # v0.5 §3.5：模型选择页（真页，非 placeholder）
     @app.get("/settings/ai/model")
-    def settings_ai_model_placeholder(request: Request):
-        return templates.TemplateResponse(
-            request, "settings/placeholder.html",
-            _ctx(request, "settings-ai-model", page_name="模型选择"),
+    async def settings_ai_model(request: Request):
+        """模型选择页（语言模型 + 识图模型，独立提交 + HTMX 局部刷新）。"""
+        store = _settings_store(request)
+        llm_model = await store.get("ai.llm_model", "deepseek-chat")
+        vision_model = await store.get("ai.vision_model", "qwen-vl-max")
+        ctx = _ctx(
+            request,
+            "settings-ai-model",
+            llm_model=llm_model,
+            vision_model=vision_model,
+            llm_key_configured=_check_env_key("DEEPSEEK_API_KEY"),
+            vision_key_configured=_check_env_key("VISION_API_KEY"),
+            msg=request.query_params.get("msg", ""),
+            err=request.query_params.get("err", ""),
         )
+        return templates.TemplateResponse(request, "settings/model.html", ctx)
+
+    @app.post("/settings/ai/model")
+    async def settings_ai_model_save(request: Request):
+        """模型选择保存（语言模型块 + 识图模型块独立提交）。"""
+        from web.env_writer import write_env_var
+        form = await request.form()
+        store = _settings_store(request)
+        is_hx = bool(request.headers.get("hx-request"))
+
+        # 语言模型块
+        llm_api_key = str(form.get("llm_api_key", "")).strip()
+        llm_model = str(form.get("llm_model", "deepseek-chat")).strip()
+
+        # 识图模型块
+        vision_api_key = str(form.get("vision_api_key", "")).strip()
+        vision_base_url = str(form.get("vision_base_url", "")).strip()
+        vision_model = str(form.get("vision_model", "qwen-vl-max")).strip()
+
+        # 写 .env（密钥只进 .env，R20）
+        if llm_api_key:
+            write_env_var("DEEPSEEK_API_KEY", llm_api_key)
+        if vision_api_key:
+            write_env_var("VISION_API_KEY", vision_api_key)
+        if vision_base_url:
+            write_env_var("VISION_BASE_URL", vision_base_url)
+
+        # 写 settings 表（模型名）
+        await store.set("ai.llm_model", llm_model, "语言模型名")
+        await store.set("ai.vision_model", vision_model, "识图模型名")
+
+        msg = "模型设置已保存（密钥存 .env，模型名存设置表，重启引擎后生效）"
+        if is_hx:
+            return _hx_redirect("/settings/ai/model", msg=msg)
+        return _redirect("/settings/ai/model", msg=msg)
 
     @app.get("/settings/ai/style")
     def settings_ai_style_placeholder(request: Request):
@@ -1283,6 +1341,36 @@ def create_app(
                        msg=f"参数 {key} 已保存", err="")
             return templates.TemplateResponse(request, "settings/_params_row.html", ctx)
         return _hx_redirect("/settings/params", msg=f"参数 {key} 已保存")
+
+    # v0.5 §3.5：扒图设置页（系统设置分组下新叶子，独立提交）
+    @app.get("/settings/scrape")
+    async def settings_scrape(request: Request):
+        """扒图设置页（storage_dir 独立提交）。"""
+        store = _settings_store(request)
+        storage_dir = await store.get("scrape.storage_dir", "/opt/liuquan/scrape/")
+        ctx = _ctx(
+            request,
+            "settings-scrape",
+            storage_dir=storage_dir,
+            msg=request.query_params.get("msg", ""),
+            err=request.query_params.get("err", ""),
+        )
+        return templates.TemplateResponse(request, "settings/scrape.html", ctx)
+
+    @app.post("/settings/scrape")
+    async def settings_scrape_save(request: Request):
+        """扒图设置保存（storage_dir 独立提交）。"""
+        store = _settings_store(request)
+        is_hx = bool(request.headers.get("hx-request"))
+        form = await request.form()
+        storage_dir = str(form.get("storage_dir", "/opt/liuquan/scrape/")).strip()
+        if not storage_dir:
+            storage_dir = "/opt/liuquan/scrape/"
+        await store.set("scrape.storage_dir", storage_dir, "扒图存储目录")
+        msg = "扒图设置已保存"
+        if is_hx:
+            return _hx_redirect("/settings/scrape", msg=msg)
+        return _redirect("/settings/scrape", msg=msg)
 
     @app.post("/tasks/{task_id}/next-confirm")
     async def task_next_confirm(request: Request, task_id: int):

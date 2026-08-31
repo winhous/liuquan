@@ -374,7 +374,12 @@ def test_a44_engine_params_from_settings(biz_engine) -> None:
     # 缺省回退默认
     resp = client.get("/api/biz/settings/engine-params", headers=headers)
     assert resp.status_code == 200
-    assert resp.json() == {"max_attempts": 2, "timeout_s": 30.0, "backoff_cap": 30}
+    data = resp.json()
+    assert data["max_attempts"] == 2
+    assert data["timeout_s"] == 30.0
+    assert data["backoff_cap"] == 30
+    assert data["llm_model"] == "deepseek-chat"
+    assert data["vision_model"] == "qwen-vl-max"
 
     # 改 settings 键 -> 返回值变化（配置地基生效）
     import asyncio
@@ -386,7 +391,12 @@ def test_a44_engine_params_from_settings(biz_engine) -> None:
 
     asyncio.run(_set())
     resp = client.get("/api/biz/settings/engine-params", headers=headers)
-    assert resp.json() == {"max_attempts": 4, "timeout_s": 45.0, "backoff_cap": 20}
+    data = resp.json()
+    assert data["max_attempts"] == 4
+    assert data["timeout_s"] == 45.0
+    assert data["backoff_cap"] == 20
+    assert data["llm_model"] == "deepseek-chat"
+    assert data["vision_model"] == "qwen-vl-max"
 
 
 # ==== A45：验收套件完整性（提醒链能力已注册 + A1-A37 回归由 verify 真跑）====

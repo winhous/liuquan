@@ -45,6 +45,7 @@ RULE_ID = "P2"
 # ---- 豁免子树（规则配置，详设 §9）----
 EXEMPT_SUBTREES = (
     "engine/core/llm",  # T8：PydanticAI 封装，唯一合法持有 base_url/密钥形态
+    "engine/connectors",  # v0.5 §5：外部资源连接器，照 models_config.py 的 env: 模式读 os.environ
     "tests/fixtures",  # 测试样本数据
     "scripts",  # 运维脚本（§9 P2 对象原文豁免；P3-2/P3-4 仍扫 scripts/）
 )

@@ -503,11 +503,11 @@ def test_load_applies_defaults_for_timeout_and_reask(
 def test_resolve_unknown_alias_raises_key_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """未知别名 -> KeyError（调用方按启动失败/工序配置错误处理）。"""
+    """未知别名 -> ModelsConfigError（v0.5 §7.1：提示识图模型未配置）。"""
     _set_env(monkeypatch)
     path = _write_yaml(tmp_path, _valid_models_yaml())
     registry = load_models(path)
-    with pytest.raises(KeyError):
+    with pytest.raises(ModelsConfigError, match="未配置"):
         registry.resolve("no-such-alias")
 
 

@@ -74,9 +74,9 @@ DEFAULT_BACKOFF_S = 5.0
 # 退避封顶（§14：→30s）
 BACKOFF_CAP_S = 30.0
 
-# v0.1 真路径唯一支持的 provider（OpenAI 兼容协议；扩展 = 此处加分支，
-# models.yaml 的 fallback 多模型位 v0.3 后按故障率再议，§7.2）
-_SUPPORTED_PROVIDERS = frozenset({"deepseek"})
+# v0.1 真路径支持的 provider（OpenAI 兼容协议；v0.5 新增 openai 支持识图模型）
+# models.yaml 的 fallback 多模型位 v0.3 后按故障率再议，§7.2
+_SUPPORTED_PROVIDERS = frozenset({"deepseek", "openai"})
 
 # 传输层可重试异常的类名兜底（openai/httpx 为 pydantic-ai 传递依赖，
 # 不直接 import，按类名判定 + status_code 鸭子判定；builtin 直判）
@@ -139,16 +139,24 @@ def agent_factory(
     output_type: type[T],
     *,
     agent_cls: Callable[..., Any] | None = None,
+    model_override: str | None = None,  # v0.5 §7.1：模型名覆盖（engine-params 注入）
 ) -> Any:
     """按 models.yaml 建 Agent（§13 构造注入点）。
 
-    ``agent_cls=None``：建真 PydanticAI Agent（OpenAI 兼容模型，provider 须为
-    v0.1 支持的 deepseek，否则抛 LLMError——显式失败不静默）。
+    v0.5 §7.1：支持 model_override 参数（engine-params 读到的 llm_model/vision_model
+    覆盖 models.yaml 的 model 字段）。provider 须为 v0.1 支持的 deepseek 或
+    v0.5 新增的 openai（识图模型走 OpenAI 兼容协议），否则抛 LLMError。
+
+    ``agent_cls=None``：建真 PydanticAI Agent（OpenAI 兼容模型）。
     ``agent_cls=桩类``：按契约 ``agent_cls(config, output_type,
     reask_limit=config.reask_limit)`` 构造，桩与真 Agent 共用 run 契约
     （``run(prompt, *, model_settings, retries, ...)``），被测代码零感知。
     """
     config = registry.resolve(alias)
+    if model_override:
+        # v0.5 §7.1：用 dataclasses.replace 创建覆盖后的 config（frozen dataclass）
+        from dataclasses import replace
+        config = replace(config, model=model_override)
     if agent_cls is None:
         return _build_real_agent(config, output_type)
     return agent_cls(config, output_type, reask_limit=config.reask_limit)

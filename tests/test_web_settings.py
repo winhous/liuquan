@@ -126,7 +126,9 @@ def test_placeholder_model(client: TestClient) -> None:
     resp = client.get("/settings/ai/model")
     assert resp.status_code == 200
     assert "模型选择" in resp.text
-    assert "建设中" in resp.text
+    # v0.5：模型选择页已改为真页（非 placeholder）
+    assert "语言模型" in resp.text
+    assert "识图模型" in resp.text
 
 
 def test_placeholder_style(client: TestClient) -> None:

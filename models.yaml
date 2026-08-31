@@ -9,3 +9,11 @@ models:
     api_key: env:DEEPSEEK_API_KEY
     timeout_s: 30
     reask_limit: 2
+  vision:                       # 识图模型别名（v0.5 新增；optional 缺 env 不拒载）
+    provider: openai            # OpenAI 兼容协议（dashscope 等）
+    model: qwen-vl-max          # settings 键 ai.vision_model 覆盖
+    base_url: env:VISION_BASE_URL
+    api_key: env:VISION_API_KEY
+    timeout_s: 30
+    reask_limit: 2
+    optional: true              # 新增：env 未设置时该别名跳过加载（resolve 抛"未配置"），不拒载启动

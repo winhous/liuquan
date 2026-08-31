@@ -180,10 +180,12 @@ def create_biz_router(
 
     @router.get("/settings/engine-params", dependencies=[Depends(_check_token)])
     async def get_engine_params() -> dict:
-        """读取引擎参数三键（web 侧读 settings 表，缺省回退默认）。
+        """读取引擎参数（web 侧读 settings 表，缺省回退默认）。
 
-        引擎启动时经 BizApiClient.get 调用本接口读取
-        max_attempts / timeout_s / backoff_cap 注入 runner。
+        v0.5 §7.1 扩展：+ llm_model / vision_model（读 settings 表 ai.llm_model /
+        ai.vision_model，缺省回退 models.yaml 默认值 deepseek-chat / qwen-vl-max）。
+
+        引擎启动时经 BizApiClient.get 调用本接口读取参数注入 runner。
         """
         from web.settings_store import SettingsStore
 
@@ -201,10 +203,21 @@ def create_biz_router(
             )
         except (ValueError, TypeError):
             max_attempts, timeout_s, backoff_cap = 2, 30.0, 30
+
+        # v0.5 §7.1：模型选择（读 settings 表，缺省回退 models.yaml 默认值）
+        llm_model = str(
+            await store.get("ai.llm_model", "deepseek-chat")
+        )
+        vision_model = str(
+            await store.get("ai.vision_model", "qwen-vl-max")
+        )
+
         return {
             "max_attempts": max_attempts,
             "timeout_s": timeout_s,
             "backoff_cap": backoff_cap,
+            "llm_model": llm_model,
+            "vision_model": vision_model,
         }
 
     # ---- 读接口：crm 上下文（引擎侧 provider 白名单与 prompt 数据来源）----

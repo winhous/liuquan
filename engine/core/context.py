@@ -48,3 +48,4 @@ class EngineContext:
     task_id: int | None = None
     step_id: int | None = None
     chain_id: str | None = None  # 当前链 id（TaskProposal.source 追溯；None = 未关联）
+    connectors: dict[str, Any] | None = None  # v0.5 §5：外部资源连接器（工序按 id 引用）

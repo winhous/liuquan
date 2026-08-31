@@ -1,0 +1,29 @@
+{# 扒图设置卡片块（整页 include + HTMX 局部刷新片段共用） #}
+<div class="card" id="scrape-settings-card">
+  <div class="card-header">
+    <h3 class="card-title">扒图设置</h3>
+  </div>
+  <div class="card-body">
+    <form hx-post="/settings/scrape" hx-target="#scrape-settings-card" hx-swap="outerHTML">
+      <div class="mb-3">
+        <label class="form-label">存储目录</label>
+        <input name="storage_dir" type="text" class="form-control" value="{{ storage_dir }}" placeholder="/opt/liuquan/scrape/">
+        <small class="text-muted">
+          扒图产物落该目录下 xhs/ 与 xianyu/ 与 crm/ 子目录。
+          夸克网盘现状人工同步，本版不做自动上传。
+        </small>
+      </div>
+      <button class="btn btn-primary">保存扒图设置</button>
+    </form>
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>

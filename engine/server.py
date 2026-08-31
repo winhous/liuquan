@@ -1017,13 +1017,17 @@ async def _read_engine_params_from_biz(
 ) -> dict[str, Any]:
     """启动时经 biz_client 读 web 侧引擎参数（详设 §7.3/§8）。
 
-    成功返回 {default_max_attempts, default_timeout_s, backoff_cap}；
-    失败（BizApiError/网络）回退默认 {2, 30.0, 30} + warning 不阻塞启动。
+    成功返回 {default_max_attempts, default_timeout_s, backoff_cap, llm_model, vision_model}；
+    失败（BizApiError/网络）回退默认 {2, 30.0, 30, deepseek-chat, qwen-vl-max} + warning 不阻塞启动。
+
+    v0.5 §7.1 扩展：+ llm_model / vision_model（模型名覆盖）。
     """
     defaults: dict[str, Any] = {
         "default_max_attempts": 2,
         "default_timeout_s": 30.0,
         "backoff_cap": 30.0,
+        "llm_model": "deepseek-chat",
+        "vision_model": "qwen-vl-max",
     }
     if biz_client is None:
         return defaults
@@ -1035,6 +1039,8 @@ async def _read_engine_params_from_biz(
                 "default_max_attempts": int(data.get("max_attempts", 2)),
                 "default_timeout_s": float(data.get("timeout_s", 30.0)),
                 "backoff_cap": float(data.get("backoff_cap", 30.0)),
+                "llm_model": str(data.get("llm_model", "deepseek-chat")),
+                "vision_model": str(data.get("vision_model", "qwen-vl-max")),
             }
         print(
             f"warning: 读取引擎参数失败（HTTP {resp.status_code}），回退默认值"
@@ -1042,7 +1048,7 @@ async def _read_engine_params_from_biz(
     except Exception as exc:
         print(
             f"warning: 读取引擎参数异常（{type(exc).__name__}: {exc}），"
-            "回退默认值（{2, 30.0, 30}）"
+            "回退默认值（{2, 30.0, 30, deepseek-chat, qwen-vl-max}）"
         )
     return defaults
 
@@ -1179,6 +1185,13 @@ def main() -> None:
     engine = _db.create_engine()
     registry = load_registry(repo_root)
     model_registry = load_models(repo_root / "models.yaml")
+
+    # v0.5 §5：装配 connectors 注册表（工序按 id 引用外部资源）
+    from engine.connectors import CONNECTORS  # noqa: PLC0415
+    connectors: dict[str, Any] = {}
+    for connector_id, factory in CONNECTORS.items():
+        connectors[connector_id] = factory(None)  # ctx=None（启动期无具体上下文）
+
     runner = TaskRunner(
         engine,
         registry,
@@ -1187,6 +1200,7 @@ def main() -> None:
         repo_root=repo_root,
         writable_check=lambda: True,
         providers=build_providers(),  # 决策 26 读取接口化：provider = HTTP 调 web 读接口
+        connectors=connectors,  # v0.5 §5：外部资源连接器
     )
     app = create_app(
         engine=engine,

@@ -47,6 +47,7 @@ _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _REQUIRED_FIELDS = ("provider", "model", "base_url", "api_key")
 _DEFAULT_TIMEOUT_S = 30.0
 _DEFAULT_REASK_LIMIT = 2
+_OPTIONAL_FIELD = "optional"  # v0.5 §7.1：别名级 optional: true
 
 
 class ModelsConfigError(Exception):
@@ -64,6 +65,7 @@ class ModelConfig:
     api_key: str
     timeout_s: float
     reask_limit: int
+    optional: bool = False  # v0.5 §7.1：别名级 optional: true（env 未设置时跳过加载）
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -116,8 +118,15 @@ def _resolve_env_ref(
     return resolved
 
 
-def _parse_alias(raw: Mapping[str, Any], alias: str, path: Path) -> ModelConfig:
-    """单别名校验与构造；任何不合规抛 ModelsConfigError（整体拒载）。"""
+def _parse_alias(
+    raw: Mapping[str, Any], alias: str, path: Path
+) -> tuple[ModelConfig | None, str | None]:
+    """单别名校验与构造；返回 (config, skip_reason)。
+
+    v0.5 §7.1：支持 optional: true（别名级可选）。
+    - optional=true 且 env 引用未设置/为空 → 跳过该别名（返回 None, skip_reason）
+    - optional=false（默认）→ env 引用未设置/为空 → 拒载（抛 ModelsConfigError）
+    """
     if not isinstance(raw, dict):
         raise ModelsConfigError(
             f"{path}: 别名 {alias!r} 的值必须是映射（拒载）"
@@ -127,6 +136,43 @@ def _parse_alias(raw: Mapping[str, Any], alias: str, path: Path) -> ModelConfig:
         raise ModelsConfigError(
             f"{path}: 别名 {alias!r} 缺必填字段 {missing}（拒载）"
         )
+
+    # v0.5 §7.1：解析 optional 标志（默认 false）
+    is_optional = bool(raw.get(_OPTIONAL_FIELD, False))
+
+    # 检查 env 引用是否可用（optional 时允许缺失）
+    env_missing = False
+    for field in ("base_url", "api_key"):
+        value = raw.get(field)
+        if not isinstance(value, str):
+            raise ModelsConfigError(
+                f"{path}: 别名 {alias!r} 的 {field} 必须是字符串（拒载），实际 {type(value).__name__}"
+            )
+        if not value.startswith(_ENV_PREFIX):
+            raise ModelsConfigError(
+                f"{path}: 别名 {alias!r} 的 {field} 必须用 env: 前缀引用环境变量"
+                "（规范 R20：models.yaml 永不出现真值），实际出现真值形态（拒载）"
+            )
+        var_name = value[len(_ENV_PREFIX):]
+        if not _ENV_NAME_RE.fullmatch(var_name):
+            raise ModelsConfigError(
+                f"{path}: 别名 {alias!r} 的 {field} 的 env: 引用不合法：{value!r}"
+                "（须为 env:<变量名>，变量名 [A-Za-z_][A-Za-z0-9_]*）（拒载）"
+            )
+        resolved = os.environ.get(var_name)
+        if not resolved:
+            if is_optional:
+                env_missing = True
+            else:
+                raise ModelsConfigError(
+                    f"{path}: 别名 {alias!r} 的 {field} 引用的环境变量 {var_name} 未设置或为空"
+                    "（拒载，fail-fast：密钥唯一来源 .env，规范 R20）"
+                )
+
+    # v0.5 §7.1：optional 别名 env 缺失 → 跳过（不拒载启动）
+    if is_optional and env_missing:
+        return None, f"别名 {alias!r} 为 optional 且 env 引用未设置，跳过加载"
+
     timeout_raw = raw.get("timeout_s", _DEFAULT_TIMEOUT_S)
     reask_raw = raw.get("reask_limit", _DEFAULT_REASK_LIMIT)
     if (
@@ -153,7 +199,8 @@ def _parse_alias(raw: Mapping[str, Any], alias: str, path: Path) -> ModelConfig:
         api_key=_resolve_env_ref(raw["api_key"], "api_key", alias, path),
         timeout_s=float(timeout_raw),
         reask_limit=int(reask_raw),
-    )
+        optional=is_optional,
+    ), None
 
 
 class ModelRegistry:
@@ -164,7 +211,10 @@ class ModelRegistry:
 
     @classmethod
     def load(cls, path: Path) -> "ModelRegistry":
-        """从 models.yaml 加载全册；任一拒载规则触发即抛 ModelsConfigError。"""
+        """从 models.yaml 加载全册；任一拒载规则触发即抛 ModelsConfigError。
+
+        v0.5 §7.1：支持 optional 别名（env 未设置时跳过加载，不拒载启动）。
+        """
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -183,22 +233,38 @@ class ModelRegistry:
         if not models:
             raise ModelsConfigError(f"{path}: models 为空，至少需要一个模型别名（拒载）")
         configs: dict[str, ModelConfig] = {}
+        skipped: list[str] = []
         for alias, raw in models.items():
             if not isinstance(alias, str):
                 raise ModelsConfigError(
                     f"{path}: 模型别名必须是字符串（拒载），实际 {alias!r}"
                 )
-            configs[alias] = _parse_alias(raw, alias, path)
+            config, skip_reason = _parse_alias(raw, alias, path)
+            if config is not None:
+                configs[alias] = config
+            else:
+                skipped.append(f"{alias}（{skip_reason}）")
+        if not configs:
+            raise ModelsConfigError(
+                f"{path}: 无可用模型别名（全部被 optional 跳过），至少需要一个非 optional 别名（拒载）"
+            )
+        if skipped:
+            print(f"info: 跳过的 optional 模型别名：{'; '.join(skipped)}")
         return cls(configs)
 
     def resolve(self, alias: str) -> ModelConfig:
-        """按别名取配置；未知别名抛 KeyError（调用方按启动失败处理）。"""
+        """按别名取配置；未知别名抛 ModelsConfigError（提示识图模型未配置）。
+
+        v0.5 §7.1：resolve 未配置别名抛 ModelsConfigError（而非 KeyError），
+        提示信息更友好（如「识图模型未配置」）。
+        """
         try:
             return self._configs[alias]
         except KeyError:
             registered = ", ".join(sorted(self._configs)) or "（无）"
-            raise KeyError(
-                f"未知模型别名 {alias!r}（models.yaml 已注册：{registered}）"
+            raise ModelsConfigError(
+                f"模型别名 {alias!r} 未配置（models.yaml 已注册：{registered}）"
+                "——如需使用识图模型，请配置 VISION_API_KEY 和 VISION_BASE_URL 环境变量"
             ) from None
 
     @property

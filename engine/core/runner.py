@@ -219,6 +219,9 @@ class TaskRunner:
         default_max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
         default_timeout_s: float = _DEFAULT_TIMEOUT_S,
         backoff_cap: float = _BACKOFF_CAP_S,
+        connectors: dict[str, Any] | None = None,  # v0.5 §5：外部资源连接器
+        llm_model: str | None = None,  # v0.5 §7.1：模型名覆盖（engine-params 注入）
+        vision_model: str | None = None,  # v0.5 §7.1：模型名覆盖（engine-params 注入）
     ) -> None:
         self._engine = engine
         self._registry = registry
@@ -226,6 +229,12 @@ class TaskRunner:
         self._model_registry = model_registry
         self._repo_root = Path(repo_root).resolve() if repo_root is not None else None
         self._providers = dict(providers or {})
+        self._connectors = dict(connectors or {})  # v0.5 §5：外部资源连接器
+        self._model_overrides: dict[str, str] = {}  # v0.5 §7.1：模型名覆盖
+        if llm_model:
+            self._model_overrides["default"] = llm_model
+        if vision_model:
+            self._model_overrides["vision"] = vision_model
         self._backoff = backoff
         self._default_max_attempts = default_max_attempts
         self._default_timeout_s = default_timeout_s
@@ -662,7 +671,11 @@ class TaskRunner:
             lines.append(PhaseLine("REASON", f"render failed: {reason}"))
             return EVENT_LLM_FAILED, None, memory, reason
         try:
-            agent = self._agent_factory(self._model_registry, worker.model, out_cls)
+            # v0.5 §7.1：engine-params 读到的 llm_model/vision_model 覆盖 models.yaml 的 model 字段
+            model_override = self._model_overrides.get(worker.model)
+            agent = self._agent_factory(
+                self._model_registry, worker.model, out_cls, model_override=model_override
+            )
             result = await call_llm(
                 agent,
                 prompt,
@@ -779,6 +792,7 @@ class TaskRunner:
                 task_id=task_id,
                 step_id=step_id,
                 chain_id=chain_id,
+                connectors=self._connectors,  # v0.5 §5：外部资源连接器
             )
             output_value = await self._call_worker_run(worker, inputs_model, ctx)
             output_model = self._coerce_model(output_value, out_cls)
