@@ -172,7 +172,8 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
 }
 /* 分组下叶子菜单：缩进体现层级（与分组标题、与一级菜单都区分） */
 .navbar-vertical .nav-sm .nav-item .nav-link {
-  padding-left: 1.375rem;
+  padding-left: 2rem;                /* 复核反馈：二级菜单明显缩进（相对一级菜单
+    文字起点再右移 ~0.6rem，层次清晰；分组下叶子同享） */
 }
 
 /* 5) 导航悬浮高亮（v0.4 复核反馈：导航所有内容——现在与将来的统一 hover 高亮；
