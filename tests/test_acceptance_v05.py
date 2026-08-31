@@ -50,12 +50,15 @@ async def biz_engine(tm_pg_cluster):
 
 @async_fixture(autouse=True)
 async def _clean_v05_tables(biz_engine):
-    """每测试后清 v0.5 涉及表（sys.settings），互不污染。"""
+    """每测试后清 v0.5 涉及表，互不污染（含跨文件污染：A47 插 scrape.image_file、
+    A49 插 seo.keyword_metric、A54 插 crm.message/message_image/customer——
+    若不清理会残留并污染后序 test_web_crm 的 A36 级联删除断言等）。"""
     yield
     async with AsyncSession(biz_engine) as session, session.begin():
         await session.execute(
             text(
-                "TRUNCATE sys.settings "
+                "TRUNCATE sys.settings, crm.message_image, crm.message, crm.customer, "
+                "scrape.image_file, seo.keyword_metric "
                 "RESTART IDENTITY CASCADE"
             )
         )
