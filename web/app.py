@@ -452,6 +452,52 @@ def create_app(
                  pending_proposal_count=0),
         )
 
+    # ---- 扒图页 JSON 接口（页面 JS 用；触发引擎链，照 crm 粘贴链模式）----
+    @app.post("/scrape/run")
+    async def scrape_run(request: Request):
+        """扒图页：贴链接 → 立即触发 scrape_suggest_chain（JSON）。"""
+        if not request.cookies.get("role"):
+            return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+        try:
+            data = await request.json()
+        except Exception:
+            return {"ok": False, "error": "请求体非 JSON"}
+        urls = str(data.get("urls", "")).strip()
+        if not urls:
+            return {"ok": False, "error": "链接为空"}
+        client = _engine_client(request)
+        try:
+            resp = await client.create_task(
+                "scrape_suggest_chain", {"urls": urls, "source": "mixed"},
+                request.cookies.get("role", "运营"),
+            )
+            return {"ok": True, "task_id": resp.get("task_id")}
+        except Exception as exc:
+            return {"ok": False, "error": f"引擎调用失败：{exc}"}
+
+    @app.post("/scrape/suggest")
+    async def scrape_suggest(request: Request):
+        """扒图页：勾选图片 → 批量生成选品建议（scrape_suggest_chain，JSON）。"""
+        if not request.cookies.get("role"):
+            return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+        try:
+            data = await request.json()
+        except Exception:
+            return {"ok": False, "error": "请求体非 JSON"}
+        image_ids = [str(i) for i in (data.get("image_ids") or [])]
+        if not image_ids:
+            return {"ok": False, "error": "未选择图片"}
+        client = _engine_client(request)
+        try:
+            resp = await client.create_task(
+                "scrape_suggest_chain",
+                {"image_ids": image_ids, "target_keywords": "", "mode": "batch"},
+                request.cookies.get("role", "运营"),
+            )
+            return {"ok": True, "task_id": resp.get("task_id")}
+        except Exception as exc:
+            return {"ok": False, "error": f"引擎调用失败：{exc}"}
+
     @app.get("/scrape/thumbnail/{image_id}")
     async def scrape_thumbnail(request: Request, image_id: str):
         """返回图片缩略图（从本地文件读取）。"""

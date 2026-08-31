@@ -291,9 +291,9 @@
     const btn = document.getElementById('btn-start-scrape');
     btn.disabled = true; btn.textContent = '⏳ 创建任务中…';
     try {
-      const r = await fetch('/api/tasks/create', {
+      const r = await fetch('/scrape/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chain_name: scrapeChainName, input: { urls, source: 'mixed' } })
+        body: JSON.stringify({ urls })
       });
       const data = await r.json();
       if (data.ok) {
@@ -344,12 +344,9 @@
     if (!ids.length) { alert('请先勾选图片'); return; }
     const btn = event.target; btn.disabled = true; btn.textContent = '⏳ 提交中…';
     try {
-      const r = await fetch('/api/tasks/create', {
+      const r = await fetch('/scrape/suggest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chain_name: 'scrape_suggest_chain',
-          input: { image_ids: ids, target_keywords: '', mode: 'batch' }
-        })
+        body: JSON.stringify({ image_ids: ids })
       });
       const data = await r.json();
       if (data.ok) { btn.textContent = '✅ 已提交！'; setTimeout(() => location.reload(), 2000); }
