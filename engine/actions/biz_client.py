@@ -55,6 +55,25 @@ class BizApiClient:
         except httpx.HTTPError as exc:
             raise BizApiError(f"业务写接口网络异常：{exc.__class__.__name__}: {exc}") from exc
 
+    async def get(self, path: str) -> httpx.Response:
+        """GET /api/biz{path}；非 200 抛 BizApiError（调用方映射 rejected）。
+
+        同鉴权同错误语义，照 post 模式。用于引擎启动时读取引擎参数
+        （GET /api/biz/settings/engine-params，详设 §7.3/§8）。
+        """
+        if not self._base_url or not self._token:
+            raise BizApiError("业务读接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
+        url = f"{self._base_url}/api/biz{path}"
+        try:
+            async with httpx.AsyncClient(
+                trust_env=False, timeout=10.0, transport=self._transport
+            ) as client:
+                return await client.get(
+                    url, headers={"X-Biz-Token": self._token}
+                )
+        except httpx.HTTPError as exc:
+            raise BizApiError(f"业务读接口网络异常：{exc.__class__.__name__}: {exc}") from exc
+
 
 def _env_value(name: str) -> str | None:
     """读仓库根 .env（P2 规则 4 合法来源，不触碰 os.environ）。"""

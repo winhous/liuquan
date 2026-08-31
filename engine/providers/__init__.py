@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 from dotenv import dotenv_values
 
-from models.workers import ChatContextData, TaskContextData
+from models.workers import ChatContextData, ReminderContextData, TaskContextData
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,38 @@ class TmTaskContextHTTP:
         return TaskContextData.model_validate(resp.json())
 
 
+class CrmOverdueContextHTTP:
+    """crm.overdue_context 实现：GET /api/biz/crm/overdue-customers -> ReminderContextData。
+
+    v0.4 详设 §10.2：提醒链数据供给，返回超期客户清单。
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        token: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = (base_url or _env_value(_BIZ_URL_ENV) or "").rstrip("/")
+        self._token = token or _env_value(_BIZ_TOKEN_ENV) or ""
+        self._transport = transport
+
+    async def __call__(self, params) -> ReminderContextData:
+        if not self._base_url or not self._token:
+            raise BizReadError("biz 读接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
+        url = f"{self._base_url}/api/biz/crm/overdue-customers"
+        async with httpx.AsyncClient(
+            trust_env=False, timeout=10.0, transport=self._transport
+        ) as client:
+            resp = await client.get(url, headers={"X-Biz-Token": self._token})
+        if resp.status_code != 200:
+            raise BizReadError(f"biz 读接口 HTTP {resp.status_code}: {resp.text[:200]}")
+        # web 接口返回裸客户清单（list），包装进契约对象 {customers: [...]}
+        # （R22：provider 返回 = ReminderContextData，契约对齐链数据声明）
+        return ReminderContextData.model_validate({"customers": resp.json()})
+
+
 def build_providers(
     *,
     base_url: str | None = None,
@@ -98,6 +130,7 @@ def build_providers(
     """装配引擎侧 provider（key = provider 声明标识，runner providers 注入）。"""
     return {
         "crm.chat_context": CrmChatContextHTTP(base_url=base_url, token=token, transport=transport),
+        "crm.overdue_context": CrmOverdueContextHTTP(base_url=base_url, token=token, transport=transport),
         "tm.task_context": TmTaskContextHTTP(base_url=base_url, token=token, transport=transport),
     }
 
@@ -111,6 +144,7 @@ def _env_value(name: str) -> str | None:
 __all__ = [
     "BizReadError",
     "CrmChatContextHTTP",
+    "CrmOverdueContextHTTP",
     "TmTaskContextHTTP",
     "build_providers",
 ]

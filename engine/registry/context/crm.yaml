@@ -12,3 +12,13 @@
   returns:
     model: ChatContextData
   provider: crm.chat_context
+
+# v0.4 批 3b：提醒链数据供给（详设-v0.4 §10.2；决策 37-3 阈值同参）
+- id: crm_overdue_context
+  domain: crm
+  description: crm 超期客户清单（overdue-customers 读接口；提醒链白名单来源）
+  params:
+    model: ReminderContextParams
+  returns:
+    model: ReminderContextData
+  provider: crm.overdue_context

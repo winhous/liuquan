@@ -102,9 +102,10 @@ _STEP_REF_RE = re.compile(r"^steps\[(\d+)\]\.output(?:\.(.+))?$")
 _MODEL_SEARCH_MODULES = ("models.workers", "models.contract", "models")
 # L2 域枚举提示（运行期由枚举拼接，不写死业务词）
 _DOMAIN_LIST = "/".join(d.value for d in Domain)
-# L10 Action target 合法值（详设 §6.3 + 详设-v0.3 §5.4：v0.3 增 crm.todo_candidate——
-# crm.candidate 候选消费者落 crm.todo_candidate，决策 19/26）
-_ACTION_TARGETS = frozenset({"tm.proposal", "crm.todo_candidate"})
+# L10 Action target 合法值（详设 §6.3 + 详设-v0.3 §5.4 + 详设-v0.4 §10.3：
+# v0.3 增 crm.todo_candidate——crm.candidate 候选消费者落 crm.todo_candidate，决策 19/26；
+# v0.4 增 tm.task——tm.schedule 提醒消费者落 tm.task，决策 37-1）
+_ACTION_TARGETS = frozenset({"tm.proposal", "crm.todo_candidate", "tm.task"})
 
 
 class RegistryLoadError(Exception):

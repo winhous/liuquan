@@ -1,0 +1,11 @@
+# tm 域 Action 登记（详设-v0.4 §10.3；决策 37-1 提醒任务直接落 tm.task 不审核）
+# tm.schedule：crm_follow_up_reminder（纯代码工序）产出 ReminderResult（提醒数组）
+# 关联的 Action——链完成由消费者 tm.schedule 校验（禁幻觉三件套：evidence 非空 /
+# ref_id 命中白名单 / source 完整）后经写接口 POST /api/biz/tm/schedule-tasks
+# 直接落 tm.task（source_type=schedule，不经提案不进审核，决策 37-1）。
+# target 白名单 {tm.proposal, crm.todo_candidate, tm.task}（loader L10）。
+- action_id: tm.schedule
+  domain: tm
+  risk: suggest
+  output_model: ReminderResult
+  target: tm.task

@@ -32,6 +32,12 @@ models:
   IntentResult:
     version: 1
     hash: 486808bb1d48348a0f38e815ce4225aec7d5938f79e5b774a6b67a4c357c9df5
+  ReminderChainInput:
+    version: 1
+    hash: b84db865d65c528aa6f06855c9de2977298c9375bd067637512d73145c04d9c8
+  ReminderResult:
+    version: 1
+    hash: f07ccc40bf5d786973ca6a49cb9df932e469b94f2c35024e824eb876e5135750
   ReplyDraftInput:
     version: 1
     hash: 3dd997fe36927566ce7c5c13d2f1accd1bc0d1f6f3809b66ae4655a2c57e5a5a

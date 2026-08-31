@@ -216,6 +216,9 @@ class TaskRunner:
         writable_check: Callable[[], bool] | None = None,
         providers: dict[str, Callable[..., Any]] | None = None,
         backoff: float = 0.0,
+        default_max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
+        default_timeout_s: float = _DEFAULT_TIMEOUT_S,
+        backoff_cap: float = _BACKOFF_CAP_S,
     ) -> None:
         self._engine = engine
         self._registry = registry
@@ -224,6 +227,9 @@ class TaskRunner:
         self._repo_root = Path(repo_root).resolve() if repo_root is not None else None
         self._providers = dict(providers or {})
         self._backoff = backoff
+        self._default_max_attempts = default_max_attempts
+        self._default_timeout_s = default_timeout_s
+        self._backoff_cap = backoff_cap
         self._audit = AuditRecorder(_DbAuditDAO(engine))
         self._checkpoint_dao = _DbCheckpointDAO(engine)
         self._audit_gate = audit_gate
@@ -642,8 +648,8 @@ class TaskRunner:
                 f"工序 {worker.id} 的 output Model {worker.output.model} 不可解析"
                 "（loader L3 应已拦截）"
             )
-        timeout_s = worker.retry.timeout_s if worker.retry else _DEFAULT_TIMEOUT_S
-        max_attempts = worker.retry.max_attempts if worker.retry else _DEFAULT_MAX_ATTEMPTS
+        timeout_s = worker.retry.timeout_s if worker.retry else self._default_timeout_s
+        max_attempts = worker.retry.max_attempts if worker.retry else self._default_max_attempts
         try:
             prompt = self._render_prompt(
                 worker,
@@ -664,6 +670,7 @@ class TaskRunner:
                 reask_limit=model_config.reask_limit,
                 max_attempts=max_attempts,
                 backoff=self._backoff,
+                backoff_cap=self._backoff_cap,
                 audit_gate=self._audit_gate,
             )
         except Exception as exc:  # LLM 层异常（无静默降级）：显式 FAILED

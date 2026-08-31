@@ -1,0 +1,11 @@
+# crm_reminder_chain 链声明（v0.4 详设 §10.1；决策 33/37）
+# CRM 客户超 N 天未跟进提醒（每天自动跑）：
+# crm_follow_up_reminder（纯代码，从 overdue_context 生成提醒项）。
+# context 声明在工序 worker.yaml（R23 关系进声明），链不重复声明。
+id: crm_reminder_chain
+domain: crm
+description: CRM 未跟进提醒链（每天自动跑，每超期客户一条提醒任务）
+input:
+  model: ReminderChainInput
+steps:
+  - worker: crm_follow_up_reminder

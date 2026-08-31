@@ -63,6 +63,7 @@ __all__ = [
     "CreateTaskRequest",
     "CreateTaskResponse",
     "QueueConsumer",
+    "Scheduler",
     "TaskDetailResponse",
     "create_app",
 ]
@@ -86,8 +87,10 @@ _MODEL_SEARCH_MODULES = ("models.workers", "models.contract", "models")
 # TaskProposal 提取判据键（详设-v0.2 §7：末步 output 若含这些键即视为提案形态）
 _PROPOSAL_KEYS = frozenset({"title", "detail", "domain", "action_id", "evidence", "source"})
 
-# whitelist 提取键（任务书技术定：链 input 里含 ref_id 或 id 的字符串值）
-_REF_ID_KEYS = frozenset({"ref_id", "id"})
+# whitelist 提取键（任务书技术定：链 input 里含 ref_id 或 id 的字符串值；
+# v0.4 集成验收修复：+customer_id——提醒链 provider 的 ReminderCustomer 业务
+# 对象 id 字段名为 customer_id，白名单需收集否则提醒 evidence 被误判幻觉）
+_REF_ID_KEYS = frozenset({"ref_id", "id", "customer_id"})
 
 
 # ---- 纯函数助手 ----
@@ -133,11 +136,14 @@ def _now() -> datetime:
 
 
 def _collect_ref_ids(value: Any, out: set[str] | None = None) -> set[str]:
-    """递归收集 dict/list 里所有 ref_id/id 字段的字符串值（决策 16 白名单）。
+    """递归收集 dict/list 里所有 ref_id/id/customer_id 字段的字符串值（决策 16 白名单）。
 
     任务书技术定（v0.2）：白名单 = 本链喂给 AI 的数据集合（对象 id），简化为
     链 input 递归收集含 ref_id 或 id 的字符串值（demo 链 input 的 ref_id 即
     白名单；真实业务 v0.3 由 Context provider 声明数据集合）。
+    v0.4（集成验收修复）：提醒链 provider 返回 ReminderCustomer 的业务对象 id
+    字段名为 customer_id（对齐 crm 域对象口径），白名单收集需含该键——
+    否则提醒 evidence ref_id=customer_id 被误判「幻觉证据」拒落。
     """
     if out is None:
         out = set()
@@ -282,6 +288,81 @@ class RegistryResponse(BaseModel):
     events: list[EventSummary]
 
 
+# ---- schedule 接口契约（详设 §9.2）----
+
+
+def _validate_cron(cron: str) -> str:
+    """校验 daily cron（M H * * * 形）；合法返回原串，非法抛 HTTPException 422。
+
+    v0.4 仅支持每天跑（分/时两段为数字，其余为 *），不引第三方 cron 库。
+    复用 next_run_time 的校验逻辑（统一口径），失败时友好提示。
+    """
+    try:
+        _db.next_run_time(cron, datetime.now(timezone.utc))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"cron 校验失败：{exc}"
+        ) from exc
+    return cron
+
+
+class ScheduleSummary(BaseModel):
+    """GET /api/engine/schedules 每条调度项（详设 §9.2）。"""
+
+    id: int
+    chain_id: str
+    name: str
+    cron: str
+    enabled: bool
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    last_status: str = ""
+
+
+class ScheduleListResponse(BaseModel):
+    """GET /api/engine/schedules 响应（详设 §9.2）。"""
+
+    schedules: list[ScheduleSummary]
+
+
+class ScheduleCreateRequest(BaseModel):
+    """POST /api/engine/schedules 请求体（详设 §9.2）。"""
+
+    chain_id: str = Field(min_length=1)
+    schedule: str = Field(min_length=1, description="5 段 daily cron，如 '0 7 * * *'")
+    name: str = Field(min_length=1, max_length=100, default="")
+
+
+class ScheduleCreateResponse(BaseModel):
+    """POST /api/engine/schedules 响应 201（详设 §9.2）。"""
+
+    id: int
+
+
+class ScheduleToggleResponse(BaseModel):
+    """POST /api/engine/schedules/{id}/toggle 响应（详设 §9.2）。"""
+
+    enabled: bool
+
+
+class ScheduleTimeRequest(BaseModel):
+    """POST /api/engine/schedules/{id}/time 请求体（详设 §9.2）。"""
+
+    schedule: str = Field(min_length=1, description="5 段 daily cron")
+
+
+class ScheduleTimeResponse(BaseModel):
+    """POST /api/engine/schedules/{id}/time 响应（详设 §9.2）。"""
+
+    next_run_at: datetime
+
+
+class ScheduleRunResponse(BaseModel):
+    """POST /api/engine/schedules/{id}/run 响应（详设 §9.2）。"""
+
+    engine_task_id: str
+
+
 # ---- 后台队列消费循环（详设 §2.3）----
 
 
@@ -398,18 +479,16 @@ class QueueConsumer:
         await asyncio.gather(*(worker() for _ in range(self._concurrency)))
 
     async def _after_task(self, result: TaskResult) -> None:
-        """任务终态后的 TM 转交器钩子（详设 §5）：DONE 且末步产出提案时转交。
+        """任务终态后的 TM 转交器钩子（详设 §5 + §10.3）：DONE 且末步产出提案/候选/提醒时转交。
 
         - 非 DONE 直接返回（失败/暂停任务不转交）
-        - 提取 TaskProposal（末步 output 判据键，§7）；无提案产物 = 非 suggest
-          链，不转交
-        - 按 proposal.action_id 查消费者注册表（v0.2 仅 tm.proposal）；无消费者
-          = 防御跳过（loader L10 已保证 target 合法）
-        - 注入 registry / whitelist / audit_lookup / tm_engine 调消费者
-        - ConsumeOutcome.status == rejected -> 任务标 failed（error 记拒落原因，
-          详设 §3.2：违反禁幻觉三件套即拒落 + 链 FAILED）；skipped_* -> 任务
-          保持 done（转交器 skip 日志，决策 17 防重/幂等不改变链终态）
-        - 消费者抛异常 -> 任务标 failed（宁失败不假成功：提案没落库不能算成功）
+        - 末步产出三种形态（详设 §10.3 v0.4 扩展）：
+          1) TaskProposal（action_id 查消费者）-> tm.proposal / crm.candidate
+          2) TodoCandidateResult（todos 键）-> crm.candidate
+          3) ReminderResult（reminders 键）-> tm.schedule（详设 §10.3）
+        - 消费者 None = 防御跳过
+        - ConsumeOutcome.status == rejected -> 任务标 failed
+        - skipped_* -> 任务保持 done
         """
         if result.status != "done":
             return
@@ -418,24 +497,27 @@ class QueueConsumer:
             return
         step = await _db.get_last_step(self._engine, result.task_id)
         step_output = step.output if step is not None else None
-        # v0.3：链末步产出两种——TaskProposal（tm.proposal 转交器）或
-        # TodoCandidateResult（crm.candidate 候选消费者，决策 19/26）
+        # v0.3：链末步产出两种——TaskProposal / TodoCandidateResult
+        # v0.4：新增第三种——ReminderResult（详设 §10.3）
         proposal = _extract_proposal(step_output)
         candidate = None
-        if proposal is None:
+        reminders = None
+        consumer_key = None
+        if proposal is not None:
+            consumer_key = proposal.action_id
+        else:
             candidate = _extract_candidate(step_output)
-            if candidate is None:
-                return  # 非 suggest 链（无提案/候选产物），无转交
-        consumer = (
-            self._consumers.get(proposal.action_id)
-            if proposal is not None
-            else self._consumers.get("crm.candidate")
-        )
+            if candidate is not None:
+                consumer_key = "crm.candidate"
+            else:
+                reminders = _extract_reminders(step_output)
+                if reminders is not None:
+                    consumer_key = "tm.schedule"
+        if consumer_key is None:
+            return  # 非 suggest 链，无转交
+        consumer = self._consumers.get(consumer_key) if consumer_key else None
         if consumer is None:
             return
-        # v0.3 白名单正式化（决策 16③）：本链喂给 AI 的数据集合 = provider 返回
-        # id 集合（检查点 memory_state.context_data 递归收集）；缺省回退 v0.2
-        # 简化机制（链 input 递归收集）
         whitelist = await self._context_whitelist(result.task_id)
         if not whitelist:
             whitelist = _collect_ref_ids(task.input)
@@ -449,13 +531,18 @@ class QueueConsumer:
         if self._biz_client is not None:
             kwargs["biz_client"] = self._biz_client
         if candidate is not None:
-            # crm.candidate：source 由链上下文构造注入（TodoCandidateResult 无
-            # source 字段，技术定——详设-v0.3 §5.4）
             kwargs["source"] = await self._candidate_source(result.task_id, task)
+        elif reminders is not None:
+            # v0.4 §10.3：reminder 消费者 source 注入（chain_id/engine_task_id/
+            # worker_id/audit_ids + 从 reminders[0] 补 customer_id/reminder_date）
+            kwargs["source"] = await self._reminder_source(result.task_id, task, reminders)
         try:
-            outcome = await consumer(
-                proposal if proposal is not None else candidate, **kwargs
+            payload = (
+                proposal if proposal is not None
+                else candidate if candidate is not None
+                else reminders
             )
+            outcome = await consumer(payload, **kwargs)
         except Exception as exc:
             await _db.update_task(
                 self._engine,
@@ -474,8 +561,6 @@ class QueueConsumer:
                 finished_at=_now(),
             )
             return
-        # inserted / skipped_idempotent / skipped_duplicate：链保持 done
-        # （§8 安全日志：只记任务 id 与 outcome 状态，不记提案正文）
         print(f"tm transfer task={_fmt_task(result.task_id)} outcome={outcome.status}")
 
     async def _context_whitelist(self, task_id: int) -> set[str]:
@@ -506,6 +591,34 @@ class QueueConsumer:
             "chain_id": chain_id,
             "engine_task_id": _fmt_task(task_id),
             "worker_id": worker_id,
+            "audit_ids": audit_ids,
+        }
+
+    async def _reminder_source(
+        self, task_id: int, task: Any, reminders: dict[str, Any]
+    ) -> dict:
+        """v0.4 §10.3：reminder 消费者 source 注入（链上下文 + 首条 reminder 信息）。"""
+        chain_id = getattr(task, "chain_id", None) or ""
+        worker_id = ""
+        if chain_id:
+            chain = self._registry.chains.get(chain_id)
+            if chain is not None and chain.steps:
+                worker_id = chain.steps[-1].worker
+        async with AsyncSession(self._engine) as session:
+            rows = await session.execute(
+                select(_db.EngineAudit.id).where(_db.EngineAudit.task_id == task_id)
+            )
+            audit_ids = [str(r) for r in rows.scalars()]
+        # 从首条 reminder 补 customer_id/reminder_date（技术定：消费者用
+        # task.input 的 trigger_date + provider 白名单）
+        first_reminder = (reminders.get("reminders") or [{}])[0]
+        trigger_date = (task.input or {}).get("trigger_date", "")
+        return {
+            "chain_id": chain_id,
+            "engine_task_id": _fmt_task(task_id),
+            "worker_id": worker_id,
+            "customer_id": first_reminder.get("customer_id"),
+            "reminder_date": trigger_date,
             "audit_ids": audit_ids,
         }
 
@@ -550,6 +663,145 @@ def _audit_item(row: Any) -> AuditSummaryItem:
         duration_ms=row.duration_ms,
         created_at=row.created_at,
     )
+
+
+# ---- 调度器（详设 §9.3）----
+
+# ReminderResult 判据键（末步 output 含 "reminders" -> 走 tm.schedule 消费者）
+_REMINDER_KEYS = frozenset({"reminders"})
+
+
+def _extract_reminders(output: dict[str, Any] | None) -> dict[str, Any] | None:
+    """从链末步 output 提取 ReminderResult（详设 §10.3；task 第三种终态产出）。
+
+    判据：dict 含 "reminders" 列表 -> 提醒产出（tm.schedule 消费者处理）；
+    缺键/类型错返回 None。
+    """
+    if not isinstance(output, dict):
+        return None
+    if not isinstance(output.get("reminders"), list):
+        return None
+    return output
+
+
+class Scheduler:
+    """调度器：常驻 tick，到点触发定时链入队（详设 §9.3）。
+
+    构造注入 engine/registry + 可注入 interval（默认 30s）与 now 提供者
+    （测试桩时钟）；start()/stop() 管理 asyncio.Task 生命周期。
+
+    tick 逻辑：
+    1) ensure_seed_schedules()（空表种子，幂等）
+    2) 查 enabled 且 next_run_at <= now 且 (last_run_at IS NULL OR last_run_at < next_run_at) 的链
+    3) 逐条：mark_schedule_run + create_task
+    4) 触发异常 -> last_status='failed'，不阻塞其他链
+    """
+
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        registry: Registry,
+        *,
+        interval: float = 30.0,
+        now_fn: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._engine = engine
+        self._registry = registry
+        self._interval = max(1.0, float(interval))
+        self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+        self._task: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        """启动常驻 tick（幂等：已在运行不重复建任务）。"""
+        if self._task is not None and not self._task.done():
+            return
+        self._task = asyncio.create_task(self._run(), name="engine-scheduler")
+
+    async def stop(self) -> None:
+        """停止常驻 tick（幂等）。"""
+        task = self._task
+        self._task = None
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def tick(self) -> None:
+        """单次 tick 执行体（详设 §9.3，可供测试直接调用）。"""
+        await _db.ensure_seed_schedules(self._engine)
+        now = self._now_fn()
+        today_str = now.strftime("%Y-%m-%d")
+        rows = await _db.list_schedules(self._engine)
+        for row in rows:
+            if not row.enabled:
+                continue
+            if row.next_run_at is None:
+                # 初始化锚点（新建/种子链，详设 §9.3）：算下一个 HH:MM 落库，
+                # 不立即触发（新链从下次计划开始，验收「种子链开箱可用」）
+                initial = _db.next_run_time(row.cron, now)
+                await _db.update_schedule(
+                    self._engine, row.id, next_run_at=initial, set_next_run_at=True
+                )
+                continue
+            if row.next_run_at > now:
+                continue
+            if row.last_run_at is not None and row.last_run_at >= row.next_run_at:
+                continue
+            # 到点触发
+            try:
+                new_next = _db.next_run_time(row.cron, now)
+                await _db.mark_schedule_run(
+                    self._engine,
+                    row.id,
+                    last_run_at=row.next_run_at,
+                    next_run_at=new_next,
+                )
+                task_id = await _db.create_task(
+                    self._engine,
+                    chain_id=row.chain_id,
+                    trigger_type="schedule",
+                    trigger_ref=str(row.id),
+                    input_={"trigger_date": today_str},
+                )
+                print(
+                    f"scheduler: 触发 {row.chain_id} (schedule={row.id}) "
+                    f"-> task {_fmt_task(task_id)}"
+                )
+            except Exception as exc:
+                # 触发异常：last_status='failed' 记录，不阻塞其他链
+                try:
+                    async with _db._sessions(self._engine)() as session, session.begin():
+                        from engine.core.db import Schedule as _Schedule
+                        from sqlalchemy import update as _update
+
+                        await session.execute(
+                            _update(_Schedule)
+                            .where(_Schedule.id == row.id)
+                            .values(
+                                last_status="failed",
+                                updated_at=_db.func.now(),
+                            )
+                        )
+                except Exception:
+                    pass  # 记录失败也异常 -> 忽略，不阻塞
+                print(
+                    f"scheduler: 链 {row.chain_id} (schedule={row.id}) 触发失败："
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+    async def _run(self) -> None:
+        """常驻 tick 循环（详设 §9.3）。"""
+        while True:
+            try:
+                await self.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"scheduler tick 异常：{type(exc).__name__}: {exc}")
+            await asyncio.sleep(self._interval)
 
 
 def _register_routes(app: FastAPI, engine: AsyncEngine, registry: Registry) -> None:
@@ -649,18 +901,186 @@ def _register_routes(app: FastAPI, engine: AsyncEngine, registry: Registry) -> N
             ],
         )
 
+    # ---- schedule 管理接口（详设 §9.2）----
 
-def _make_lifespan(consumer: QueueConsumer) -> Callable[[FastAPI], Any]:
-    """FastAPI lifespan：启动时崩溃恢复 + 启动消费循环；关闭时停止（§2.3）。"""
+    @app.get("/api/engine/schedules", response_model=ScheduleListResponse)
+    async def list_schedules() -> ScheduleListResponse:
+        """GET /api/engine/schedules：定时链列表（web 设置页数据源）。"""
+        rows = await _db.list_schedules(engine)
+        return ScheduleListResponse(
+            schedules=[
+                ScheduleSummary(
+                    id=r.id,
+                    chain_id=r.chain_id,
+                    name=r.name,
+                    cron=r.cron,
+                    enabled=r.enabled,
+                    last_run_at=r.last_run_at,
+                    next_run_at=r.next_run_at,
+                    last_status=r.last_status,
+                )
+                for r in rows
+            ]
+        )
+
+    @app.post(
+        "/api/engine/schedules",
+        response_model=ScheduleCreateResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_schedule(payload: ScheduleCreateRequest) -> ScheduleCreateResponse:
+        """POST /api/engine/schedules：新增定时链（详设 §9.2）。
+
+        校验：chain_id 必须命中 registry.chains（否则 422）；cron 必须 daily 形；
+        创建时计算 next_run_at 并落库。
+        """
+        if payload.chain_id not in registry.chains:
+            raise HTTPException(status_code=422, detail="chain_id not in registry")
+        cron = _validate_cron(payload.schedule)
+        now = datetime.now(timezone.utc)
+        next_run = _db.next_run_time(cron, now)
+        name = payload.name or payload.chain_id
+        schedule_id = await _db.create_schedule(
+            engine,
+            chain_id=payload.chain_id,
+            name=name,
+            cron=cron,
+            enabled=True,
+        )
+        await _db.update_schedule(engine, schedule_id, cron=cron)
+        # 创建后单独更新 next_run_at（create_schedule 不设此字段）
+        async with _db._sessions(engine)() as session, session.begin():
+            from engine.core.db import Schedule as _Schedule
+            from sqlalchemy import update as _update
+
+            await session.execute(
+                _update(_Schedule)
+                .where(_Schedule.id == schedule_id)
+                .values(next_run_at=next_run, updated_at=_db.func.now())
+            )
+        return ScheduleCreateResponse(id=schedule_id)
+
+    @app.post("/api/engine/schedules/{schedule_id}/toggle", response_model=ScheduleToggleResponse)
+    async def toggle_schedule(schedule_id: int) -> ScheduleToggleResponse:
+        """POST /api/engine/schedules/{id}/toggle：enabled 翻转（详设 §9.2）。"""
+        row = await _db.get_schedule(engine, schedule_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="schedule not found")
+        new_enabled = not row.enabled
+        await _db.update_schedule(engine, schedule_id, enabled=new_enabled)
+        return ScheduleToggleResponse(enabled=new_enabled)
+
+    @app.post("/api/engine/schedules/{schedule_id}/time", response_model=ScheduleTimeResponse)
+    async def update_schedule_time(schedule_id: int, payload: ScheduleTimeRequest) -> ScheduleTimeResponse:
+        """POST /api/engine/schedules/{id}/time：改 cron + 重算 next_run_at（详设 §9.2）。"""
+        row = await _db.get_schedule(engine, schedule_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="schedule not found")
+        cron = _validate_cron(payload.schedule)
+        now = datetime.now(timezone.utc)
+        next_run = _db.next_run_time(cron, now)
+        await _db.update_schedule(engine, schedule_id, cron=cron)
+        async with _db._sessions(engine)() as session, session.begin():
+            from engine.core.db import Schedule as _Schedule
+            from sqlalchemy import update as _update
+
+            await session.execute(
+                _update(_Schedule)
+                .where(_Schedule.id == schedule_id)
+                .values(next_run_at=next_run, updated_at=_db.func.now())
+            )
+        return ScheduleTimeResponse(next_run_at=next_run)
+
+    @app.post("/api/engine/schedules/{schedule_id}/run", response_model=ScheduleRunResponse)
+    async def run_schedule(schedule_id: int) -> ScheduleRunResponse:
+        """POST /api/engine/schedules/{id}/run：立即运行（决策 37-7）。
+
+        create_task 入队（trigger_type=manual_schedule, trigger_ref=schedule_id,
+        input={'trigger_date': 今天 YYYY-MM-DD}）；不动 last_run_at/next_run_at。
+        """
+        row = await _db.get_schedule(engine, schedule_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="schedule not found")
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        task_id = await _db.create_task(
+            engine,
+            chain_id=row.chain_id,
+            trigger_type="manual_schedule",
+            trigger_ref=str(schedule_id),
+            input_={"trigger_date": today_str},
+        )
+        return ScheduleRunResponse(engine_task_id=_fmt_task(task_id))
+
+
+async def _read_engine_params_from_biz(
+    biz_client: BizApiClient | None,
+) -> dict[str, Any]:
+    """启动时经 biz_client 读 web 侧引擎参数（详设 §7.3/§8）。
+
+    成功返回 {default_max_attempts, default_timeout_s, backoff_cap}；
+    失败（BizApiError/网络）回退默认 {2, 30.0, 30} + warning 不阻塞启动。
+    """
+    defaults: dict[str, Any] = {
+        "default_max_attempts": 2,
+        "default_timeout_s": 30.0,
+        "backoff_cap": 30.0,
+    }
+    if biz_client is None:
+        return defaults
+    try:
+        resp = await biz_client.get("/settings/engine-params")
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "default_max_attempts": int(data.get("max_attempts", 2)),
+                "default_timeout_s": float(data.get("timeout_s", 30.0)),
+                "backoff_cap": float(data.get("backoff_cap", 30.0)),
+            }
+        print(
+            f"warning: 读取引擎参数失败（HTTP {resp.status_code}），回退默认值"
+        )
+    except Exception as exc:
+        print(
+            f"warning: 读取引擎参数异常（{type(exc).__name__}: {exc}），"
+            "回退默认值（{2, 30.0, 30}）"
+        )
+    return defaults
+
+
+def _make_lifespan(
+    consumer: QueueConsumer,
+    scheduler: Scheduler | None = None,
+    biz_client: BizApiClient | None = None,
+    runner_factory: Callable[[dict[str, Any]], Any] | None = None,
+) -> Callable[[FastAPI], Any]:
+    """FastAPI lifespan：启动时崩溃恢复 + 读引擎参数注入 runner + 启动消费循环 + 调度器。
+
+    runner_factory: 可选——接收 engine_params dict（{default_max_attempts,
+    default_timeout_s, backoff_cap}，读取失败时已回退默认），返回新 TaskRunner。
+    默认构造 runner 路径（create_app 未显式注入 runner）传它：lifespan 内读取
+    web 侧引擎参数后**重建 runner 并替换 consumer._runner**（TaskRunner 构造后
+    无状态只读，替换安全），使 settings 的 engine.* 参数真正生效（详设 §7.3：
+    页面改引擎参数 -> 重启引擎生效）；读取失败 -> params 为默认值，重建等价
+    原 runner（决策 34 表无回退默认）。
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # 读取引擎参数（详设 §7.3：启动时读一次）并注入 runner
+        if biz_client is not None and runner_factory is not None:
+            engine_params = await _read_engine_params_from_biz(biz_client)
+            app.state.engine_params = engine_params
+            consumer._runner = runner_factory(engine_params)
         for line in await consumer.recover():
             print(line)
         consumer.start()
+        if scheduler is not None:
+            scheduler.start()
         try:
             yield
         finally:
+            if scheduler is not None:
+                await scheduler.stop()
             await consumer.stop()
 
     return lifespan
@@ -676,10 +1096,14 @@ def create_app(
     biz_client: BizApiClient | None = None,
     concurrency: int = 2,
     poll_interval: float = 0.5,
+    scheduler_interval: float = 30.0,
+    scheduler_enabled: bool = True,
+    scheduler_now_fn: Callable[[], datetime] | None = None,
 ) -> FastAPI:
     """构造引擎常驻 FastAPI app（注入式设计，规范 R12）。
 
-    三接口 + 后台队列消费循环 + TM 转交器钩子全部装配；依赖全部可注入：
+    三接口 + schedule 五接口 + 后台队列消费循环 + TM 转交器钩子 + 调度器
+    全部装配；依赖全部可注入：
     - engine：引擎库 AsyncEngine（必填）
     - registry：真注册表（必填；POST 链登记校验 / GET registry 清单 / 转交
       注入的 Action 声明与工序声明）
@@ -687,17 +1111,25 @@ def create_app(
       传 agent_factory/model_registry/repo_root/writable_check 等）；测试
       可注入桩（真 TaskRunner + FakeAgent 或脚本桩）
     - consumers：Action 消费者注册表；None 时取 engine.actions.CONSUMERS
-      （v0.2 仅 tm.proposal -> TM 转交器）
-    - tm_engine：业务库 AsyncEngine（转交器落库用；None 时消费者自建真连接）
     - concurrency：队列消费并发上限（§2.3：2）；poll_interval：空队列退避秒
+    - scheduler_interval：调度器 tick 间隔秒（默认 30）；scheduler_enabled：
+      是否启动调度器（测试可禁用）；scheduler_now_fn：桩时钟（测试用）
 
-    返回的 app.state.consumer 即 QueueConsumer（lifespan 自动 start/stop；
-    ASGITransport 测试不跑 lifespan，可手动 consumer.start()/stop()）。
+    返回的 app.state.consumer / app.state.scheduler 即 QueueConsumer/Scheduler
+    （lifespan 自动 start/stop；ASGITransport 测试不跑 lifespan，可手动
+    consumer.start()/stop()、scheduler.tick()）。
     """
     if runner is None:
         if not runner_kwargs:
             raise ValueError("create_app 需要 runner 或 runner_kwargs（常驻消费依赖执行器）")
         runner = TaskRunner(engine, registry, **runner_kwargs)
+        # 默认构造路径：lifespan 读取引擎参数后重建 runner 并替换（真正注入，
+        # 详设 §7.3 engine.* 参数；runner_kwargs 显式键优先，读取参数只补缺省）
+        default_runner_factory = lambda params: TaskRunner(  # noqa: E731
+            engine, registry, **{**runner_kwargs, **params}
+        )
+    else:
+        default_runner_factory = None
     consumer = QueueConsumer(
         engine=engine,
         registry=registry,
@@ -707,10 +1139,27 @@ def create_app(
         concurrency=concurrency,
         poll_interval=poll_interval,
     )
-    app = FastAPI(title="liuquan-engine", lifespan=_make_lifespan(consumer))
+    scheduler = None
+    if scheduler_enabled:
+        scheduler = Scheduler(
+            engine,
+            registry,
+            interval=scheduler_interval,
+            now_fn=scheduler_now_fn,
+        )
+    app = FastAPI(
+        title="liuquan-engine",
+        lifespan=_make_lifespan(
+            consumer,
+            scheduler=scheduler,
+            biz_client=biz_client,
+            runner_factory=default_runner_factory,
+        ),
+    )
     app.state.engine = engine
     app.state.registry = registry
     app.state.consumer = consumer
+    app.state.scheduler = scheduler
     _register_routes(app, engine, registry)
     return app
 

@@ -185,12 +185,14 @@ async def call_llm(
     reask_limit: int = DEFAULT_REASK_LIMIT,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     backoff: float = DEFAULT_BACKOFF_S,
+    backoff_cap: float = BACKOFF_CAP_S,
     audit_gate: AuditGate | None = None,
 ) -> LLMCallResult[Any]:
     """封装一次 LLM 调用（重试/超时/re-ask/审计门/用量，见模块 docstring）。
 
     ``agent`` 可以是真 PydanticAI Agent 或 tests/ 注入的桩（二者共用 run
     契约）；``backoff=0`` 可在测试中关闭退避等待。
+    ``backoff_cap`` 退避封顶秒（详设 §7.3：engine.backoff_cap 注入点）。
     """
     # 先审计后调用（§7.3）：审计不可写 = 调用不允许发生，任何调用前先检查
     if audit_gate is not None:
@@ -210,7 +212,7 @@ async def call_llm(
                 raise  # 非网络/超时/5xx：原样上抛（显式失败，不静默）
             causes.append(exc)
             if attempt < max_attempts:
-                await asyncio.sleep(_backoff_seconds(backoff, attempt))
+                await asyncio.sleep(_backoff_seconds(backoff, attempt, backoff_cap))
     raise LLMRetryExhaustedError(
         attempts=max_attempts + 1, causes=tuple(causes)
     ) from causes[-1]
@@ -263,6 +265,6 @@ def _is_retryable_error(exc: Exception) -> bool:
     return isinstance(status, int) and 500 <= status < 600
 
 
-def _backoff_seconds(backoff: float, retry_index: int) -> float:
-    """指数退避：``min(backoff * 2**k, 30s)``（§14「5s→30s」区间描述）。"""
-    return min(backoff * (2 ** retry_index), BACKOFF_CAP_S)
+def _backoff_seconds(backoff: float, retry_index: int, cap: float = BACKOFF_CAP_S) -> float:
+    """指数退避：``min(backoff * 2**k, cap)``（§14「5s→30s」区间描述）。"""
+    return min(backoff * (2 ** retry_index), cap)
