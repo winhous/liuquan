@@ -57,7 +57,10 @@ class Rule(ABC):
 
 
 # ---- 全仓 .py 收集的剪枝配置（「扫全仓」= 仓库自身源码；环境/缓存产物不进）----
-_PRUNED_DIR_NAMES = frozenset({"__pycache__", "node_modules", "dist", "build", ".pgdata"})
+# v0.5：加 vendor（第三方库目录 XHS-Downloader 186MB 不入库但部署时落盘，非刘全源码）
+_PRUNED_DIR_NAMES = frozenset(
+    {"__pycache__", "node_modules", "dist", "build", ".pgdata", "vendor"}
+)
 _PRUNED_DIR_SUFFIXES = (".egg-info",)
 
 
@@ -67,7 +70,7 @@ def iter_py_files(
     """递归收集 repo_root 下全部 .py。
 
     剪枝：隐藏目录（.git/.venv/.pytest_cache/.claude 等）、__pycache__、
-    node_modules、dist、build、*.egg-info、.pgdata；
+    node_modules、dist、build、*.egg-info、.pgdata、vendor（第三方库）；
     豁免：skip_subtrees 指定的子树（相对 repo_root 的 posix 路径，
     如 "engine/core/llm"）整体不进扫描对象。
     """
