@@ -134,9 +134,16 @@ MODULES: list[dict[str, Any]] = [
      "desc": "关键词研究 / 标题优化 / 体检（v0.5，数据源 eHunt）"},
     {"id": "scrape", "name": "扒图", "icon": "ti ti-photo", "href": "/modules/scrape",
      "desc": "选品扒图 / 图片体检（v0.5，建设中）"},
-    # ---- 设置一级菜单（v0.4 批 2a，详设 §7.1）----
+    # ---- 设置一级菜单（v0.4 批 2a，详设 §7.1；复核反馈 2026-09-01：三分组——
+    # 基础设置/AI 设置/系统设置，所有设置项归组，分组标题不可点）----
     {"id": "settings", "name": "设置", "icon": "ti ti-settings", "href": "/settings/params",
      "children": [
+         {"id": "settings-basic", "name": "基础设置", "icon": "ti ti-building-store",
+          "href": "", "group": True,
+          "children": [
+              {"id": "settings-shops", "name": "店铺管理", "icon": "ti ti-building-store",
+               "href": "/settings/shops"},
+          ]},
          {"id": "settings-ai", "name": "AI 设置", "icon": "ti ti-brand-openai",
           "href": "", "group": True,
           "children": [
@@ -147,14 +154,16 @@ MODULES: list[dict[str, Any]] = [
               {"id": "settings-ai-style", "name": "风格指南术语表", "icon": "ti ti-file-text",
                "href": "/settings/ai/style", "placeholder": True},
           ]},
-         {"id": "settings-shops", "name": "店铺管理", "icon": "ti ti-building-store",
-          "href": "/settings/shops"},
-         {"id": "settings-schedule", "name": "定时任务", "icon": "ti ti-clock",
-          "href": "/settings/schedule"},
-         {"id": "settings-notify", "name": "通知配置", "icon": "ti ti-bell",
-          "href": "/settings/notify"},
-         {"id": "settings-params", "name": "系统参数", "icon": "ti ti-adjustments",
-          "href": "/settings/params"},
+         {"id": "settings-system", "name": "系统设置", "icon": "ti ti-settings",
+          "href": "", "group": True,
+          "children": [
+              {"id": "settings-schedule", "name": "定时任务", "icon": "ti ti-clock",
+               "href": "/settings/schedule"},
+              {"id": "settings-notify", "name": "通知配置", "icon": "ti ti-bell",
+               "href": "/settings/notify"},
+              {"id": "settings-params", "name": "系统参数", "icon": "ti ti-adjustments",
+               "href": "/settings/params"},
+          ]},
      ]},
 ]
 

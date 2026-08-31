@@ -147,3 +147,20 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
 .page-body .alert-link { color: #000 !important; font-weight: 600; }
 /* 派生链接（a.badge 复用）已在徽章规则里统一黑字；统计卡图标 ti 图标继承
    父级文字色，随上面规则一并变黑（图标本身无色语义） */
+
+/* 4) 设置导航分组样式（v0.4 复核反馈 2026-09-01：分组标题须与一级菜单明显区分，
+   且所有设置项按大类归组——基础设置/AI 设置/系统设置） */
+.navbar-vertical .nav-item-header {
+  margin-top: 0.625rem;              /* 与上一组/叶子拉开距离 */
+  padding: 0.25rem 0.875rem;
+  font-size: 0.6875rem;              /* 小号（一级菜单 0.9375rem） */
+  font-weight: 600;
+  letter-spacing: 0.06em;            /* 字距拉开，类目感 */
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);  /* 淡灰（一级菜单近白）——明显弱于一级 */
+  border-top: 1px solid rgba(255, 255, 255, 0.07);  /* 顶部细分隔线 */
+}
+/* 分组下叶子菜单：缩进体现层级（与分组标题、与一级菜单都区分） */
+.navbar-vertical .nav-sm .nav-item .nav-link {
+  padding-left: 1.375rem;
+}

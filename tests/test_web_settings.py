@@ -83,6 +83,21 @@ def test_settings_nav_in_sidebar(client: TestClient) -> None:
     assert "AI 设置" in resp.text
 
 
+def test_nav_three_groups_rendered(client: TestClient) -> None:
+    """导航（复核反馈 2026-09-01）：设置页按大类分组——基础设置/AI 设置/系统设置
+    三个分组标题 + 各自叶子；所有设置项都归组（无平级散项）。"""
+    _login(client)
+    resp = client.get("/settings/shops")
+    assert resp.status_code == 200
+    # 三个分组标题（nav-item-header 不可点）
+    assert resp.text.count("nav-item-header") >= 3
+    for group in ("基础设置", "AI 设置", "系统设置"):
+        assert group in resp.text
+    # 叶子归组：店铺管理（基础）/API 密钥（AI）/定时任务+通知配置+系统参数（系统）
+    for leaf in ("店铺管理", "API 密钥", "定时任务", "通知配置", "系统参数"):
+        assert leaf in resp.text
+
+
 def test_nav_group_title_not_link(client: TestClient) -> None:
     """导航：AI 设置是分组标题（group=true），渲染为 nav-item-header（不可点击）。"""
     _login(client)
