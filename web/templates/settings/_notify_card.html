@@ -1,0 +1,45 @@
+{# 通知配置卡片块（整页 include + HTMX 局部刷新片段共用；上下文：feishu_enabled/webhook_configured/msg/err） #}
+<div class="card" id="notify-card">
+  <div class="card-header">
+    <h3 class="card-title">飞书通知</h3>
+  </div>
+  <div class="card-body">
+    <form hx-post="/settings/notify" hx-target="#notify-card" hx-swap="outerHTML">
+      <div class="mb-3">
+        <label class="form-label">通知总开关</label>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="feishu_enabled"
+                 role="switch" id="feishuEnabled"
+                 {{ 'checked' if feishu_enabled else '' }}>
+          <label class="form-check-label" for="feishuEnabled">启用飞书通知</label>
+        </div>
+        <small class="text-muted">关闭后，所有飞书通知将暂停发送。</small>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">飞书 Webhook URL</label>
+        <input name="webhook_url" type="password" class="form-control"
+               placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
+        {% if webhook_configured %}
+        <small class="text-muted">当前状态：<span class="badge bg-success-lt">已配置</span></small>
+        {% else %}
+        <small class="text-muted">当前状态：<span class="badge bg-secondary-lt">未配置</span></small>
+        {% endif %}
+      </div>
+      <p class="text-muted small">
+        <i class="ti ti-info-circle me-1"></i>
+        Webhook URL 存储在 .env 文件中（R20 密钥纪律）。
+      </p>
+      <button class="btn btn-primary">保存配置</button>
+    </form>
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>

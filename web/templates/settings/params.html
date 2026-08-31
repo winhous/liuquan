@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}系统参数 · 设置 · 刘全{% endblock %}
+{% block content_title %}系统参数{% endblock %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-md-9">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">系统参数配置</h3>
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-3">
+          <i class="ti ti-info-circle me-1"></i>
+          修改参数后点击「保存」即可生效（引擎相关参数需重启引擎）。
+        </p>
+        <div class="table-responsive">
+          <table class="table table-vcenter">
+            <thead>
+              <tr>
+                <th>参数名</th>
+                <th>描述</th>
+                <th>当前值</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for param in params %}
+              {% include "settings/_params_row.html" %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if msg %}
+        <div class="alert alert-success mt-3 mb-0" role="alert">
+          <i class="ti ti-check me-1"></i>{{ msg }}
+        </div>
+        {% endif %}
+        {% if err %}
+        <div class="alert alert-danger mt-3 mb-0" role="alert">
+          <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

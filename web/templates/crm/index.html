@@ -71,7 +71,13 @@
           </div>
           <div class="mb-2">
             <label class="form-label">来源店铺</label>
-            <input name="source_shop" class="form-control">
+            <select name="source_shop" class="form-select">
+              <option value="">未选择</option>
+              {% for shop in shops %}
+              <option value="{{ shop.name }}">{{ shop.name }}</option>
+              {% endfor %}
+            </select>
+            <small class="text-muted">选中店铺名写入客户来源（存量自由文本保留不变）</small>
           </div>
           <div class="mb-2">
             <label class="form-label">备注</label>

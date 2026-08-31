@@ -36,6 +36,7 @@ from models.tm import Task, TaskProposal
 from web.crm_store import CRMStore, CrmWebError
 from web.engineapi.client import EngineAPIError, EngineAPIClient
 from web.feishu import send_task_card
+from web.settings_store import SettingsError, SettingsStore
 from web.tm_store import (
     ROLE_VALUES,
     TMStore,
@@ -45,6 +46,8 @@ from web.tm_store import (
 )
 
 BASE = Path(__file__).resolve().parent
+_REPO_ROOT = BASE.parent
+_DOTENV_PATH = _REPO_ROOT / ".env"
 
 # 角色：cookie 存 ASCII 键（latin-1 限制），显示映射中文标签（原型保留）
 ROLES: list[tuple[str, str]] = [("admin", "管理员"), ("ops", "运营"), ("buyer", "采购")]
@@ -131,6 +134,28 @@ MODULES: list[dict[str, Any]] = [
      "desc": "关键词研究 / 标题优化 / 体检（v0.5，数据源 eHunt）"},
     {"id": "scrape", "name": "扒图", "icon": "ti ti-photo", "href": "/modules/scrape",
      "desc": "选品扒图 / 图片体检（v0.5，建设中）"},
+    # ---- 设置一级菜单（v0.4 批 2a，详设 §7.1）----
+    {"id": "settings", "name": "设置", "icon": "ti ti-settings", "href": "/settings/params",
+     "children": [
+         {"id": "settings-ai", "name": "AI 设置", "icon": "ti ti-brand-openai",
+          "href": "", "group": True,
+          "children": [
+              {"id": "settings-ai-key", "name": "API 密钥", "icon": "ti ti-key",
+               "href": "/settings/ai/api-key"},
+              {"id": "settings-ai-model", "name": "模型选择", "icon": "ti ti-brain",
+               "href": "/settings/ai/model", "placeholder": True},
+              {"id": "settings-ai-style", "name": "风格指南术语表", "icon": "ti ti-file-text",
+               "href": "/settings/ai/style", "placeholder": True},
+          ]},
+         {"id": "settings-shops", "name": "店铺管理", "icon": "ti ti-building-store",
+          "href": "/settings/shops"},
+         {"id": "settings-schedule", "name": "定时任务", "icon": "ti ti-clock",
+          "href": "/settings/schedule"},
+         {"id": "settings-notify", "name": "通知配置", "icon": "ti ti-bell",
+          "href": "/settings/notify"},
+         {"id": "settings-params", "name": "系统参数", "icon": "ti ti-adjustments",
+          "href": "/settings/params"},
+     ]},
 ]
 
 
@@ -228,6 +253,55 @@ def _redirect(
     return RedirectResponse(url, status_code=303)
 
 
+def _hx_redirect(
+    path: str,
+    *,
+    msg: str | None = None,
+    err: str | None = None,
+) -> RedirectResponse:
+    """HTMX 局部刷新：303 重定向让 HTMX 跟随并局部替换。"""
+    params: dict[str, str] = {}
+    if msg:
+        params["msg"] = msg
+    if err:
+        params["err"] = err
+    qs = urlencode(params)
+    url = f"{path}?{qs}" if qs else path
+    return RedirectResponse(url, status_code=303)
+
+
+def _check_env_key(name: str) -> bool:
+    """检查 .env 中是否已配置指定密钥（R20：不回显值，只返回是否已配置）。"""
+    from dotenv import dotenv_values
+    values = dotenv_values(_DOTENV_PATH)
+    val = (values.get(name) or "").strip()
+    return bool(val)
+
+
+def _time_to_cron(trigger_time: str) -> str:
+    """'HH:MM' -> cron 5 段 'M H * * *'（分 时 日 月 周）；非法输入回退默认 07:00。"""
+    try:
+        hour, minute = trigger_time.strip().split(":")
+        h, m = int(hour), int(minute)
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            return "0 7 * * *"
+        return f"{m:02d} {h:02d} * * *"
+    except (ValueError, TypeError):
+        return "0 7 * * *"
+
+
+# 系统参数键清单（详设 §7.3：七键；每个键独立存/独立提交）
+_PARAM_DEFS: list[dict[str, Any]] = [
+    {"key": "crm.follow_up_days", "description": "客户跟进逾期天数阈值（int）", "type": "int", "default": 5},
+    {"key": "crm.page_size", "description": "客户列表每页条数（int）", "type": "int", "default": 20},
+    {"key": "schedule.default_time", "description": "定时链默认触发时间（HH:MM）", "type": "time", "default": "07:00"},
+    {"key": "engine.max_attempts", "description": "LLM 重试次数（int）", "type": "int", "default": 2},
+    {"key": "engine.timeout_s", "description": "LLM 单次超时秒（float）", "type": "float", "default": 30},
+    {"key": "engine.backoff_cap", "description": "LLM 退避封顶秒（int）", "type": "int", "default": 30},
+    {"key": "notify.feishu_enabled", "description": "飞书通知总开关（bool）", "type": "bool", "default": True},
+]
+
+
 def _store(request: Request) -> TMStore:
     return request.app.state.tm_store
 
@@ -236,12 +310,17 @@ def _engine_client(request: Request) -> EngineAPIClient:
     return request.app.state.engine_client_factory()
 
 
+def _settings_store(request: Request) -> SettingsStore:
+    return request.app.state.settings_store
+
+
 # ---- 应用工厂（测试构造注入：tm_store / engine_client_factory）----
 
 def create_app(
     *,
     tm_store: TMStore | None = None,
     crm_store: CRMStore | None = None,
+    settings_store: SettingsStore | None = None,
     engine_client_factory: Callable[[], EngineAPIClient] | None = None,
 ) -> FastAPI:
     """建 web 应用；依赖可注入（R12：测试注入嵌入式 PG store + MockTransport 引擎桩）。"""
@@ -252,16 +331,27 @@ def create_app(
             app_.state.tm_store = TMStore.from_env()  # 生产：.env 连接串
         if app_.state.crm_store is None:
             app_.state.crm_store = CRMStore.from_env()
+        if app_.state.settings_store is None:
+            app_.state.settings_store = SettingsStore.from_env()
         yield
         await app_.state.tm_store.dispose()
         await app_.state.crm_store.dispose()
+        await app_.state.settings_store.dispose()
 
     app = FastAPI(title="刘全 · 综合智能运营系统（v0.2）", lifespan=_lifespan)
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
     templates = Jinja2Templates(directory=BASE / "templates")
     app.state.tm_store = tm_store
     app.state.crm_store = crm_store
+    app.state.settings_store = settings_store
     app.state.engine_client_factory = engine_client_factory or (lambda: EngineAPIClient())
+
+    # ---- 设置页登录保护（决策 37-5：所有「登录用户」可访问；未登录拦到 /login）----
+    @app.middleware("http")
+    async def _settings_login_guard(request: Request, call_next):
+        if request.url.path.startswith("/settings") and not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        return await call_next(request)
 
     # ---- 业务读写接口（v0.3 决策 26 接口化：引擎经 /api/biz/* 读写业务数据，不直连业务库）----
     from web.api_biz import create_biz_router
@@ -564,6 +654,9 @@ def create_app(
         rows, total = await request.app.state.crm_store.list_customers(
             q=q, status=status, page=page_no
         )
+        # CRM source_shop 下拉候选（详设 §4 / 决策 37-6）
+        settings_store = _settings_store(request)
+        shops = await settings_store.list_shops() if settings_store else []
         return templates.TemplateResponse(
             request,
             "crm/index.html",
@@ -575,6 +668,7 @@ def create_app(
                 rows=rows,
                 total=total,
                 page=page_no,
+                shops=shops,
                 status_filters=[
                     ("", "进行中"), ("waiting_reply", "待回复"), ("replied", "已回复"),
                     ("closed_deal", "已成交"), ("on_hold", "搁置"), ("archived", "归档"),
@@ -861,6 +955,325 @@ def create_app(
         except EngineAPIError as exc:
             return JSONResponse({"ok": False, "error": str(exc)})
         return JSONResponse({"ok": True, "engine_task_id": resp["task_id"]})
+
+    # ---- 设置页（v0.4 批 2a，详设 §7.1/§7.2）----
+
+    async def _shops_rows_fragment(
+        request: Request, *, msg: str = "", err: str = ""
+    ) -> TemplateResponse:
+        """店铺列表 tbody 片段（HTMX 局部刷新：只刷新列表区，不整页不牵连其他块）。"""
+        store = _settings_store(request)
+        shops = await store.list_shops(include_disabled=True)
+        return templates.TemplateResponse(
+            request, "settings/_shops_rows.html",
+            _ctx(request, "settings-shops", shops=shops, msg=msg, err=err),
+        )
+
+    @app.get("/settings/ai/model")
+    def settings_ai_model_placeholder(request: Request):
+        return templates.TemplateResponse(
+            request, "settings/placeholder.html",
+            _ctx(request, "settings-ai-model", page_name="模型选择"),
+        )
+
+    @app.get("/settings/ai/style")
+    def settings_ai_style_placeholder(request: Request):
+        return templates.TemplateResponse(
+            request, "settings/placeholder.html",
+            _ctx(request, "settings-ai-style", page_name="风格指南术语表"),
+        )
+
+    @app.get("/settings/ai/api-key")
+    def settings_ai_api_key(request: Request):
+        """API 密钥页（R20：值只存 .env，友好壳）。"""
+        configured = _check_env_key("DEEPSEEK_API_KEY")
+        ctx = _ctx(request, "settings-ai-key",
+                   configured=configured,
+                   msg=request.query_params.get("msg", ""),
+                   err=request.query_params.get("err", ""))
+        if request.headers.get("hx-request"):
+            return templates.TemplateResponse(request, "settings/ai_key.html", ctx)
+        return templates.TemplateResponse(request, "settings/ai_key.html", ctx)
+
+    @app.post("/settings/ai/api-key")
+    async def settings_ai_api_key_save(request: Request):
+        from web.env_writer import write_env_var
+        form = await request.form()
+        api_key = str(form.get("api_key", "")).strip()
+        is_hx = bool(request.headers.get("hx-request"))
+        if not api_key:
+            if is_hx:
+                return _hx_redirect("/settings/ai/api-key", err="API 密钥不能为空")
+            return _redirect("/settings/ai/api-key", err="API 密钥不能为空")
+        ok = write_env_var("DEEPSEEK_API_KEY", api_key)
+        if not ok:
+            if is_hx:
+                return _hx_redirect("/settings/ai/api-key", err="写入 .env 失败，请检查文件权限")
+            return _redirect("/settings/ai/api-key", err="写入 .env 失败，请检查文件权限")
+        msg = "API 密钥已保存（重启引擎后生效）"
+        if is_hx:
+            # HTMX 局部刷新：返回卡片片段（独立提交，只刷新本块，不整页）
+            ctx = _ctx(request, "settings-ai-key",
+                       configured=_check_env_key("DEEPSEEK_API_KEY"),
+                       msg=msg, err="")
+            return templates.TemplateResponse(request, "settings/_ai_key_card.html", ctx)
+        return _redirect("/settings/ai/api-key", msg=msg)
+
+    @app.get("/settings/shops")
+    async def settings_shops(request: Request):
+        """店铺管理页（列表 + 新建表单）。"""
+        store = _settings_store(request)
+        shops = await store.list_shops(include_disabled=True)
+        return templates.TemplateResponse(
+            request, "settings/shops.html",
+            _ctx(request, "settings-shops",
+                 shops=shops,
+                 msg=request.query_params.get("msg", ""),
+                 err=request.query_params.get("err", "")),
+        )
+
+    @app.post("/settings/shops")
+    async def settings_shops_create(request: Request):
+        """新建店铺（独立提交，重名 SettingsError -> err 提示）。"""
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        remark = str(form.get("remark", "")).strip()
+        store = _settings_store(request)
+        is_hx = bool(request.headers.get("hx-request"))
+        try:
+            await store.create_shop(name, remark)
+        except SettingsError as exc:
+            if is_hx:
+                return await _shops_rows_fragment(request, err=str(exc))
+            return _redirect("/settings/shops", err=str(exc))
+        if is_hx:
+            return await _shops_rows_fragment(request, msg=f"店铺「{name}」已创建")
+        return _redirect("/settings/shops", msg=f"店铺「{name}」已创建")
+
+    @app.post("/settings/shops/{shop_id}")
+    async def settings_shops_update(request: Request, shop_id: int):
+        """改店铺（name/remark）。"""
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        remark = str(form.get("remark", "")).strip()
+        store = _settings_store(request)
+        try:
+            await store.update_shop(shop_id, name, remark)
+        except SettingsError as exc:
+            return _redirect("/settings/shops", err=str(exc))
+        return _redirect("/settings/shops", msg="店铺已更新")
+
+    @app.post("/settings/shops/{shop_id}/toggle")
+    async def settings_shops_toggle(request: Request, shop_id: int):
+        """启停店铺（独立提交，HTMX 局部刷新店铺列表）。"""
+        store = _settings_store(request)
+        is_hx = bool(request.headers.get("hx-request"))
+        try:
+            new_enabled = await store.toggle_shop(shop_id)
+        except SettingsError as exc:
+            if is_hx:
+                return await _shops_rows_fragment(request, err=str(exc))
+            return _redirect("/settings/shops", err=str(exc))
+        label = "已启用" if new_enabled else "已停用"
+        if is_hx:
+            return await _shops_rows_fragment(request, msg=f"店铺{label}")
+        return _redirect("/settings/shops", msg=f"店铺{label}")
+
+    @app.post("/settings/shops/{shop_id}/delete")
+    async def settings_shops_delete(request: Request, shop_id: int):
+        """删除店铺（hx-confirm 二次确认，物理删；HTMX 局部刷新店铺列表）。"""
+        store = _settings_store(request)
+        is_hx = bool(request.headers.get("hx-request"))
+        try:
+            await store.delete_shop(shop_id)
+        except SettingsError as exc:
+            if is_hx:
+                return await _shops_rows_fragment(request, err=str(exc))
+            return _redirect("/settings/shops", err=str(exc))
+        if is_hx:
+            return await _shops_rows_fragment(request, msg="店铺已删除")
+        return _redirect("/settings/shops", msg="店铺已删除")
+
+    @app.get("/settings/schedule")
+    async def settings_schedule(request: Request):
+        """定时任务页（详设 §7.2）。"""
+        store = _settings_store(request)
+        default_time = await store.get("schedule.default_time", "07:00")
+        # 引擎链清单（触发面板）；引擎未连接/未启动时降级展示
+        schedules: list[dict] = []
+        available_chains: list[dict] = []
+        engine_error: str | None = None
+        try:
+            async with _engine_client(request) as client:
+                reg = await client.list_registry()
+                chains = reg.get("chains", [])
+                available_chains = [{"id": c["id"], "name": c.get("name", c["id"])} for c in chains]
+                schedules = await client.list_schedules()
+        except EngineAPIError as exc:
+            engine_error = f"引擎未连接：{exc}"
+        return templates.TemplateResponse(
+            request, "settings/schedule.html",
+            _ctx(request, "settings-schedule",
+                 schedules=schedules,
+                 available_chains=available_chains,
+                 default_time=default_time,
+                 engine_error=engine_error,
+                 msg=request.query_params.get("msg", ""),
+                 err=request.query_params.get("err", "")),
+        )
+
+    @app.post("/settings/schedule")
+    async def settings_schedule_create(request: Request):
+        """新增定时链（独立提交）。"""
+        form = await request.form()
+        chain_id = str(form.get("chain_id", "")).strip()
+        trigger_time = str(form.get("trigger_time", "07:00")).strip()
+        if not chain_id:
+            return _redirect("/settings/schedule", err="请选择工序链")
+        trigger_expr = _time_to_cron(trigger_time)
+        try:
+            async with _engine_client(request) as client:
+                await client.create_schedule(chain_id, trigger_expr)
+        except EngineAPIError as exc:
+            return _redirect("/settings/schedule", err=f"新增失败：{exc}")
+        return _redirect("/settings/schedule", msg=f"定时链「{chain_id}」已新增")
+
+    @app.post("/settings/schedule/{schedule_id}/toggle")
+    async def settings_schedule_toggle(request: Request, schedule_id: int):
+        """启停定时链（独立提交）。"""
+        try:
+            async with _engine_client(request) as client:
+                await client.toggle_schedule(schedule_id)
+        except EngineAPIError as exc:
+            return _redirect("/settings/schedule", err=f"启停失败：{exc}")
+        return _redirect("/settings/schedule", msg="定时链状态已更新")
+
+    @app.post("/settings/schedule/{schedule_id}/time")
+    async def settings_schedule_time(request: Request, schedule_id: int):
+        """改定时链触发时间（独立提交）。"""
+        form = await request.form()
+        trigger_time = str(form.get("trigger_time", "07:00")).strip()
+        trigger_expr = _time_to_cron(trigger_time)
+        try:
+            async with _engine_client(request) as client:
+                await client.update_schedule_time(schedule_id, trigger_expr)
+        except EngineAPIError as exc:
+            return _redirect("/settings/schedule", err=f"改时间失败：{exc}")
+        return _redirect("/settings/schedule", msg="触发时间已更新")
+
+    @app.post("/settings/schedule/{schedule_id}/run")
+    async def settings_schedule_run(request: Request, schedule_id: int):
+        """立即运行一次定时链（独立提交）。"""
+        try:
+            async with _engine_client(request) as client:
+                resp = await client.run_schedule(schedule_id)
+        except EngineAPIError as exc:
+            return _redirect("/settings/schedule", err=f"运行失败：{exc}")
+        eid = resp.get("engine_task_id", "")
+        return _redirect("/settings/schedule", msg=f"已触发运行，引擎任务 {eid}")
+
+    @app.get("/settings/notify")
+    async def settings_notify(request: Request):
+        """通知配置页（详设 §7.2/§7.3）。"""
+        store = _settings_store(request)
+        feishu_enabled = await store.get("notify.feishu_enabled", True)
+        webhook_configured = _check_env_key("LIUQUAN_FEISHU_WEBHOOK_URL")
+        ctx = _ctx(request, "settings-notify",
+                   feishu_enabled=feishu_enabled,
+                   webhook_configured=webhook_configured,
+                   msg=request.query_params.get("msg", ""),
+                   err=request.query_params.get("err", ""))
+        if request.headers.get("hx-request"):
+            return templates.TemplateResponse(request, "settings/notify.html", ctx)
+        return templates.TemplateResponse(request, "settings/notify.html", ctx)
+
+    @app.post("/settings/notify")
+    async def settings_notify_save(request: Request):
+        """保存通知配置（开关写 settings + webhook 写 .env）。"""
+        from web.env_writer import write_env_var
+        form = await request.form()
+        store = _settings_store(request)
+        is_hx = bool(request.headers.get("hx-request"))
+        # 总开关
+        feishu_enabled = str(form.get("feishu_enabled", "")).lower() == "on"
+        await store.set("notify.feishu_enabled", feishu_enabled, "飞书通知总开关")
+        # webhook URL（仅在有值时写入）
+        webhook_url = str(form.get("webhook_url", "")).strip()
+        msg = "通知配置已保存"
+        if webhook_url:
+            ok = write_env_var("LIUQUAN_FEISHU_WEBHOOK_URL", webhook_url)
+            if not ok:
+                msg = "开关已保存，但 Webhook URL 写入失败"
+                if is_hx:
+                    return _hx_redirect("/settings/notify", msg=msg)
+                return _redirect("/settings/notify", msg=msg)
+        if is_hx:
+            # HTMX 局部刷新：返回卡片片段（独立提交，只刷新本块）
+            ctx = _ctx(request, "settings-notify",
+                       feishu_enabled=feishu_enabled,
+                       webhook_configured=_check_env_key("LIUQUAN_FEISHU_WEBHOOK_URL"),
+                       msg=msg, err="")
+            return templates.TemplateResponse(request, "settings/_notify_card.html", ctx)
+        return _redirect("/settings/notify", msg=msg)
+
+    @app.get("/settings/params")
+    async def settings_params(request: Request):
+        """系统参数页（详设 §7.2/§7.3）。"""
+        store = _settings_store(request)
+        params = []
+        for kd in _PARAM_DEFS:
+            val = await store.get(kd["key"], kd["default"])
+            params.append({
+                "key": kd["key"],
+                "description": kd["description"],
+                "type": kd["type"],
+                "value": val,
+            })
+        ctx = _ctx(request, "settings-params",
+                   params=params,
+                   msg=request.query_params.get("msg", ""),
+                   err=request.query_params.get("err", ""))
+        if request.headers.get("hx-request"):
+            return templates.TemplateResponse(request, "settings/params.html", ctx)
+        return templates.TemplateResponse(request, "settings/params.html", ctx)
+
+    @app.post("/settings/params/{key}")
+    async def settings_params_save(request: Request, key: str):
+        """单键保存（独立提交，只原子更新该 key）。"""
+        from web.settings_store import _TYPE_REGISTRY
+        store = _settings_store(request)
+        is_hx = bool(request.headers.get("hx-request"))
+        form = await request.form()
+        value = str(form.get("value", "")).strip()
+        # 类型校验
+        type_kind = _TYPE_REGISTRY.get(key, "str")
+        if type_kind == "int":
+            try:
+                value = int(value)
+            except ValueError:
+                return _hx_redirect("/settings/params", err=f"参数 {key} 需为整数")
+        elif type_kind == "float":
+            try:
+                value = float(value)
+            except ValueError:
+                return _hx_redirect("/settings/params", err=f"参数 {key} 需为数字")
+        elif type_kind == "bool":
+            value = value.lower() in ("true", "1", "yes", "on")
+        await store.set(key, value)
+        if is_hx:
+            # HTMX 局部刷新：只返回该参数行片段（其他 key 不动，A41 独立提交）
+            desc = next((d["description"] for d in _PARAM_DEFS if d["key"] == key), "")
+            param = {
+                "key": key,
+                "description": desc,
+                "type": type_kind,
+                "value": await store.get(key, None),
+            }
+            ctx = _ctx(request, "settings-params",
+                       param=param,
+                       msg=f"参数 {key} 已保存", err="")
+            return templates.TemplateResponse(request, "settings/_params_row.html", ctx)
+        return _hx_redirect("/settings/params", msg=f"参数 {key} 已保存")
 
     @app.post("/tasks/{task_id}/next-confirm")
     async def task_next_confirm(request: Request, task_id: int):

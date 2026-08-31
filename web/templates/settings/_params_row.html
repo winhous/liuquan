@@ -1,0 +1,36 @@
+{# 系统参数单行（整页 include + HTMX 局部刷新片段共用；上下文：param{key,description,type,value}/msg/err） #}
+<tr id="param-row-{{ param.key }}">
+  <td><code>{{ param.key }}</code></td>
+  <td class="text-muted">{{ param.description }}</td>
+  <td>
+    <form hx-post="/settings/params/{{ param.key }}"
+          hx-target="#param-row-{{ param.key }}"
+          hx-swap="outerHTML"
+          class="d-flex gap-2">
+      {% if param.type == 'bool' %}
+      <select name="value" class="form-select form-select-sm">
+        <option value="true" {{ 'selected' if param.value else '' }}>开启</option>
+        <option value="false" {{ 'selected' if not param.value else '' }}>关闭</option>
+      </select>
+      {% elif param.type == 'time' %}
+      <input name="value" type="time" class="form-control form-control-sm"
+             value="{{ param.value }}" style="width: 120px;">
+      {% else %}
+      <input name="value" type="{{ 'number' if param.type in ('int', 'float') else 'text' }}"
+             class="form-control form-control-sm" value="{{ param.value }}"
+             style="width: 120px;">
+      {% endif %}
+      <button class="btn btn-sm btn-primary">保存</button>
+    </form>
+    {% if msg %}
+    <div class="alert alert-success mt-2 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-2 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </td>
+</tr>

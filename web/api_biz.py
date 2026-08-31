@@ -23,7 +23,9 @@ from dotenv import dotenv_values
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
-from sqlalchemy import select, text
+from datetime import date, datetime, timezone
+
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from models.contract.task import EvidenceRef, SourceTrace, TaskProposal
@@ -34,6 +36,7 @@ from models.workers import (
     CustomerBrief,
     EventBrief,
     MessageBrief,
+    ScheduleTaskWrite,
     SnapshotBrief,
     TaskContextData,
 )
@@ -173,6 +176,37 @@ def create_biz_router(
             await session.flush()
             return {"ok": True, "id": row.id, "skipped": False}
 
+    # ---- 读接口：引擎参数（详设 §7.3/§8：GET /api/biz/settings/engine-params）----
+
+    @router.get("/settings/engine-params", dependencies=[Depends(_check_token)])
+    async def get_engine_params() -> dict:
+        """读取引擎参数三键（web 侧读 settings 表，缺省回退默认）。
+
+        引擎启动时经 BizApiClient.get 调用本接口读取
+        max_attempts / timeout_s / backoff_cap 注入 runner。
+        """
+        from web.settings_store import SettingsStore
+
+        eng = _resolve_engine()
+        store = SettingsStore(eng)
+        try:
+            max_attempts = int(
+                await store.get("engine.max_attempts", 2)
+            )
+            timeout_s = float(
+                await store.get("engine.timeout_s", 30.0)
+            )
+            backoff_cap = int(
+                await store.get("engine.backoff_cap", 30)
+            )
+        except (ValueError, TypeError):
+            max_attempts, timeout_s, backoff_cap = 2, 30.0, 30
+        return {
+            "max_attempts": max_attempts,
+            "timeout_s": timeout_s,
+            "backoff_cap": backoff_cap,
+        }
+
     # ---- 读接口：crm 上下文（引擎侧 provider 白名单与 prompt 数据来源）----
 
     @router.get("/crm/context/{customer_id}", dependencies=[Depends(_check_token)])
@@ -244,6 +278,135 @@ def create_biz_router(
                 ),
                 existing_open_todos=[*todo_rows, *cand_rows],
             )
+
+    # ---- 读接口：超期客户清单（详设 §8：GET /api/biz/crm/overdue-customers）----
+
+    @router.get("/crm/overdue-customers", dependencies=[Depends(_check_token)])
+    async def overdue_customers() -> list[dict]:
+        """提醒链数据供给：超期客户清单（决策 37-3：阈值同参 crm.follow_up_days）。
+
+        过滤口径（决策 37-3）：
+        - days = now - max(last_contacted_at, updated_at) > crm.follow_up_days
+        - follow_up_status != 'archived'（on_hold 含）
+        - 按 days_since 降序
+        latest_summary 取 crm.customer.latest_summary（页面层维护的冗余字段）。
+        """
+        from web.settings_store import SettingsStore
+
+        eng = _resolve_engine()
+        store = SettingsStore(eng)
+        try:
+            follow_up_days = int(await store.get("crm.follow_up_days", 5))
+        except (ValueError, TypeError):
+            follow_up_days = 5
+
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        async with maker() as session:
+            # 查非归档客户
+            rows = (
+                await session.execute(
+                    select(Customer).where(
+                        Customer.follow_up_status != "archived"
+                    )
+                )
+            ).scalars().all()
+            now = datetime.now(timezone.utc)
+            result = []
+            for c in rows:
+                latest = c.last_contacted_at or c.updated_at
+                if latest is None:
+                    continue
+                days_since = (now.date() - latest.date()).days
+                if days_since > follow_up_days:
+                    result.append(
+                        {
+                            "customer_id": c.id,
+                            "nickname": c.nickname,
+                            "days_since": days_since,
+                            "latest_summary": c.latest_summary or "",
+                        }
+                    )
+            # 按 days_since 降序
+            result.sort(key=lambda x: x["days_since"], reverse=True)
+            return result
+
+    # ---- 写接口：定时任务直接落 tm.task（详设 §8：POST /api/biz/tm/schedule-tasks）----
+
+    @router.post("/tm/schedule-tasks", dependencies=[Depends(_check_token)])
+    async def schedule_task(payload: ScheduleTaskWrite) -> dict:
+        """提醒任务直接落 tm.task（source_type=schedule，决策 37-1）。
+
+        防重（详设 §8/§10.4）：存在 tm.task 满足 domain='crm' AND
+        source->>'customer_id'=X AND source->>'reminder_date'=Y AND
+        status <> 'void' -> 409。
+        """
+        # 校验 source.customer_id + reminder_date 必填
+        if not payload.source.customer_id:
+            raise HTTPException(status_code=422, detail="source.customer_id 不能为空")
+        if not payload.source.reminder_date:
+            raise HTTPException(status_code=422, detail="source.reminder_date 不能为空")
+        # evidence 非空（决策 16①）
+        if not payload.evidence:
+            raise HTTPException(status_code=422, detail="evidence 为空：无依据不出建议")
+
+        eng = _resolve_engine()
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        async with maker() as session, session.begin():
+            # 防重：同客户同 reminder_date 已有非 void 任务 -> 409
+            dup = await session.execute(
+                text(
+                    "SELECT id FROM tm.task "
+                    "WHERE domain = 'crm' "
+                    "AND source->>'customer_id' = :cid "
+                    "AND source->>'reminder_date' = :rd "
+                    "AND status <> 'void' LIMIT 1"
+                ),
+                {
+                    "cid": str(payload.source.customer_id),
+                    "rd": payload.source.reminder_date,
+                },
+            )
+            if dup.scalar_one_or_none() is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="当天已生成提醒任务",
+                )
+            # 解析 due
+            try:
+                due_date = date.fromisoformat(payload.due)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=422, detail="due 格式错误，需 YYYY-MM-DD")
+            # 落库 tm.task
+            task = Task(
+                title=payload.title,
+                detail=payload.detail,
+                domain=payload.domain,
+                role=payload.role,
+                due=due_date,
+                source_type="schedule",
+                source={
+                    "chain_id": payload.source.chain_id,
+                    "engine_task_id": payload.source.engine_task_id,
+                    "worker_id": payload.source.worker_id,
+                    "customer_id": payload.source.customer_id,
+                    "reminder_date": payload.source.reminder_date,
+                    "audit_ids": payload.source.audit_ids or [],
+                },
+                tags=[],
+                created_by="运营",
+            )
+            session.add(task)
+            await session.flush()
+            # 创建事件
+            event = TaskEvent(
+                task_id=task.id,
+                event_type="created",
+                actor="运营",
+                note="定时提醒任务自动就位",
+            )
+            session.add(event)
+            await session.flush()
+            return {"ok": True, "id": task.id}
 
     # ---- 读接口：tm 任务上下文（tm_intent 链 provider 数据来源）----
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from dotenv import dotenv_values
 from sqlalchemy import func, or_, select, text
@@ -48,8 +49,8 @@ STATUS_META = {
 STAGE_META = {"pre_sale": "售前", "in_sale": "售中", "after_sale": "售后"}
 DIRECTION_META = {"buyer": "买家", "seller": "我"}
 
-# 逾期判定：超过 N 天无动静（config 外置，默认 5）
-FOLLOW_UP_DAYS = 5
+# 逾期判定默认阈值（详设 §7.3：读 settings crm.follow_up_days，表无回退默认）
+_DEFAULT_FOLLOW_UP_DAYS = 5
 
 
 class CrmWebError(Exception):
@@ -57,20 +58,40 @@ class CrmWebError(Exception):
 
 
 class CRMStore:
-    """CRM 域数据访问（构造注入 engine；生产经 from_env）。"""
+    """CRM 域数据访问（构造注入 engine + settings_store；生产经 from_env）。"""
 
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        settings_store: Any | None = None,
+    ) -> None:
         self._engine = engine
+        self._settings_store = settings_store
 
     @classmethod
     def from_env(cls) -> "CRMStore":
+        # 延迟 import 避免循环：SettingsStore 同包
+        from web.settings_store import SettingsStore
+
         url = (dotenv_values(_DOTENV_PATH) or {}).get(_TM_DB_URL_ENV)
-        return cls(create_tm_engine(url))
+        engine = create_tm_engine(url)
+        settings_store = SettingsStore(engine)
+        return cls(engine, settings_store=settings_store)
 
     async def dispose(self) -> None:
         await self._engine.dispose()
 
     # ---- 客户列表 ----
+
+    async def _get_follow_up_days(self) -> int:
+        """从 settings_store 读逾期阈值；未注入或读取失败回退默认。"""
+        if self._settings_store is None:
+            return _DEFAULT_FOLLOW_UP_DAYS
+        try:
+            val = await self._settings_store.get("crm.follow_up_days", _DEFAULT_FOLLOW_UP_DAYS)
+            return int(val) if val is not None else _DEFAULT_FOLLOW_UP_DAYS
+        except Exception:
+            return _DEFAULT_FOLLOW_UP_DAYS
 
     async def list_customers(
         self,
@@ -78,13 +99,25 @@ class CRMStore:
         q: str = "",
         status: str = "",
         page: int = 1,
-        page_size: int = 20,
+        page_size: int | None = None,
     ) -> tuple[list[dict], int]:
         """客户列表（状态筛选 tab + 全文搜索 + 分页）。
 
         status: ""=进行中(非归档) / 五态 / all=全部。搜索：昵称/备注/消息
         原文译文/快照 summary+current_need。
         """
+        follow_up_days = await self._get_follow_up_days()
+        # page_size 默认值从 settings 读（表无回退 20）
+        effective_page_size = 20
+        if page_size is not None:
+            effective_page_size = page_size
+        else:
+            try:
+                if self._settings_store is not None:
+                    val = await self._settings_store.get("crm.page_size", 20)
+                    effective_page_size = int(val) if val is not None else 20
+            except Exception:
+                effective_page_size = 20
         async with AsyncSession(self._engine) as session:
             query = select(Customer)
             if status == "all":
@@ -127,24 +160,24 @@ class CRMStore:
                 (
                     await session.execute(
                         query.order_by(Customer.updated_at.desc(), Customer.id.desc())
-                        .offset((page - 1) * page_size)
-                        .limit(page_size)
+                        .offset((page - 1) * effective_page_size)
+                        .limit(effective_page_size)
                     )
                 )
                 .scalars()
                 .all()
             )
-        return [self._customer_view(c) for c in rows], total
+        return [self._customer_view(c, follow_up_days) for c in rows], total
 
     @staticmethod
-    def _customer_view(c: Customer) -> dict:
+    def _customer_view(c: Customer, follow_up_days: int = _DEFAULT_FOLLOW_UP_DAYS) -> dict:
         days = None
         latest = c.last_contacted_at or c.updated_at
         if latest is not None:
             days = (datetime.now(timezone.utc).date() - latest.date()).days
         overdue = (
             days is not None
-            and days > FOLLOW_UP_DAYS
+            and days > follow_up_days
             and c.follow_up_status != "archived"
         )
         return {
@@ -166,6 +199,7 @@ class CRMStore:
         name = nickname.strip()
         if not name:
             return []
+        follow_up_days = await self._get_follow_up_days()
         async with AsyncSession(self._engine) as session:
             rows = (
                 (
@@ -178,7 +212,7 @@ class CRMStore:
                 .scalars()
                 .all()
             )
-        return [self._customer_view(c) for c in rows]
+        return [self._customer_view(c, follow_up_days) for c in rows]
 
     async def create_customer(
         self, *, nickname: str, source_shop: str = "", remark: str = "", force: bool = False
@@ -230,6 +264,7 @@ class CRMStore:
 
     async def detail(self, customer_id: int) -> dict | None:
         """客户详情：档案头 + 消息时间线 + 最新快照 + 任务卡 + 待确认候选。"""
+        follow_up_days = await self._get_follow_up_days()
         async with AsyncSession(self._engine) as session:
             customer = await session.get(Customer, customer_id)
             if customer is None:
@@ -285,7 +320,7 @@ class CRMStore:
                 .all()
             )
         return {
-            "customer": self._customer_view(customer),
+            "customer": self._customer_view(customer, follow_up_days),
             "messages": [
                 {
                     "id": m.id,
@@ -516,4 +551,4 @@ class CRMStore:
             customer.last_contacted_at = datetime.now(timezone.utc)
 
 
-__all__ = ["CRMStore", "CrmWebError", "FOLLOW_UP_DAYS"]
+__all__ = ["CRMStore", "CrmWebError"]

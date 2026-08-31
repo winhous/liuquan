@@ -50,21 +50,44 @@
           {% for m in modules %}
             {% if m.children %}
             <!-- 二级导航组（Tabler treeview：data-bs-toggle=collapse + nav-link-toggle） -->
+            {% set child_ids = m.children | map(attribute='id') | list %}
+            {% set ns = namespace(active_child=false) %}
+            {% for c in m.children %}
+              {% if c.id == active %}{% set ns.active_child = true %}{% endif %}
+              {% if c.children %}
+                {% for gc in c.children %}
+                  {% if gc.id == active %}{% set ns.active_child = true %}{% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
             <li class="nav-item">
-              <a class="nav-link" data-bs-toggle="collapse" href="#sub-{{ m.id }}" role="button" aria-expanded="{{ 'true' if active in (m.children|map(attribute='id')|list) else 'false' }}">
+              <a class="nav-link" data-bs-toggle="collapse" href="#sub-{{ m.id }}" role="button" aria-expanded="{{ 'true' if ns.active_child else 'false' }}">
                 <span class="nav-link-icon"><i class="ti {{ m.icon }}"></i></span>
                 <span class="nav-link-title">{{ m.name }}</span>
                 <span class="nav-link-toggle"></span>
               </a>
-              <div class="collapse {{ 'show' if active in (m.children|map(attribute='id')|list) else '' }}" id="sub-{{ m.id }}">
+              <div class="collapse {{ 'show' if ns.active_child else '' }}" id="sub-{{ m.id }}">
                 <ul class="nav nav-sm flex-column">
                   {% for c in m.children %}
-                  <li class="nav-item">
-                    <a href="{{ c.href }}" class="nav-link {{ 'active' if active == c.id else '' }}">
-                      <span class="nav-link-icon"><i class="ti {{ c.icon }}"></i></span>
-                      <span class="nav-link-title">{{ c.name }}</span>
-                    </a>
-                  </li>
+                    {% if c.group %}
+                    <!-- 分组标题（不可点，展开态展示子项） -->
+                    <li class="nav-item-header">{{ c.name }}</li>
+                    {% for gc in c.children %}
+                    <li class="nav-item">
+                      <a href="{{ gc.href }}" class="nav-link {{ 'active' if active == gc.id else '' }}">
+                        <span class="nav-link-icon"><i class="ti {{ gc.icon }}"></i></span>
+                        <span class="nav-link-title">{{ gc.name }}</span>
+                      </a>
+                    </li>
+                    {% endfor %}
+                    {% else %}
+                    <li class="nav-item">
+                      <a href="{{ c.href }}" class="nav-link {{ 'active' if active == c.id else '' }}">
+                        <span class="nav-link-icon"><i class="ti {{ c.icon }}"></i></span>
+                        <span class="nav-link-title">{{ c.name }}</span>
+                      </a>
+                    </li>
+                    {% endif %}
                   {% endfor %}
                 </ul>
               </div>

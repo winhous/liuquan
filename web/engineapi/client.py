@@ -152,6 +152,47 @@ class EngineAPIClient:
         """GET /api/engine/registry：工序/链清单（详设 §4.3），期望 200。"""
         return await self._request("GET", "/api/engine/registry", expected=(200,))
 
+    # ---- 定时链接口（v0.4 §9.2：设置页定时任务经此管理）----
+
+    async def list_schedules(self) -> list[dict[str, Any]]:
+        """GET /api/engine/schedules：定时链清单，期望 200。"""
+        data = await self._request("GET", "/api/engine/schedules", expected=(200,))
+        return data.get("schedules", [])
+
+    async def create_schedule(
+        self, chain_id: str, cron: str, name: str = ""
+    ) -> dict[str, Any]:
+        """POST /api/engine/schedules：新增定时链，期望 201。"""
+        payload: dict[str, Any] = {"chain_id": chain_id, "schedule": cron}
+        if name:
+            payload["name"] = name
+        return await self._request(
+            "POST", "/api/engine/schedules", json=payload, expected=(201,)
+        )
+
+    async def toggle_schedule(self, schedule_id: int) -> dict[str, Any]:
+        """POST /api/engine/schedules/{id}/toggle：启停，期望 200。"""
+        return await self._request(
+            "POST", f"/api/engine/schedules/{schedule_id}/toggle", expected=(200,)
+        )
+
+    async def update_schedule_time(
+        self, schedule_id: int, cron: str
+    ) -> dict[str, Any]:
+        """POST /api/engine/schedules/{id}/time：改触发时间，期望 200。"""
+        return await self._request(
+            "POST",
+            f"/api/engine/schedules/{schedule_id}/time",
+            json={"schedule": cron},
+            expected=(200,),
+        )
+
+    async def run_schedule(self, schedule_id: int) -> dict[str, Any]:
+        """POST /api/engine/schedules/{id}/run：立即运行一次，期望 200。"""
+        return await self._request(
+            "POST", f"/api/engine/schedules/{schedule_id}/run", expected=(200,)
+        )
+
     # ---- 请求/响应公共处理 ----
 
     async def _request(

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}定时任务 · 设置 · 刘全{% endblock %}
+{% block content_title %}定时任务{% endblock %}
+{% block content %}
+
+{% if engine_error %}
+<div class="alert alert-warning mb-3">
+  <i class="ti ti-plug-x me-1"></i>{{ engine_error }}（定时任务管理需要引擎常驻服务；其余设置功能不受影响）
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card" id="schedule-list-card">
+      <div class="card-header">
+        <h3 class="card-title">定时链清单</h3>
+      </div>
+      <div class="card-body">
+        {% if schedules %}
+        <div class="table-responsive">
+          <table class="table table-vcenter">
+            <thead>
+              <tr><th>链名</th><th>触发时间</th><th>上次运行</th><th>下次运行</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              {% for s in schedules %}
+              <tr id="schedule-row-{{ s.id }}">
+                <td>{{ s.name }}</td>
+                <td>{{ s.cron }}</td>
+                <td>{{ s.last_run_at or "—" }}</td>
+                <td>{{ s.next_run_at or "—" }}</td>
+                <td>
+                  {% if s.enabled %}
+                  <span class="badge bg-success-lt">已启用</span>
+                  {% else %}
+                  <span class="badge bg-secondary-lt">已停用</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="btn-group btn-group-sm">
+                    <form method="post" action="/settings/schedule/{{ s.id }}/toggle" style="display:inline">
+                      <button class="btn btn-outline-secondary" title="启停">{% if s.enabled %}停{% else %}启{% endif %}</button>
+                    </form>
+                    <button class="btn btn-outline-secondary" title="改时间"
+                            onclick="document.getElementById('time-form-{{ s.id }}').style.display='block'">改时间</button>
+                    <form method="post" action="/settings/schedule/{{ s.id }}/run" style="display:inline">
+                      <button class="btn btn-outline-primary" title="立即运行">运行</button>
+                    </form>
+                  </div>
+                  <form id="time-form-{{ s.id }}" method="post" action="/settings/schedule/{{ s.id }}/time"
+                        style="display:none" class="mt-1">
+                    <div class="input-group input-group-sm">
+                      <input name="trigger_time" type="time" class="form-control" value="{{ s.cron_time }}">
+                      <button class="btn btn-primary">保存</button>
+                    </div>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-4">暂无定时链——请在下方新增。</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">新增定时链</h3></div>
+      <div class="card-body">
+        <form method="post" action="/settings/schedule">
+          <div class="mb-2">
+            <label class="form-label">选择链</label>
+            <select name="chain_id" class="form-select" required>
+              <option value="">请选择工序链</option>
+              {% for chain in available_chains %}
+              <option value="{{ chain.id }}">{{ chain.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">触发时间</label>
+            <input name="trigger_time" type="time" class="form-control" value="{{ default_time }}" required>
+          </div>
+          <button class="btn btn-primary w-100">新增</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if msg %}
+<div class="alert alert-success mt-3" role="alert">
+  <i class="ti ti-check me-1"></i>{{ msg }}
+</div>
+{% endif %}
+{% if err %}
+<div class="alert alert-danger mt-3" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+</div>
+{% endif %}
+{% endblock %}

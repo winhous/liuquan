@@ -1,0 +1,37 @@
+{# API 密钥卡片块（整页 include + HTMX 局部刷新片段共用；上下文：configured/msg/err） #}
+<div class="card" id="api-key-card">
+  <div class="card-header">
+    <h3 class="card-title">DeepSeek API 密钥</h3>
+  </div>
+  <div class="card-body">
+    <div class="mb-3">
+      <span class="text-muted">当前状态：</span>
+      {% if configured %}
+        <span class="badge bg-success-lt"><i class="ti ti-check me-1"></i>已配置</span>
+      {% else %}
+        <span class="badge bg-secondary-lt"><i class="ti ti-x me-1"></i>未配置</span>
+      {% endif %}
+    </div>
+    <form hx-post="/settings/ai/api-key" hx-target="#api-key-card" hx-swap="outerHTML">
+      <div class="mb-3">
+        <label class="form-label">API Key</label>
+        <input name="api_key" type="password" class="form-control" placeholder="sk-...">
+      </div>
+      <p class="text-muted small">
+        <i class="ti ti-info-circle me-1"></i>
+        密钥存储在 .env 文件中（R20 密钥纪律），保存后需<strong>重启引擎</strong>方可生效。
+      </p>
+      <button class="btn btn-primary">保存密钥</button>
+    </form>
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>

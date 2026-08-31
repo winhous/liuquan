@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}店铺管理 · 设置 · 刘全{% endblock %}
+{% block content_title %}店铺管理{% endblock %}
+{% block content %}
+
+{% if msg %}
+<div class="alert alert-success alert-dismissible" role="alert">
+  <i class="ti ti-check me-1"></i>{{ msg }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+{% if err %}
+<div class="alert alert-danger alert-dismissible" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">店铺列表（共 {{ shops|length }}）</h3>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-vcenter">
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>备注</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="shop-rows">
+              {% include "settings/_shops_rows.html" %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">新建店铺</h3></div>
+      <div class="card-body">
+        <form method="post" action="/settings/shops"
+              hx-post="/settings/shops"
+              hx-target="#shop-rows"
+              hx-swap="innerHTML">
+          <div class="mb-2">
+            <label class="form-label">店铺名 <span class="text-danger">*</span></label>
+            <input name="name" class="form-control" required maxlength="100">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">备注</label>
+            <input name="remark" class="form-control">
+          </div>
+          <button class="btn btn-primary w-100">新建店铺</button>
+        </form>
+      </div>
+    </div>
+    <div class="card mt-3">
+      <div class="card-body text-muted small">
+        <i class="ti ti-info-circle me-1"></i>
+        店铺用于 CRM 客户来源标记。停用的店铺不出现在 CRM 下拉中，但已关联的客户数据不受影响。
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import httpx
 from dotenv import dotenv_values
@@ -23,8 +24,25 @@ _DOTENV_PATH = _REPO_ROOT / ".env"
 _FEISHU_WEBHOOK_ENV = "LIUQUAN_FEISHU_WEBHOOK_" + "URL"  # 拆串：P2 敏感名拦截规避
 
 
-async def send_task_card(task_view: dict) -> bool:
-    """发送任务卡片；未配置/失败 -> False（决策 21：未配置不阻塞，失败静默）。"""
+async def send_task_card(
+    task_view: dict,
+    *,
+    settings_store: Any | None = None,
+) -> bool:
+    """发送任务卡片；未配置/失败 -> False（决策 21：未配置不阻塞，失败静默）。
+
+    settings_store: 可选注入（通知总开关 notify.feishu_enabled 读取）；
+    未注入时默认视为开启（保证既有测试兼容）。
+    """
+    # 通知总开关检查（详设 §7.3：notify.feishu_enabled=false 时直接返回 False）
+    if settings_store is not None:
+        try:
+            enabled = await settings_store.get("notify.feishu_enabled", True)
+            if enabled is False or enabled == "false":
+                return False
+        except Exception:
+            pass  # 读取异常不影响发送（防御性）
+
     url = (dotenv_values(_DOTENV_PATH) or {}).get(_FEISHU_WEBHOOK_ENV)
     if not url:
         logger.warning("飞书 webhook 未配置（LIUQUAN_FEISHU_WEBHOOK_URL），跳过通知")
