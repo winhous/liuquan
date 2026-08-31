@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# 刘全四绿总门（开发流程 ④ 四绿 hook；开发规范 R13 四绿守门）
+# 刘全五绿总门（开发流程 ④ 五绿 hook；开发规范 R13 五绿守门）
 #
 # 用法：bash scripts/check.sh（任意 cwd 可执行，自动定位仓库根；可重复执行）
 #
-# 四绿（v0.1 全真跑，无 skipped）：
+# 五绿（v0.1 全真跑，无 skipped）：
 #   1) lint              engine/lint P1/P2/P3（T2 P2/P3 + T11 P1 已落地）
 #   2) registry 一致性   liuquan-engine registry-check（详设 §10；T12b 已实现，真跑）
 #   3) 全量单测          uv run pytest（fake LLM、零网络，规范 R12）
 #   4) verify            liuquan-engine verify（详设 §10；T12b 已实现，真跑）
+#   5) 断言覆盖          scripts/check_acceptance.py（B1：manifest 三态校验，防假绿）
 #
 # 判定：
 #   - 任一【真红】= 本脚本非零退出（git pre-commit hook 拦提交，不绿不让提交）
@@ -38,7 +39,7 @@ fi
 REGISTRY_LAND_TASK="T12b"    # liuquan-engine registry-check（已实现，真跑）
 VERIFY_LAND_TASK="T12b"      # liuquan-engine verify（已实现，真跑）
 
-SUMMARY=()   # 末尾四行「绿/红」汇总
+SUMMARY=()   # 末尾五行「绿/红」汇总
 RED=0        # 真红计数
 
 mark_green() { SUMMARY+=("绿 $1"); }
@@ -69,7 +70,7 @@ cli_gate() {
   fi
 }
 
-echo "==== 刘全四绿总门 scripts/check.sh ===="
+echo "==== 刘全五绿总门 scripts/check.sh ===="
 
 # ---------- 绿 1/4：lint（T2 落地：P2 凭据端点零容忍 + P3 契约纪律，P1=T11）----------
 # 入口 engine/lint/__main__.py：0 违规退出 0，有违规打印明细退出 1。
@@ -102,18 +103,26 @@ else
   mark_red "4 verify（未通过）"
 fi
 
+# ---------- 绿 5/5：断言覆盖（B1：manifest 三态校验，防假绿）----------
+echo "---- 5/5 断言覆盖：uv run python scripts/check_acceptance.py ----"
+if uv run python scripts/check_acceptance.py; then
+  mark_green "5 断言覆盖（通过）"
+else
+  mark_red "5 断言覆盖（manifest 校验未通过，详见上方输出）"
+fi
+
 # ---------- 汇总 ----------
 echo
-echo "==== 四绿汇总（绿/红）===="
+echo "==== 五绿汇总（绿/红）===="
 for line in "${SUMMARY[@]}"; do
   echo "$line"
 done
 
 if [[ "$RED" -gt 0 ]]; then
   echo
-  echo "结果：${RED} 项真红 -- 四绿未过（R13），改动未完成，提交被拦截"
+  echo "结果：${RED} 项真红 -- 五绿未过（R13），改动未完成，提交被拦截"
   exit 1
 fi
 echo
-echo "结果：四绿全绿（v0.1 全真跑，无 skipped）"
+echo "结果：五绿全绿（v0.1 全真跑，无 skipped）"
 exit 0

@@ -1,0 +1,289 @@
+# tests/acceptance_manifest.yaml — 验收断言覆盖单一事实源（B1，2026-09-03）
+# 校验方：scripts/check_acceptance.py（check.sh 第 5 门）
+# 三态：implemented（必须真实测试函数，缺失即红）/ planned（已知缺口带 plan，记黄不红）/ manual（手工验证）
+version: "1"
+assertions:
+  # ---- v0.1 引擎地基 A1-A11 ----
+  - id: A1
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a1_full_chain_done_with_phase_lines"
+    desc: "runner + FakeAgent 全相位到 DONE + 相位流水非空"
+  - id: A2
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a2_registry_rejects_broken_declarations"
+    desc: "注册表拒坏声明（字段缺失/类型错）"
+  - id: A3
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a3_audit_queryable_full_fields"
+    desc: "审计记录全字段可查（phase/result/duration_ms/error）"
+  - id: A4
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a4_crash_recovery_audit_count_unchanged"
+    desc: "崩溃恢复后审计记录数不变（检查点恢复）"
+  - id: A5
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a5_suite_zero_network_all_stubs"
+    desc: "全量套件零网络调用（全 stub）"
+  - id: A6
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a6_lint_blocks_three_sample_kinds"
+    desc: "lint 阻断三类样本（P1/P2/P3）"
+  - id: A7
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a7_model_string_switch_zero_code_change"
+    desc: "模型字符串切换零代码改动"
+  - id: A8
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a8_transaction_risk_rejected"
+    desc: "事务风险操作被拒"
+  - id: A9
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a9_five_stubs_and_production_stub_blocked"
+    desc: "五个 stub + 生产 stub 被阻"
+  - id: A10
+    version: v0.1
+    status: implemented
+    test: "tests/test_acceptance.py::test_a10_provider_injection_and_worker_import_blocked"
+    desc: "provider 注入 + worker import 被阻"
+  - id: A11
+    version: v0.1
+    status: manual
+    desc: "真模型冒烟（DeepSeek 端到端，发版前手工跑）"
+  # ---- v0.2 TM A12-A26 ----
+  - id: A12
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a12_trigger_chain_lands_pending_proposal"
+    desc: "触发链落 pending 提案"
+  - id: A13
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a13_manual_review_approve_reject_no_auto_path"
+    desc: "手工审核批准/拒绝无自动路径"
+  - id: A14
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a14_status_flow_done_at_and_trace_closure"
+    desc: "状态流 done_at + 追踪关闭"
+  - id: A15
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a15_three_endpoints_and_error_paths"
+    desc: "三个端点 + 错误路径"
+  - id: A16
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a16_login_roles_redirect_and_labels"
+    desc: "登录角色重定向 + 标签"
+  - id: A17
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a17_crash_recovery_queue_not_lost"
+    desc: "崩溃恢复队列不丢"
+  - id: A18
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a18_idempotent_same_delivery_once"
+    desc: "幂等：同投递只处理一次"
+  - id: A19
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a19_four_greens_gates_covered"
+    desc: "四绿守门存在性断言（B1 修订后为五绿）"
+  - id: A20
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a20_dual_channel_and_source_badge"
+    desc: "双通道 + 来源徽章显示 domain"
+  - id: A21
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a21_antihallucination_triple_reverse"
+    desc: "反幻觉三重反转（双函数：test_a21_antihallucination_triple_reverse + test_a21_whitelist_violation_marks_chain_failed）"
+  - id: A22
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a22_evidence_panel_full_and_empty_invisible"
+    desc: "evidence 面板全字段 + 空时隐藏"
+  - id: A23
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a23_result_note_required_then_lands"
+    desc: "result_note 必填后落库"
+  - id: A24
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a24_derive_keeps_parent_open_and_child_independent"
+    desc: "派生保持父开 + 子独立"
+  - id: A25
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a25_dedup_hang_overdue_bar_and_filters"
+    desc: "去重挂起 + 过期栏 + 筛选"
+  - id: A26
+    version: v0.2
+    status: implemented
+    test: "tests/test_acceptance.py::test_a26_edit_snapshot_and_reopen"
+    desc: "编辑快照 + 重开"
+  # ---- v0.3 CRM A27-A37 ----
+  - id: A27
+    version: v0.3
+    status: implemented
+    test: "tests/test_acceptance.py::test_a27_paste_chain_done_and_candidate_lands"
+    desc: "粘贴链 DONE + candidate 落库"
+  - id: A28
+    version: v0.3
+    status: implemented
+    test: "tests/test_web_crm.py::test_confirm_candidates_creates_task"
+    desc: "确认候选创建任务（含 test_confirm_candidate_twice_rejected 反向）"
+  - id: A29
+    version: v0.3
+    status: planned
+    plan: "B5 随扒图重做阶段 1 补：dismissed 不建任务、不飞书的行为测试（web /crm/{id}/todos/dismiss → status=dismissed + 无 task + 无飞书调用）"
+    desc: "候选忽略 dismissed：不建任务、不飞书（行为断言；现有 test_candidate_invalid_status_rejected 仅测 DB CHECK 约束非行为，2026-09-03 主代理验收标 planned）"
+  - id: A30
+    version: v0.3
+    status: implemented
+    test: "tests/test_web_translate.py::test_translate_triggers_chain"
+    desc: "翻译工具触发链（含 test_translate_archive_lands_message 覆盖 /translate/archive 归入客户落 crm.message）"
+  - id: A31
+    version: v0.3
+    status: implemented
+    test: "tests/test_web_crm.py::test_reply_send_archives_seller_message"
+    desc: "回复发送归档卖家消息"
+  - id: A32
+    version: v0.3
+    status: implemented
+    test: "tests/test_web_crm.py::test_crm_detail_shows_snapshot_tasks_candidates"
+    desc: "历史记录/快照展示：详情页展示 snapshot + tasks + candidates（部分覆盖；message_time 为空在 test_crm_models.py；快照滚动两次粘贴 need_history 长度增加无独立测试，2026-09-03 主代理验收标注）"
+  - id: A33
+    version: v0.3
+    status: implemented
+    test: "tests/test_tm_flow.py::test_next_tag_updates_tags"
+    desc: "tag 更新标签（含 test_task_list_shows_tags）"
+  - id: A34
+    version: v0.3
+    status: implemented
+    test: "tests/test_tm_flow.py::test_next_assign_changes_role"
+    desc: "TM 流转多函数（test_next_assign_changes_role / test_next_ignore_clears_suggestion / test_next_intent_triggers_chain / test_next_confirm_transfer_unavailable / test_next_confirm_assign_executes）"
+  - id: A35
+    version: v0.3
+    status: implemented
+    test: "tests/test_acceptance.py::test_a35_write_api_no_db_conn_string_in_engine"
+    desc: "写接口零业务库连接串"
+  - id: A36
+    version: v0.3
+    status: implemented
+    test: "tests/test_web_crm.py::test_crm_delete_cascades"
+    desc: "客户删除级联清 message/snapshot/candidate/task"
+  - id: A37
+    version: v0.3
+    status: implemented
+    test: "tests/test_acceptance.py::test_a37_four_greens_and_full_suite"
+    desc: "五绿总门 + 全量单测（B1 修订后为五绿）"
+  # ---- v0.4 定时闭环与设置 A38-A45 ----
+  - id: A38
+    version: v0.4
+    status: implemented
+    test: "tests/test_acceptance_v04.py::test_a38_settings_ground_and_hardcode_migration"
+    desc: "settings 落地 + 硬编码迁移"
+  - id: A39
+    version: v0.4
+    status: implemented
+    test: "tests/test_acceptance_v04.py::test_a39_shop_crud_and_crm_dropdown"
+    desc: "店铺 CRUD + CRM 下拉"
+  - id: A40
+    version: v0.4
+    status: implemented
+    test: "tests/test_acceptance_v04.py::test_a40_api_key_env_and_notify"
+    desc: "API key 环境变量 + 通知"
+  - id: A41
+    version: v0.4
+    status: implemented
+    test: "tests/test_acceptance_v04.py::test_a41_independent_submit_only_that_key"
+    desc: "独立提交只改该 key"
+  - id: A42
+    version: v0.4
+    status: implemented
+    test: "tests/test_acceptance_v04.py::test_a42_scheduler_fires_and_seed"
+    desc: "调度器触发 + seed"
+  - id: A43
+    version: v0.4
+    status: implemented
+    test: "tests/test_acceptance_v04.py::test_a43_schedule_tasks_write_and_dedup"
+    desc: "定时任务写入 + 去重"
+  - id: A44
+    version: v0.4
+    status: implemented
+    test: "tests/test_acceptance_v04.py::test_a44_engine_params_from_settings"
+    desc: "引擎参数来自 settings"
+  - id: A45
+    version: v0.4
+    status: implemented
+    test: "tests/test_acceptance_v04.py::test_a45_capability_registered_and_no_env_sources"
+    desc: "能力注册 + 无 env 源"
+  # ---- v0.5 SEO + 扒图 A46-A56 ----
+  - id: A46
+    version: v0.5
+    status: implemented
+    test: "tests/test_acceptance_v05.py::test_a46_nav_seo_children_scrape_first"
+    desc: "导航 SEO 子项扒图优先"
+  - id: A47
+    version: v0.5
+    status: planned
+    plan: "B5 随扒图重做阶段 1 补：image_file 落库 + 提案审核真实链路测试"
+    desc: "扒图 image_file 落库 + 提案审核真实链路"
+  - id: A48
+    version: v0.5
+    status: planned
+    plan: "B5 随扒图重做阶段 1 补：tm.task domain=scrape 落点测试"
+    desc: "tm.task domain=scrape 落点"
+  - id: A49
+    version: v0.5
+    status: implemented
+    test: "tests/test_acceptance_v05.py::test_a49_healthcheck_changed_proposes_task"
+    desc: "healthcheck 变更提议任务"
+  - id: A50
+    version: v0.5
+    status: implemented
+    test: "tests/test_acceptance_v05.py::test_a50_quota_transparent_in_keyword_metric"
+    desc: "配额透明在 keyword 指标中"
+  - id: A51
+    version: v0.5
+    status: planned
+    plan: "B5 随扒图重做阶段 1 补：seo-optimize config 规格可改行为变化测试"
+    desc: "seo-optimize config 规格可改行为变化"
+  - id: A52
+    version: v0.5
+    status: implemented
+    test: "tests/test_acceptance_v05.py::test_a52_scrape_storage_dir_setting"
+    desc: "扒图存储目录设置"
+  - id: A53
+    version: v0.5
+    status: implemented
+    test: "tests/test_acceptance_v05.py::test_a53_model_settings_and_engine_params"
+    desc: "模型设置与引擎参数"
+  - id: A54
+    version: v0.5
+    status: implemented
+    test: "tests/test_acceptance_v05.py::test_a54_crm_message_image_full_chain"
+    desc: "CRM 消息图片全链路（含 test_a54_crm_image_chain_labels_and_inputs / test_a54_crm_image_worker_registered）"
+  - id: A55
+    version: v0.5
+    status: implemented
+    test: "tests/test_acceptance_v05.py::test_a55_healthcheck_chain_in_labels_and_inputs"
+    desc: "healthcheck 链标签与输入（含 test_a55_keyword_and_optimize_chains_registered / test_a55_healthcheck_chain_seed_schedule）"
+  - id: A56
+    version: v0.5
+    status: implemented
+    test: "tests/test_acceptance_v05.py::test_a56_v05_pages_render"
+    desc: "v0.5 页面渲染"

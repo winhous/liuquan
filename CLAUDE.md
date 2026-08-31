@@ -9,7 +9,7 @@ AI 大管家系统：盯着店铺的生意事实（订单/库存/客户/流量�
 1. **动手前先读**：`docs/项目状态.md`（当前在哪）+ 本次任务相关的规范/详设章节。指针文档必须点开读，不能凭记忆干活
 2. **详设先行**：没有确认的详设不动代码；开发中发现详设有误，先改详设再改代码
 3. **改动必留痕**：凡改动工序/规范/架构/依赖，在 `docs/变更日志.md` 追加一条「因为…所以…」（只增不减）
-4. **四绿守门**：lint / registry 一致性 / 单测 / verify 任一不绿 = 改动未完成，不得标完成不得提交（pre-commit hook 强制）
+4. **五绿守门**：lint / registry 一致性 / 单测 / verify / 断言覆盖任一不绿 = 改动未完成，不得标完成不得提交（pre-commit hook 强制）。第 5 门：断言覆盖（`scripts/check_acceptance.py` + `tests/acceptance_manifest.yaml`：implemented 缺测试即红，planned 已知缺口记黄须带落地计划，manual 手工验证豁免）
 5. **安全红线零容忍**：永不写 Etsy API、永不写 NocoBase 库（只读 v_* 视图）、本机永不直连 Etsy、密钥只进 `.env`
 6. **AI 100% 可控**：AI 只在引擎 REASON 相位出现；输出必过 Pydantic 类型校验 + 业务代码校验；业务代码禁止直调 LLM；部件间只允许契约/声明/配置三种依赖（低耦合 R21-R24，lint 执法）
 7. **不自评完成**：完成 = 验收断言全绿 + 用户复核；禁止"我觉得写完了"
@@ -54,7 +54,7 @@ L0 数据层（PG16 单实例双 database：业务库 + 引擎库隔离；外部
 
 FastAPI + SQLAlchemy 2.0 · Jinja2 + HTMX（原型阶段可再评估）· PostgreSQL 16 · PydanticAI + DeepSeek · PG 内置队列（SKIP LOCKED）· systemd 常驻。
 
-引擎继承广成（studio）之骨（5 相位状态机 / Policy 门禁 / 检查点 / 暂停恢复 / 审计 / YAML 声明式注册 / 测试四绿守门）+ PydanticAI 之心（output_type 契约 / 校验失败 re-ask / 模型字符串切换）。全新代码库，不 import 广成。
+引擎继承广成（studio）之骨（5 相位状态机 / Policy 门禁 / 检查点 / 暂停恢复 / 审计 / YAML 声明式注册 / 测试五绿守门）+ PydanticAI 之心（output_type 契约 / 校验失败 re-ask / 模型字符串切换）。全新代码库，不 import 广成。
 
 ## 生产环境红线（不可违反）
 
@@ -74,4 +74,4 @@ FastAPI + SQLAlchemy 2.0 · Jinja2 + HTMX（原型阶段可再评估）· Postgr
 
 ## 开发纪律
 
-详见 `docs/开发规范.md`（R1-R25）与 `docs/版本规划.md`。要点：四绿守门（lint/一致性/单测/verify）；改动必记变更日志；业务决策用户确认、引擎技术细节技术方确认（已授权）。
+详见 `docs/开发规范.md`（R1-R25）与 `docs/版本规划.md`。要点：五绿守门（lint/一致性/单测/verify/断言覆盖）；改动必记变更日志；业务决策用户确认、引擎技术细节技术方确认（已授权）。
