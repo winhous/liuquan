@@ -74,12 +74,12 @@ def run(inputs: ImageDownloadInput, ctx: EngineContext) -> ImagePack:
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(
                     asyncio.run,
-                    connector.fetch(url, batch_id=batch_id),
+                    connector.download(url, batch_id=batch_id),
                 )
                 result = future.result(timeout=120)
         else:
             result = loop.run_until_complete(
-                connector.fetch(url, batch_id=batch_id)
+                connector.download(url, batch_id=batch_id)
             )
     except Exception as e:
         return ImagePack(
