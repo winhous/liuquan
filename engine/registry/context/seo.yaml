@@ -1,0 +1,11 @@
+# seo 域 Context provider 登记（详设-v0.5 §6.3）
+
+# v0.5 批 2：SEO 关键词历史指标（listing_healthcheck 比较用）
+- id: seo_metric_history
+  domain: seo
+  description: SEO 关键词历史指标（seo.metrics 读接口；白名单来源）
+  params:
+    model: KeywordResearchInput
+  returns:
+    model: KeywordData
+  provider: seo.metric_history

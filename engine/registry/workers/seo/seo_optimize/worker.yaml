@@ -1,0 +1,23 @@
+# seo_optimize 工序声明（详设-v0.5 §6.1）
+# LLM 工序（reason: llm，model: default）：
+# 三段一上下文 prompt（商品理解→关键词策略→文案生成，照广成 seo-optimize SKILL.md + run.py）
+# LLM 网关用刘全 PydanticAI output_type + re-ask（worker.yaml 声明 output model，
+# runner REASON 相位自动校验，工序 run() 拿 llm_output 做归一化组装——不要在 run.py 里直调 LLM，R4）
+
+id: seo_optimize
+domain: seo
+version: 1
+risk: suggest
+description: SEO 优化：分析商品→关键词策略→文案生成（三段一上下文，LLM 工序）
+input:
+  model: SeoOptimizeInput
+output:
+  model: SeoOptimizationReport
+model: default
+reason: llm
+retry:
+  max_attempts: 2
+  timeout_s: 60
+context: []
+prompt: prompt.md
+config_dir: config/

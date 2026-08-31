@@ -17,11 +17,13 @@ Model 清单：
   EvidenceRef 复用 models.contract.task）；crm_chat_context / tm_task_context
   两 Context provider 的 params/returns Model（ChatContextParams/Data、
   TaskContextParams/Data + Brief 族）
+- v0.5 批 2（详设-v0.5 §6.1）：
+  keyword_research / seo_optimize 两工序的 input/output Model
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -64,6 +66,14 @@ __all__ = [
     "TodoCandidateResult",
     "TodoGenerateInput",
     "TranslationItem",
+    # v0.5 批 2：SEO 工序 Model
+    "KeywordResearchInput",
+    "KeywordData",
+    "SeoOptimizeInput",
+    "SeoOptimizationReport",
+    "SeoProductText",
+    "HealthcheckInput",
+    "HealthcheckResult",
 ]
 
 
@@ -430,3 +440,107 @@ class ScheduleTaskWrite(BaseModel):
     role: str = "运营"
     due: str  # YYYY-MM-DD
     evidence: list[EvidenceRef] = Field(min_length=1, max_length=20)
+
+
+# ==== v0.5 批 2：SEO 工序 Model（详设-v0.5 §6.1）====
+
+
+class KeywordResearchInput(BaseModel):
+    """keyword_research 工序入参 / keyword_research_chain 链入参（详设-v0.5 §6.1）。
+
+    keywords: 关键词列表（最多 8 个，connector 层硬顶）
+    page_size: 每页商品数（≤100，默认 10）
+    """
+
+    keywords: list[str] = Field(min_length=1, max_length=8)
+    page_size: int | None = Field(default=None, ge=1, le=100)
+
+
+class KeywordData(BaseModel):
+    """keyword_research 工序输出（详设-v0.5 §6.1）。
+
+    source: 数据来源（ehunt-api / ehunt-api+ehunt-keyword-cdp）
+    keywords: 逐词画像（product_num/avg_price_top/top_competitors/metrics/related_keywords）
+    quota: eHunt 配额回显（used_today/remaining_today）
+    metrics_note: 降级提示（CDP 不可用时）
+    """
+
+    source: str
+    keywords: dict[str, Any] = {}
+    quota: dict[str, Any] | None = None
+    metrics_note: str | None = None
+
+
+class SeoProductText(BaseModel):
+    """SEO 优化输入的商品文本信息（详设-v0.5 §6.1）。"""
+
+    title: str = ""
+    tags: list[str] = []
+    description: str = ""
+
+
+class SeoOptimizeInput(BaseModel):
+    """seo_optimize 工序入参 / seo_optimize_chain 链入参（详设-v0.5 §6.1）。
+
+    product_text: 商品当前文本信息（title/tags/description）
+    image_path: 可选图片路径（vision 补全理解，本批不接 vision）
+    target_keywords: 可选目标关键词（来自 keyword_research 输出）
+    playbook_key: 可选 playbooks 键（wall_art/digital/jewelry/clothing/home_candle/personalized/general）
+    """
+
+    product_text: SeoProductText
+    image_path: str | None = None  # vision 图片理解待批 4/5 接入
+    target_keywords: list[str] | None = None
+    playbook_key: str | None = None
+
+
+class SeoOptimizationReport(BaseModel):
+    """seo_optimize 工序输出（详设-v0.5 §6.1）。
+
+    三段一上下文 prompt（商品理解→关键词策略→文案生成，照广成 seo-optimize）；
+    归一化 = 纯 Python 硬约束（≤20 字符×13 标签、≤140×5 标题、≤13 材质、≤250 alt）。
+    note 明示不保证排名、手动粘贴回 ETSY。
+    """
+
+    original: SeoProductText  # 原始输入
+    titles: list[dict[str, str]] = Field(default_factory=list)  # 3-5 个标题候选（含 angle）
+    tags: list[str] = Field(default_factory=list)  # ≤13 标签，每个 ≤20 字符
+    listing_description: str = ""  # 描述重写
+    materials: list[str] = Field(default_factory=list)  # ≤13 材质
+    alt_text: str = ""  # ≤250 字符
+    suggested_category: str = ""  # 从 playbook 的 etsy_category_hints 选
+    seo_keywords: list[str] = Field(default_factory=list)  # 6-10 个 SEO 关键词
+    search_intent: str = ""  # 搜索意图分析
+    keyword_data_appendix: dict[str, Any] | None = None  # 上游关键词数据附录
+    playbook: str = ""  # 使用的 playbook key
+    note: str = "注意：SEO 优化建议不保证排名，需手动粘贴回 ETSY"  # 固定提示
+
+
+class HealthcheckInput(BaseModel):
+    """listing_healthcheck 工序入参 / seo_healthcheck_chain 链入参（详设-v0.5 §6.1）。
+
+    keywords: 体检关键词列表（缺省读设置键 seo.healthcheck_keywords）
+    date: 体检日期（可空，默认当天）
+    """
+
+    keywords: list[str] = Field(default_factory=list)
+    date: str | None = None  # YYYY-MM-DD 格式
+
+
+class HealthcheckResult(BaseModel):
+    """listing_healthcheck 工序输出（详设-v0.5 §6.1）。
+
+    changed: 变化项（product_num 升降/均价波动）
+    stable: 稳定项
+    metrics_written: 本次写入的指标数
+    """
+
+    changed: list[dict[str, Any]] = Field(default_factory=list)
+    stable: list[dict[str, Any]] = Field(default_factory=list)
+    metrics_written: int = 0
+
+
+# 重建所有使用 Any 类型的 Model（from __future__ import annotations 导致延迟求值）
+KeywordData.model_rebuild()
+SeoOptimizationReport.model_rebuild()
+HealthcheckResult.model_rebuild()

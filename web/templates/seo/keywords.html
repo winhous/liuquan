@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}关键词研究 - SEO{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>关键词研究</h1>
+  <p class="text-muted">输入关键词列表（≤8 词），获取竞品画像和逐词指标</p>
+</div>
+
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5>关键词输入</h5>
+      </div>
+      <div class="card-body">
+        <form id="keyword-research-form" hx-post="/seo/keywords" hx-target="#result-area" hx-swap="innerHTML">
+          <div class="mb-3">
+            <label for="keywords" class="form-label">关键词（逗号分隔，最多 8 个）</label>
+            <input type="text" class="form-control" id="keywords" name="keywords" 
+                   placeholder="例如：name necklace, floral print, custom poster" required>
+            <div class="form-text">eHunt API 每日限额 200 条，请合理使用</div>
+          </div>
+          <div class="mb-3">
+            <label for="page_size" class="form-label">每页商品数（≤100，默认 10）</label>
+            <input type="number" class="form-control" id="page_size" name="page_size" 
+                   min="1" max="100" value="10">
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="ti ti-search"></i> 开始调研
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div id="result-area">
+      {% if error %}
+      <div class="alert alert-danger">{{ error }}</div>
+      {% endif %}
+
+      {% if keyword_data %}
+      <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5>调研结果</h5>
+          <span class="badge bg-{{ 'success' if keyword_data.source == 'ehunt-api+ehunt-keyword-cdp' else 'warning' }}">
+            {{ keyword_data.source }}
+          </span>
+        </div>
+        <div class="card-body">
+          {% if keyword_data.metrics_note %}
+          <div class="alert alert-warning">
+            <i class="ti ti-alert-triangle"></i> {{ keyword_data.metrics_note }}
+          </div>
+          {% endif %}
+
+          {% if keyword_data.quota %}
+          <div class="mb-3">
+            <small class="text-muted">
+              eHunt 配额：今日已用 {{ keyword_data.quota.used_today }} / 剩余 {{ keyword_data.quota.remaining_today }}
+            </small>
+          </div>
+          {% endif %}
+
+          {% for keyword, data in keyword_data.keywords.items() %}
+          <div class="card mb-3">
+            <div class="card-header">
+              <h6>{{ keyword }}</h6>
+            </div>
+            <div class="card-body">
+              <div class="row">
+                <div class="col-md-4">
+                  <p><strong>商品总数：</strong>{{ data.product_num or 'N/A' }}</p>
+                  <p><strong>Top 均价：</strong>{{ '$%.2f'|format(data.avg_price_top) if data.avg_price_top else 'N/A' }}</p>
+                </div>
+                <div class="col-md-8">
+                  {% if data.metrics %}
+                  <p><strong>逐词指标：</strong></p>
+                  <ul class="list-unstyled">
+                    <li>频率：{{ data.metrics.frequency or 'N/A' }}</li>
+                    <li>竞争度：{{ data.metrics.competition or 'N/A' }}</li>
+                    <li>月浏览量：{{ data.metrics.views_month or 'N/A' }}</li>
+                    <li>月收藏量：{{ data.metrics.favorites_month or 'N/A' }}</li>
+                    <li>月销量：{{ data.metrics.sales_month or 'N/A' }}</li>
+                  </ul>
+                  {% endif %}
+                </div>
+              </div>
+
+              {% if data.top_competitors %}
+              <p><strong>Top 竞品：</strong></p>
+              <div class="table-responsive">
+                <table class="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>标题</th>
+                      <th>价格</th>
+                      <th>销量</th>
+                      <th>评论</th>
+                      <th>收藏</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for item in data.top_competitors[:5] %}
+                    <tr>
+                      <td>{{ item.title[:50] }}...</td>
+                      <td>${{ item.price }}</td>
+                      <td>{{ item.sales_total }}</td>
+                      <td>{{ item.reviews }}</td>
+                      <td>{{ item.favorites }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <h5>使用说明</h5>
+      </div>
+      <div class="card-body">
+        <ul>
+          <li>输入关键词（逗号分隔，最多 8 个）</li>
+          <li>系统调用 eHunt API 获取竞品画像</li>
+          <li>如果 Chrome 9222 已启动，还会获取逐词指标</li>
+          <li>结果可用于 SEO 优化和 listing 体检</li>
+        </ul>
+        <div class="alert alert-info mt-3">
+          <small>
+            <strong>注意：</strong>eHunt API 每日限额 200 条，每次查询消耗 1 条/词。
+          </small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

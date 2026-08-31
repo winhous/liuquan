@@ -1,4 +1,4 @@
-"""crm_follow_up_reminder 工序 ACT（v0.4 详设 §10.1；决策 37 纯代码提醒）。
+"""crm_follow_up_reminder 工序 ACT（v0.4 详设-定时闭环-§X.Y；决策 37 纯代码提醒）。
 
 纯代码工序（worker.yaml 的 reason: none，无 LLM 调用，零 token 成本）：
 从 crm_overdue_context provider 拿超期客户清单 -> 逐客户生成 ReminderItem。

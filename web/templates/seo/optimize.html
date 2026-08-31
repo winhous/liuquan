@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}SEO 优化 - SEO{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>SEO 优化</h1>
+  <p class="text-muted">输入商品信息，AI 生成优化后的 SEO 文案</p>
+</div>
+
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5>商品信息输入</h5>
+      </div>
+      <div class="card-body">
+        <form id="seo-optimize-form" hx-post="/seo/optimize" hx-target="#optimize-result" hx-swap="innerHTML">
+          <div class="mb-3">
+            <label for="title" class="form-label">当前标题</label>
+            <input type="text" class="form-control" id="title" name="title" 
+                   placeholder="例如：Custom Name Necklace - Personalized Gift">
+          </div>
+          <div class="mb-3">
+            <label for="tags" class="form-label">当前标签（逗号分隔）</label>
+            <input type="text" class="form-control" id="tags" name="tags" 
+                   placeholder="例如：necklace, personalized, gift, custom">
+          </div>
+          <div class="mb-3">
+            <label for="description" class="form-label">当前描述</label>
+            <textarea class="form-control" id="description" name="description" rows="4"
+                      placeholder="请输入商品描述..."></textarea>
+          </div>
+          <div class="mb-3">
+            <label for="target_keywords" class="form-label">目标关键词（可选，逗号分隔）</label>
+            <input type="text" class="form-control" id="target_keywords" name="target_keywords" 
+                   placeholder="例如：name necklace, personalized jewelry">
+          </div>
+          <div class="mb-3">
+            <label for="playbook_key" class="form-label">Playbook（可选）</label>
+            <select class="form-select" id="playbook_key" name="playbook_key">
+              <option value="">自动选择</option>
+              <option value="wall_art">Wall Art</option>
+              <option value="digital">Digital Products</option>
+              <option value="jewelry">Jewelry</option>
+              <option value="clothing">Clothing</option>
+              <option value="home_candle">Home & Candle</option>
+              <option value="personalized">Personalized</option>
+              <option value="general">General</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="ti ti-sparkles"></i> 生成优化文案
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div id="optimize-result">
+      {% if error %}
+      <div class="alert alert-danger">{{ error }}</div>
+      {% endif %}
+
+      {% if report %}
+      <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5>优化报告</h5>
+          <span class="badge bg-info">Playbook: {{ report.playbook or 'auto' }}</span>
+        </div>
+        <div class="card-body">
+          <div class="alert alert-warning">
+            <i class="ti ti-alert-triangle"></i> {{ report.note }}
+          </div>
+
+          <h6>优化标题（{{ report.titles|length }} 个）</h6>
+          <div class="table-responsive mb-4">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>标题</th>
+                  <th>角度</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for t in report.titles %}
+                <tr>
+                  <td>{{ loop.index }}</td>
+                  <td>{{ t.title }}</td>
+                  <td><span class="badge bg-secondary">{{ t.angle }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <h6>优化标签（{{ report.tags|length }} 个）</h6>
+          <div class="mb-4">
+            {% for tag in report.tags %}
+            <span class="badge bg-primary me-1 mb-1">{{ tag }}</span>
+            {% endfor %}
+          </div>
+
+          <h6>优化描述</h6>
+          <div class="mb-4 p-3 bg-light rounded">
+            {{ report.listing_description }}
+          </div>
+
+          <div class="row">
+            <div class="col-md-6">
+              <h6>材质</h6>
+              <ul>
+                {% for m in report.materials %}
+                <li>{{ m }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <h6>建议类目</h6>
+              <p>{{ report.suggested_category }}</p>
+            </div>
+          </div>
+
+          <h6>SEO 关键词（{{ report.seo_keywords|length }} 个）</h6>
+          <div class="mb-4">
+            {% for kw in report.seo_keywords %}
+            <span class="badge bg-success me-1 mb-1">{{ kw }}</span>
+            {% endfor %}
+          </div>
+
+          <h6>搜索意图</h6>
+          <p>{{ report.search_intent }}</p>
+
+          <h6>图片 Alt 文本</h6>
+          <div class="p-3 bg-light rounded">
+            <small>{{ report.alt_text }}</small>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <h5>使用说明</h5>
+      </div>
+      <div class="card-body">
+        <ul>
+          <li>输入商品当前标题、标签和描述</li>
+          <li>可选：指定目标关键词和 Playbook</li>
+          <li>AI 会生成优化后的 SEO 文案</li>
+          <li>包含标题、标签、描述、材质、类目建议等</li>
+        </ul>
+        <div class="alert alert-info mt-3">
+          <small>
+            <strong>注意：</strong>优化建议不保证排名，需手动粘贴回 ETSY。
+          </small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

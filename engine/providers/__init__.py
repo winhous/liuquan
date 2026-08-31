@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 from dotenv import dotenv_values
 
-from models.workers import ChatContextData, ReminderContextData, TaskContextData
+from models.workers import ChatContextData, KeywordData, ReminderContextData, TaskContextData
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,48 @@ class CrmOverdueContextHTTP:
         return ReminderContextData.model_validate({"customers": resp.json()})
 
 
+class SeoMetricHistoryHTTP:
+    """seo.metric_history 实现：GET /api/biz/seo/metrics/{keyword} -> KeywordData。
+
+    v0.5 详设 §6.3：SEO 关键词历史指标（listing_healthcheck 比较用）。
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        token: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = (base_url or _env_value(_BIZ_URL_ENV) or "").rstrip("/")
+        self._token = token or _env_value(_BIZ_TOKEN_ENV) or ""
+        self._transport = transport
+
+    async def __call__(self, params) -> KeywordData:
+        if not self._base_url or not self._token:
+            raise BizReadError("biz 读接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
+        # params 可能是 KeywordResearchInput 或 dict
+        keyword = getattr(params, "keyword", None) or (params.get("keyword") if isinstance(params, dict) else None)
+        if not keyword:
+            raise BizReadError("seo.metric_history provider 缺少 keyword 参数")
+        url = f"{self._base_url}/api/biz/seo/metrics/{keyword}"
+        async with httpx.AsyncClient(
+            trust_env=False, timeout=10.0, transport=self._transport
+        ) as client:
+            resp = await client.get(url, headers={"X-Biz-Token": self._token})
+        if resp.status_code != 200:
+            raise BizReadError(f"biz 读接口 HTTP {resp.status_code}: {resp.text[:200]}")
+        # 返回历史指标列表，包装进 KeywordData（source = "history"）
+        history = resp.json()
+        # 取最新一条的指标作为当前数据
+        latest = history[0] if history else {}
+        return KeywordData(
+            source="seo-metric-history",
+            keywords={keyword: latest},
+            quota=latest.get("quota"),
+        )
+
+
 def build_providers(
     *,
     base_url: str | None = None,
@@ -132,6 +174,7 @@ def build_providers(
         "crm.chat_context": CrmChatContextHTTP(base_url=base_url, token=token, transport=transport),
         "crm.overdue_context": CrmOverdueContextHTTP(base_url=base_url, token=token, transport=transport),
         "tm.task_context": TmTaskContextHTTP(base_url=base_url, token=token, transport=transport),
+        "seo.metric_history": SeoMetricHistoryHTTP(base_url=base_url, token=token, transport=transport),
     }
 
 
@@ -146,5 +189,6 @@ __all__ = [
     "CrmChatContextHTTP",
     "CrmOverdueContextHTTP",
     "TmTaskContextHTTP",
+    "SeoMetricHistoryHTTP",
     "build_providers",
 ]

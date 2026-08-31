@@ -1,0 +1,303 @@
+# SEO 优化 playbooks（详设-v0.5 §6.1，R10 规格外置）
+# 照广成 seo-optimize/playbooks.py 平移（Contentsy MIT 7 本）
+# 7 本：wall_art / digital / jewelry / clothing / home_candle / personalized / general
+# 数据源：etsy_category_hints 本地缓存（不调 taxonomy API）
+
+# Etsy 顶级类目常量（照广成 ETSY_TOP_LEVELS）
+etsy_category_hints:
+  - "Art & Collectibles"
+  - "Craft Supplies & Tools"
+  - "Clothing & Accessories"
+  - "Home & Living"
+  - "Jewelry & Accessories"
+  - "Paper & Party Supplies"
+  - "Accessories"
+  - "Bags & Purses"
+  - "Bath & Beauty"
+  - "Books, Movies & Music"
+  - "Electronics & Accessories"
+  - "Home Decor"
+  - "Jewelry"
+  - "Shoes"
+  - "Toys & Games"
+
+# 7 本 playbook（照广成 Contentsy MIT 7 本）
+playbooks:
+  wall_art:
+    key: wall_art
+    label: "Wall Art"
+    title_formula: "Custom {product_type} | {style} Wall Art | {theme} Decor"
+    example_title: "Custom Floral Watercolor Print | Minimalist Wall Art | Living Room Decor"
+    description_sections:
+      - "Transform your space with this stunning {product_type}"
+      - "Perfect for {room} decoration"
+      - "High-quality print on premium material"
+      - "Available in multiple sizes"
+    tag_mix:
+      - "wall art"
+      - "print"
+      - "poster"
+      - "wall decor"
+      - "home decor"
+      - "living room"
+      - "bedroom"
+      - "office"
+      - "gift"
+      - "personalized"
+      - "custom"
+      - "digital download"
+      - "instant download"
+    key_attributes:
+      - "high resolution"
+      - "printable"
+      - "multiple sizes"
+      - "instant download"
+    rules:
+      - "Must include room type in title"
+      - "Must include style descriptor"
+      - "Tags must include 'wall art' and 'home decor'"
+    etsy_category_hints:
+      - "Art & Collectibles > Prints > Digital Prints"
+      - "Home & Living > Home Decor > Wall Decor > Wall Art"
+
+  digital:
+    key: digital
+    label: "Digital Products"
+    title_formula: "Instant Download {product_type} | {use_case} | {style}"
+    example_title: "Instant Download Wedding Invitation Template | Floral Design | Modern"
+    description_sections:
+      - "Get instant access to this digital {product_type}"
+      - "Easy to customize and edit"
+      - "High resolution files included"
+      - "No physical item will be shipped"
+    tag_mix:
+      - "digital download"
+      - "instant download"
+      - "template"
+      - "printable"
+      - "DIY"
+      - "editable"
+      - "customizable"
+      - "digital art"
+      - "wall art"
+      - "poster"
+      - "invitation"
+      - "card"
+      - "sticker"
+    key_attributes:
+      - "instant download"
+      - "editable"
+      - "high resolution"
+      - "multiple file formats"
+    rules:
+      - "Must include 'digital download' or 'instant download' in title"
+      - "Must mention no physical item shipped"
+      - "Tags must include 'digital download' and 'instant download'"
+    etsy_category_hints:
+      - "Craft Supplies & Tools > Templates"
+      - "Art & Collectibles > Prints > Digital Prints"
+
+  jewelry:
+    key: jewelry
+    label: "Jewelry"
+    title_formula: "{material} {product_type} | {style} | {occasion} Gift"
+    example_title: "Sterling Silver Necklace | Minimalist Design | Birthday Gift for Her"
+    description_sections:
+      - "Handcrafted {product_type} made with {material}"
+      - "Perfect for {occasion} or everyday wear"
+      - "Adjustable length for comfortable fit"
+      - "Comes in a gift-ready box"
+    tag_mix:
+      - "jewelry"
+      - "necklace"
+      - "bracelet"
+      - "earrings"
+      - "ring"
+      - "silver"
+      - "gold"
+      - "handmade"
+      - "gift for her"
+      - "birthday gift"
+      - "anniversary gift"
+      - "minimalist"
+      - "dainty"
+    key_attributes:
+      - "handcrafted"
+      - "adjustable"
+      - "gift-ready packaging"
+      - "hypoallergenic"
+    rules:
+      - "Must include material in title"
+      - "Must include occasion or use case"
+      - "Tags must include 'jewelry' and gift-related terms"
+    etsy_category_hints:
+      - "Jewelry & Accessories > Necklaces"
+      - "Jewelry & Accessories > Bracelets"
+      - "Jewelry & Accessories > Earrings"
+
+  clothing:
+    key: clothing
+    label: "Clothing"
+    title_formula: "{style} {product_type} | {material} | {occasion}"
+    example_title: "Bohemian Floral Dress | Cotton | Summer Casual"
+    description_sections:
+      - "Stay comfortable and stylish with this {product_type}"
+      - "Made from {material} for all-day comfort"
+      - "Perfect for {occasion} or casual wear"
+      - "Available in multiple sizes"
+    tag_mix:
+      - "clothing"
+      - "dress"
+      - "shirt"
+      - "blouse"
+      - "skirt"
+      - "pants"
+      - "jacket"
+      - "cotton"
+      - "linen"
+      - "summer"
+      - "casual"
+      - "bohemian"
+      - "vintage"
+    key_attributes:
+      - "comfortable fit"
+      - "machine washable"
+      - "sustainable material"
+      - "inclusive sizing"
+    rules:
+      - "Must include material in title"
+      - "Must include style or occasion"
+      - "Tags must include 'clothing' and material"
+    etsy_category_hints:
+      - "Clothing & Accessories > Dresses"
+      - "Clothing & Accessories > Tops & Tees"
+
+  home_candle:
+    key: home_candle
+    label: "Home & Candle"
+    title_formula: "{scent} Candle | {size} | {occasion} Gift"
+    example_title: "Lavender Soy Candle | 8 oz | Housewarming Gift"
+    description_sections:
+      - "Hand-poured {scent} candle made with natural soy wax"
+      - "Burns clean and long-lasting"
+      - "Perfect for {occasion} or self-care"
+      - "Reusable jar for storage or decor"
+    tag_mix:
+      - "candle"
+      - "soy candle"
+      - "scented candle"
+      - "home decor"
+      - "gift"
+      - "housewarming"
+      - "self care"
+      - "relaxation"
+      - "aromatherapy"
+      - "handmade"
+      - "natural"
+      - "eco-friendly"
+      - "reusable"
+    key_attributes:
+      - "natural soy wax"
+      - "hand-poured"
+      - "reusable container"
+      - "clean burning"
+    rules:
+      - "Must include scent in title"
+      - "Must include size or weight"
+      - "Tags must include 'candle' and scent"
+    etsy_category_hints:
+      - "Home & Living > Home Decor > Candles & Holders"
+      - "Bath & Beauty > Aromatherapy > Candles"
+
+  personalized:
+    key: personalized
+    label: "Personalized"
+    title_formula: "Personalized {product_type} | Custom {feature} | {occasion}"
+    example_title: "Personalized Name Necklace | Custom Birthstone | Anniversary Gift"
+    description_sections:
+      - "Make it truly yours with this personalized {product_type}"
+      - "Custom {feature} adds a unique touch"
+      - "Perfect for {occasion} or everyday wear"
+      - "Handcrafted with care"
+    tag_mix:
+      - "personalized"
+      - "custom"
+      - "name"
+      - "monogram"
+      - "engraved"
+      - "birthstone"
+      - "anniversary"
+      - "birthday"
+      - "gift for her"
+      - "gift for him"
+      - "wedding"
+      - "mother's day"
+      - "unique"
+    key_attributes:
+      - "personalization included"
+      - "handcrafted"
+      - "gift-ready"
+      - "multiple options"
+    rules:
+      - "Must include 'personalized' or 'custom' in title"
+      - "Must include occasion or use case"
+      - "Tags must include 'personalized' and occasion"
+    etsy_category_hints:
+      - "Jewelry & Accessories > Necklaces > Name Necklaces"
+      - "Home & Living > Home Decor > Personalized Home Decor"
+
+  general:
+    key: general
+    label: "General"
+    title_formula: "{product_type} | {style} | {use_case}"
+    example_title: "Handmade Pottery Mug | Rustic Style | Coffee Lover Gift"
+    description_sections:
+      - "Discover this beautiful {product_type}"
+      - "Crafted with attention to detail"
+      - "Perfect for {use_case}"
+      - "Makes a great gift"
+    tag_mix:
+      - "handmade"
+      - "artisan"
+      - "unique"
+      - "gift"
+      - "home decor"
+      - "kitchen"
+      - "bathroom"
+      - "bedroom"
+      - "office"
+      - "rustic"
+      - "modern"
+      - "vintage"
+      - "minimalist"
+    key_attributes:
+      - "handmade"
+      - "unique design"
+      - "gift-worthy"
+      - "quality materials"
+    rules:
+      - "Must include product type in title"
+      - "Must include style descriptor"
+      - "Tags must include product type and style"
+    etsy_category_hints:
+      - "Home & Living > Home Decor"
+      - "Craft Supplies & Tools"
+
+# 匹配顺序（照广成 _MATCH_ORDER：具体在前）
+match_order:
+  - digital
+  - wall_art
+  - jewelry
+  - clothing
+  - personalized
+  - home_candle
+  - general
+
+# 匹配关键词（照广成 match_playbook 逻辑）
+match_keywords:
+  digital: ["digital", "download", "template", "printable", "svg", "png", "pdf"]
+  wall_art: ["wall", "art", "print", "poster", "canvas", "painting", "decor"]
+  jewelry: ["jewelry", "necklace", "bracelet", "earring", "ring", "silver", "gold"]
+  clothing: ["dress", "shirt", "blouse", "skirt", "pants", "jacket", "wear"]
+  personalized: ["personalized", "custom", "name", "monogram", "engraved", "birthstone"]
+  home_candle: ["candle", "soy", "wax", "scented", "aromatherapy"]

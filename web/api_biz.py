@@ -421,6 +421,94 @@ def create_biz_router(
             await session.flush()
             return {"ok": True, "id": task.id}
 
+    # ---- 读接口：SEO 关键词历史指标（详设-v0.5 §10：GET /api/biz/seo/metrics/{keyword}）----
+
+    @router.get("/seo/metrics/{keyword}", dependencies=[Depends(_check_token)])
+    async def seo_metric_history(keyword: str) -> list[dict]:
+        """SEO 关键词历史指标（白名单来源，listing_healthcheck 比较用）。
+
+        按 keyword 查询 seo.keyword_metric 表，返回历史指标列表（按 metric_date 降序）。
+        """
+        from models.seo import KeywordMetric
+
+        eng = _resolve_engine()
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        async with maker() as session:
+            rows = (
+                await session.execute(
+                    select(KeywordMetric)
+                    .where(KeywordMetric.keyword == keyword)
+                    .order_by(KeywordMetric.metric_date.desc(), KeywordMetric.id.desc())
+                    .limit(30)
+                )
+            ).scalars().all()
+            return [
+                {
+                    "id": r.id,
+                    "keyword": r.keyword,
+                    "metric_date": r.metric_date.isoformat() if r.metric_date else None,
+                    "product_num": r.product_num,
+                    "avg_price_top": float(r.avg_price_top) if r.avg_price_top is not None else None,
+                    "top_competitors": r.top_competitors or [],
+                    "metrics": r.metrics,
+                    "quota": r.quota,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+
+    # ---- 写接口：SEO 关键词指标落库（详设-v0.5 §10：POST /api/biz/seo/metrics）----
+
+    @router.post("/seo/metrics", dependencies=[Depends(_check_token)])
+    async def seo_metric_write(payload: dict) -> dict:
+        """落新指标（unique(keyword, metric_date) 幂等 409 防重）。
+
+        listing_healthcheck 工序经本接口写入新指标数据。
+        """
+        from models.seo import KeywordMetric
+
+        # 校验必填字段
+        keyword = payload.get("keyword")
+        metric_date_str = payload.get("metric_date")
+        if not keyword or not metric_date_str:
+            raise HTTPException(status_code=422, detail="keyword 和 metric_date 不能为空")
+
+        # 解析日期
+        try:
+            metric_date = date.fromisoformat(metric_date_str)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="metric_date 格式错误，需 YYYY-MM-DD")
+
+        eng = _resolve_engine()
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        async with maker() as session, session.begin():
+            # 幂等：同 keyword + 同 metric_date 已存在 -> 409
+            dup = await session.execute(
+                select(KeywordMetric.id).where(
+                    KeywordMetric.keyword == keyword,
+                    KeywordMetric.metric_date == metric_date,
+                ).limit(1)
+            )
+            if dup.scalar_one_or_none() is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"指标已存在：keyword={keyword}, metric_date={metric_date_str}",
+                )
+
+            # 落库
+            row = KeywordMetric(
+                keyword=keyword,
+                metric_date=metric_date,
+                product_num=payload.get("product_num"),
+                avg_price_top=payload.get("avg_price_top"),
+                top_competitors=payload.get("top_competitors", []),
+                metrics=payload.get("metrics"),
+                quota=payload.get("quota"),
+            )
+            session.add(row)
+            await session.flush()
+            return {"ok": True, "id": row.id}
+
     # ---- 读接口：tm 任务上下文（tm_intent 链 provider 数据来源）----
 
     @router.get("/tm/task-context/{task_id}", dependencies=[Depends(_check_token)])

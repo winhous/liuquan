@@ -17,6 +17,7 @@ from engine.providers import (
     BizReadError,
     CrmChatContextHTTP,
     CrmOverdueContextHTTP,
+    SeoMetricHistoryHTTP,
     TmTaskContextHTTP,
     build_providers,
 )
@@ -112,10 +113,11 @@ async def test_provider_missing_config_raises(monkeypatch: pytest.MonkeyPatch) -
 
 def test_build_providers_assembles() -> None:
     providers = build_providers(base_url="http" + "://test-" + "biz", token="test-token")
-    assert set(providers) == {"crm.chat_context", "crm.overdue_context", "tm.task_context"}
+    assert set(providers) == {"crm.chat_context", "crm.overdue_context", "tm.task_context", "seo.metric_history"}
     assert isinstance(providers["crm.chat_context"], CrmChatContextHTTP)
     assert isinstance(providers["crm.overdue_context"], CrmOverdueContextHTTP)
     assert isinstance(providers["tm.task_context"], TmTaskContextHTTP)
+    assert isinstance(providers["seo.metric_history"], SeoMetricHistoryHTTP)
 
 
 @pytest.mark.asyncio

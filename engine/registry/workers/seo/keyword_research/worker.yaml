@@ -1,0 +1,22 @@
+# keyword_research 工序声明（详设-v0.5 §6.1）
+# 纯代码工序（reason: none，无 LLM 调用，零 token 成本）：
+# 调 ehunt_api + ehunt_keyword 两跳聚合（照广成 run.py 逻辑）；
+# 输入关键词列表 -> 竞品画像 + 逐词指标 -> KeywordData
+
+id: keyword_research
+domain: seo
+version: 1
+risk: read
+description: SEO 关键词调研：eHunt API 竞品画像 + CDP 逐词指标聚合（零 token）
+input:
+  model: KeywordResearchInput
+output:
+  model: KeywordData
+model: default
+reason: none
+retry:
+  max_attempts: 2
+  timeout_s: 30
+context: []
+prompt: prompt.md
+config_dir: config/

@@ -1407,6 +1407,156 @@ def create_app(
             return RedirectResponse(f"/tasks?err={urlencode({'msg': str(exc)})}", status_code=303)
         return RedirectResponse("/tasks", status_code=303)
 
+    # ---- SEO 路由（v0.5 批 2，详设-v0.5 §3.3）----
+
+    @app.get("/seo/keywords")
+    async def seo_keywords_page(request: Request):
+        """关键词研究页（照 crm 页模式 + 登录保护）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        return request.app.state.templates.TemplateResponse(
+            request, "seo/keywords.html", _ctx(request, "seo-keywords")
+        )
+
+    @app.post("/seo/keywords")
+    async def seo_keywords_research(request: Request):
+        """关键词研究接口（HTMX 局部刷新）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        form = await request.form()
+        keywords_str = str(form.get("keywords", "")).strip()
+        page_size = int(form.get("page_size", 10))
+
+        if not keywords_str:
+            return request.app.state.templates.TemplateResponse(
+                request, "seo/keywords.html",
+                {**_ctx(request, "seo-keywords"), "error": "请输入关键词"}
+            )
+
+        keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
+        if len(keywords) > 8:
+            keywords = keywords[:8]
+
+        # 调用引擎触发 keyword_research 工序（异步）
+        try:
+            # 这里应该调用引擎接口触发工序，但本批先做页面展示
+            # 实际实现需要 engineapi client 触发链
+            keyword_data = {
+                "source": "ehunt-api",
+                "keywords": {},
+                "quota": None,
+                "metrics_note": "本批占位：实际实现需要触发 keyword_research 工序",
+            }
+            return request.app.state.templates.TemplateResponse(
+                request, "seo/keywords.html",
+                {**_ctx(request, "seo-keywords"), "keyword_data": keyword_data}
+            )
+        except Exception as exc:
+            return request.app.state.templates.TemplateResponse(
+                request, "seo/keywords.html",
+                {**_ctx(request, "seo-keywords"), "error": f"调研失败：{exc}"}
+            )
+
+    @app.get("/seo/optimize")
+    async def seo_optimize_page(request: Request):
+        """SEO 优化页（照 crm 页模式 + 登录保护）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        return request.app.state.templates.TemplateResponse(
+            request, "seo/optimize.html", _ctx(request, "seo-optimize")
+        )
+
+    @app.post("/seo/optimize")
+    async def seo_optimize_action(request: Request):
+        """SEO 优化接口（HTMX 局部刷新）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        form = await request.form()
+        title = str(form.get("title", "")).strip()
+        tags_str = str(form.get("tags", "")).strip()
+        description = str(form.get("description", "")).strip()
+        target_keywords_str = str(form.get("target_keywords", "")).strip()
+        playbook_key = str(form.get("playbook_key", "")).strip()
+
+        if not title and not tags_str and not description:
+            return request.app.state.templates.TemplateResponse(
+                request, "seo/optimize.html",
+                {**_ctx(request, "seo-optimize"), "error": "请至少输入标题、标签或描述"}
+            )
+
+        tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
+        target_keywords = [k.strip() for k in target_keywords_str.split(",") if k.strip()] if target_keywords_str else None
+
+        # 调用引擎触发 seo_optimize 工序（异步）
+        try:
+            # 这里应该调用引擎接口触发工序，但本批先做页面展示
+            # 实际实现需要 engineapi client 触发链
+            from models.workers import SeoOptimizationReport, SeoProductText
+            report = SeoOptimizationReport(
+                original=SeoProductText(title=title, tags=tags, description=description),
+                note="本批占位：实际实现需要触发 seo_optimize 工序",
+            )
+            return request.app.state.templates.TemplateResponse(
+                request, "seo/optimize.html",
+                {**_ctx(request, "seo-optimize"), "report": report}
+            )
+        except Exception as exc:
+            return request.app.state.templates.TemplateResponse(
+                request, "seo/optimize.html",
+                {**_ctx(request, "seo-optimize"), "error": f"优化失败：{exc}"}
+            )
+
+    @app.get("/seo/healthcheck")
+    async def seo_healthcheck_page(request: Request):
+        """listing 体检页（照 crm 页模式 + 登录保护）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+
+        # 获取有指标数据的关键词列表
+        try:
+            from web.seo_store import SEOStore
+            seo_store = SEOStore(request.app.state.engine)
+            keywords = await seo_store.list_keywords_with_metrics()
+        except Exception:
+            keywords = []
+
+        return request.app.state.templates.TemplateResponse(
+            request, "seo/healthcheck.html",
+            {**_ctx(request, "seo-healthcheck"), "keywords": keywords}
+        )
+
+    @app.get("/seo/healthcheck/{keyword}")
+    async def seo_healthcheck_detail(request: Request, keyword: str):
+        """listing 体检详情页（单个关键词历史指标）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+
+        try:
+            from web.seo_store import SEOStore
+            seo_store = SEOStore(request.app.state.engine)
+            metrics = await seo_store.get_keyword_metrics(keyword)
+        except Exception:
+            metrics = []
+
+        return request.app.state.templates.TemplateResponse(
+            request, "seo/healthcheck.html",
+            {**_ctx(request, "seo-healthcheck"), "keyword": keyword, "metrics": metrics}
+        )
+
+    @app.post("/seo/healthcheck/run")
+    async def seo_healthcheck_run(request: Request):
+        """listing 体检立即运行（HTMX 局部刷新）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+
+        # 调用引擎触发 seo_healthcheck_chain（异步）
+        try:
+            # 这里应该调用引擎接口触发链，但本批先做页面展示
+            # 实际实现需要 engineapi client 触发链
+            return "<div class='alert alert-success'>体检已触发（本批占位）</div>"
+        except Exception as exc:
+            return f"<div class='alert alert-danger'>体检失败：{exc}</div>"
+
     return app
 
 

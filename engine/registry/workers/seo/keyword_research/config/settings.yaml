@@ -1,0 +1,11 @@
+# keyword_research 工序配置（详设-v0.5 §6.1，R10 规格外置）
+# 业务规格值只许住这里，不许字面量进 run.py（lint P1 词表自动生成来源）
+
+# 最大关键词数（硬顶，防误用打爆 200/天配额）
+max_keywords: 8
+
+# 默认 page_size（每页商品数）
+default_page_size: 10
+
+# page_size 上限
+max_page_size: 100

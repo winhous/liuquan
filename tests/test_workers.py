@@ -233,6 +233,8 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "todo_generate",
         "customer_reply_draft",
         "tm_intent",
+        "keyword_research",
+        "seo_optimize",
     }
     assert set(registry.chains) == {
         "demo_echo_chain",
@@ -248,6 +250,7 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "crm_chat_context",
         "crm_overdue_context",
         "tm_task_context",
+        "seo_metric_history",
     }
     assert set(registry.events) == {"demo.echo_done"}
     # v0.4：tm.schedule Action（提醒任务直接落 tm.task，详设 §10.3）

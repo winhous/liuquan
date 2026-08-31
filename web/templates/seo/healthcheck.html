@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}listing 体检 - SEO{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>listing 体检</h1>
+  <p class="text-muted">监控关键词指标变化，发现排名下滑及时优化</p>
+</div>
+
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5>关键词指标历史</h5>
+        <button class="btn btn-sm btn-outline-primary" hx-post="/seo/healthcheck/run" hx-target="#healthcheck-result" hx-swap="innerHTML">
+          <i class="ti ti-refresh"></i> 立即体检
+        </button>
+      </div>
+      <div class="card-body">
+        {% if keywords %}
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>关键词</th>
+                <th>指标数</th>
+                <th>最新日期</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for kw in keywords %}
+              <tr>
+                <td>{{ kw.keyword }}</td>
+                <td>{{ kw.metric_count }}</td>
+                <td>{{ kw.latest_date }}</td>
+                <td>
+                  <a href="/seo/healthcheck/{{ kw.keyword }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="ti ti-eye"></i> 查看
+                  </a>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+          <p>暂无关键词指标数据</p>
+          <p>请先在「关键词研究」页面查询关键词</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div id="healthcheck-result">
+      {% if error %}
+      <div class="alert alert-danger">{{ error }}</div>
+      {% endif %}
+
+      {% if keyword %}
+      <div class="card mb-4">
+        <div class="card-header">
+          <h5>{{ keyword }} - 指标趋势</h5>
+        </div>
+        <div class="card-body">
+          {% if metrics %}
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>商品数</th>
+                  <th>均价</th>
+                  <th>变化</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in metrics %}
+                <tr>
+                  <td>{{ m.metric_date }}</td>
+                  <td>{{ m.product_num or 'N/A' }}</td>
+                  <td>{{ '$%.2f'|format(m.avg_price_top) if m.avg_price_top else 'N/A' }}</td>
+                  <td>
+                    {% if loop.index0 < metrics|length - 1 %}
+                      {% set prev = metrics[loop.index0 + 1] %}
+                      {% if prev.product_num and m.product_num %}
+                        {% if m.product_num > prev.product_num %}
+                          <span class="text-danger">↑ {{ ((m.product_num - prev.product_num) / prev.product_num * 100)|round(1) }}%</span>
+                        {% elif m.product_num < prev.product_num %}
+                          <span class="text-success">↓ {{ ((prev.product_num - m.product_num) / prev.product_num * 100)|round(1) }}%</span>
+                        {% else %}
+                          <span class="text-muted">→ 0%</span>
+                        {% endif %}
+                      {% endif %}
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="text-center text-muted py-4">
+            <p>暂无该关键词的历史指标数据</p>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <h5>使用说明</h5>
+      </div>
+      <div class="card-body">
+        <ul>
+          <li>查看已查询关键词的历史指标</li>
+          <li>监控商品数、均价等变化趋势</li>
+          <li>发现排名下滑及时优化</li>
+          <li>点击「立即体检」手动触发检查</li>
+        </ul>
+        <div class="alert alert-info mt-3">
+          <small>
+            <strong>注意：</strong>数据来自「关键词研究」页面的查询结果。
+          </small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
