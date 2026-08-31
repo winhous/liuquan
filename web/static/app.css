@@ -152,14 +152,23 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
    且所有设置项按大类归组——基础设置/AI 设置/系统设置） */
 .navbar-vertical .nav-item-header {
   margin-top: 0.625rem;              /* 与上一组/叶子拉开距离 */
-  padding: 0.25rem 0.875rem;
-  text-align: center;                /* 复核反馈：分类标题居中 */
-  font-size: 0.625rem;               /* 复核反馈：字体再调小（10px，一级菜单 0.9375rem） */
+  padding: 0.25rem 0.5rem;
+  display: flex;                     /* 复核反馈：横线在文字两侧、垂直居中（— AI 设置 —） */
+  align-items: center;               /* 横线在文字垂直中间 */
+  gap: 0.5rem;
+  font-size: 0.625rem;               /* 复核反馈：字体调小（10px，一级菜单 0.9375rem） */
   font-weight: 600;
   letter-spacing: 0.06em;            /* 字距拉开，类目感 */
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.42);  /* 淡灰（一级菜单近白）——明显弱于一级 */
-  border-top: 1px solid rgba(255, 255, 255, 0.07);  /* 顶部细分隔线 */
+}
+/* 两侧横线段（伪元素撑开，文字自然居中） */
+.navbar-vertical .nav-item-header::before,
+.navbar-vertical .nav-item-header::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.14);  /* 细线弱于文字，分隔类目 */
 }
 /* 分组下叶子菜单：缩进体现层级（与分组标题、与一级菜单都区分） */
 .navbar-vertical .nav-sm .nav-item .nav-link {
