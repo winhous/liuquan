@@ -29,7 +29,7 @@ class SourceTrace(BaseModel):
 class EvidenceRef(BaseModel):
     """依据引用：提案必须可追溯业务事实。"""
 
-    kind: Literal["message", "metric", "order_view", "listing", "image"]
+    kind: Literal["message", "metric", "order_view", "listing", "image", "customer"]
     ref_id: str  # 业务侧对象 id
     quote: str | None = None  # 原文摘录（如那句要跟进的买家消息）
 

@@ -1,19 +1,21 @@
 """引擎库数据访问层（T6；详设-v0.1 §3 引擎库 4 表 + §3 队列雏形 SKIP LOCKED）。
 
-- ORM 模型（Base + 4 映射类）与迁移同源：字段/类型/默认值/索引与
+- ORM 模型（Base + 5 映射类）与迁移同源：字段/类型/默认值/索引与
   migrations/engine/versions/ 的 DDL 逐列对齐（JSONB 显式用 postgresql.JSONB——
   sa.JSON 在 PG 方言下渲染为 JSON 而非 JSONB，见 §3 类型语义，schema 测试锁死）。
 - DAO 全部 async（async_sessionmaker + AsyncSession，T3 技术定：引擎 asyncio 化）；
   每个函数一次调用 = 一个事务，成功即提交。
 - 队列雏形：dequeue_task 用 SELECT ... FOR UPDATE SKIP LOCKED 取 queued 任务，
   只取不改状态（状态转换归 runner），worker_id 参数 v0.1 预留。
+- v0.4 扩展：Schedule ORM + DAO（详设 §5/§9.1），next_run_time 纯代码计算。
 
 接口契约由主代理技术定（T9 checkpoint/audit、T12 runner 均依赖），不得擅改。
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
@@ -21,6 +23,8 @@ from dotenv import dotenv_values
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -173,7 +177,50 @@ class EngineAudit(Base):
     )
 
 
-# ---- Row 返回类型（NamedTuple；TaskRow/CheckpointRow/AuditRow 契约）----
+class Schedule(Base):
+    """schedule：定时触发底座（v0.4 详设 §5）。
+
+    每行 = 一条定时链配置；enabled 开关；cron 限定 daily 形（"M H * * *"）；
+    last_run_at/next_run_at 为幂等锚点（调度器维护）。
+    ORM 与迁移 0002 逐列同源（R22）。
+    """
+
+    __tablename__ = "schedule"
+    __table_args__ = (
+        CheckConstraint(
+            "length(name) BETWEEN 1 AND 100",
+            name="chk_schedule_name",
+        ),
+        CheckConstraint(
+            "last_status IN ('','done','failed','skipped')",
+            name="chk_schedule_last_status",
+        ),
+        Index("idx_schedule_enabled", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    chain_id: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    cron: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'0 7 * * *'")
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+# ---- Row 返回类型（NamedTuple；TaskRow/CheckpointRow/AuditRow/ScheduleRow 契约）----
 
 
 class TaskRow(NamedTuple):
@@ -233,6 +280,22 @@ class AuditRow(NamedTuple):
     output_tokens: int | None
     duration_ms: int | None
     created_at: datetime
+
+
+@dataclass
+class ScheduleRow:
+    """schedule 行（v0.4 详设 §5；R22 同源，对齐 Schedule ORM）。"""
+
+    id: int
+    chain_id: str
+    name: str
+    cron: str
+    enabled: bool
+    last_run_at: datetime | None
+    next_run_at: datetime | None
+    last_status: str
+    created_at: datetime
+    updated_at: datetime
 
 
 # ---- 队列取队语句（§3「SELECT ... FOR UPDATE SKIP LOCKED」；测试同源断言）----
@@ -574,6 +637,151 @@ async def get_audit(engine: AsyncEngine, task_id: int) -> list[AuditRow]:
         return [_audit_row(a) for a in rows]
 
 
+# ---- schedule（v0.4 详设 §5/§9.1）----
+
+
+async def list_schedules(engine: AsyncEngine) -> list[ScheduleRow]:
+    """查全部定时链（插入序）。"""
+    async with _sessions(engine)() as session:
+        rows = (
+            await session.execute(
+                select(Schedule).order_by(Schedule.id)
+            )
+        ).scalars()
+        return [_schedule_row(s) for s in rows]
+
+
+async def get_schedule(engine: AsyncEngine, schedule_id: int) -> ScheduleRow | None:
+    """按 id 查定时链；不存在返回 None。"""
+    async with _sessions(engine)() as session:
+        s = await session.get(Schedule, schedule_id)
+        return _schedule_row(s) if s is not None else None
+
+
+async def create_schedule(
+    engine: AsyncEngine,
+    *,
+    chain_id: str,
+    name: str,
+    cron: str = "0 7 * * *",
+    enabled: bool = True,
+) -> int:
+    """建定时链，返回 schedule_id。"""
+    async with _sessions(engine)() as session, session.begin():
+        s = Schedule(
+            chain_id=chain_id,
+            name=name,
+            cron=cron,
+            enabled=enabled,
+        )
+        session.add(s)
+        await session.flush()
+        return s.id
+
+
+async def update_schedule(
+    engine: AsyncEngine,
+    schedule_id: int,
+    *,
+    name: str | None = None,
+    cron: str | None = None,
+    enabled: bool | None = None,
+    next_run_at: datetime | None = None,
+    set_next_run_at: bool = False,
+) -> None:
+    """更新定时链列；None = 不更新该列（只更新传入字段）。
+
+    next_run_at 语义（避免与 name 等「None=不动」混淆）：set_next_run_at=False
+    时忽略 next_run_at；set_next_run_at=True 时把 next_run_at 写为该值（可写
+    None 清空）。供调度器初始化 NULL 锚点（详设 §9.3）。
+    """
+    values: dict = {}
+    if name is not None:
+        values[Schedule.name] = name
+    if cron is not None:
+        values[Schedule.cron] = cron
+    if enabled is not None:
+        values[Schedule.enabled] = enabled
+    if set_next_run_at:
+        values[Schedule.next_run_at] = next_run_at
+    if not values:
+        return
+    values[Schedule.updated_at] = func.now()
+    async with _sessions(engine)() as session, session.begin():
+        await session.execute(
+            update(Schedule).where(Schedule.id == schedule_id).values(values)
+        )
+
+
+async def mark_schedule_run(
+    engine: AsyncEngine,
+    schedule_id: int,
+    *,
+    last_run_at: datetime,
+    next_run_at: datetime,
+) -> None:
+    """推进锚点：last_run_at/next_run_at 更新，last_status 清为空串。"""
+    async with _sessions(engine)() as session, session.begin():
+        await session.execute(
+            update(Schedule)
+            .where(Schedule.id == schedule_id)
+            .values(
+                last_run_at=last_run_at,
+                next_run_at=next_run_at,
+                last_status="",
+                updated_at=func.now(),
+            )
+        )
+
+
+async def ensure_seed_schedules(engine: AsyncEngine) -> None:
+    """幂等种子：schedule 表为空时插入 crm_reminder_chain（详设 §5）；非空不插。"""
+    async with _sessions(engine)() as session:
+        count = (await session.execute(select(func.count(Schedule.id)))).scalar_one()
+    if count == 0:
+        await create_schedule(
+            engine,
+            chain_id="crm_reminder_chain",
+            name="CRM 未跟进提醒",
+            cron="0 7 * * *",
+            enabled=True,
+        )
+
+
+def next_run_time(cron: str, after: datetime) -> datetime:
+    """纯代码计算下一次每天 HH:MM 的 UTC 时刻（详设 §5）。
+
+    cron 限定 daily 形「M H * * *」：第 0/1 段为分/时数字，第 2-4 段为 *。
+    返回 after 之后下一个每天 HH:MM 的 UTC 时刻。
+    边界：after 正好等于某天 HH:MM 时取下一个；跨天正常。
+    不引第三方 cron 库。
+    """
+    parts = cron.strip().split()
+    if len(parts) != 5:
+        raise ValueError(f"cron 必须 5 段，实际 {len(parts)}：{cron!r}")
+    minute_str, hour_str = parts[0], parts[1]
+    if not (minute_str.isdigit() and hour_str.isdigit()):
+        raise ValueError(
+            f"daily cron 第 0/1 段须为数字，实际 minute={minute_str!r} hour={hour_str!r}"
+        )
+    if parts[2] != "*" or parts[3] != "*" or parts[4] != "*":
+        raise ValueError(
+            f"v0.4 仅支持 daily cron（第 2-4 段均为 *），实际：{cron!r}"
+        )
+    minute, hour = int(minute_str), int(hour_str)
+    if not (0 <= minute <= 59 and 0 <= hour <= 23):
+        raise ValueError(f"minute/hour 越界：minute={minute} hour={hour}")
+
+    # 确保 after 是 UTC naive 用于计算
+    after_utc = after.replace(tzinfo=None) if after.tzinfo else after
+    # 今天 HH:MM
+    target = after_utc.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target > after_utc:
+        return target.replace(tzinfo=timezone.utc)
+    # after 正好等于或晚于今天 HH:MM → 取明天
+    return (target + timedelta(days=1)).replace(tzinfo=timezone.utc)
+
+
 # ---- 内部助手 ----
 
 
@@ -644,4 +852,19 @@ def _audit_row(a: EngineAudit) -> AuditRow:
         output_tokens=a.output_tokens,
         duration_ms=a.duration_ms,
         created_at=a.created_at,
+    )
+
+
+def _schedule_row(s: Schedule) -> ScheduleRow:
+    return ScheduleRow(
+        id=s.id,
+        chain_id=s.chain_id,
+        name=s.name,
+        cron=s.cron,
+        enabled=s.enabled,
+        last_run_at=s.last_run_at,
+        next_run_at=s.next_run_at,
+        last_status=s.last_status,
+        created_at=s.created_at,
+        updated_at=s.updated_at,
     )

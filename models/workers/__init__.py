@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from models.contract.task import EvidenceRef
 
@@ -46,8 +46,15 @@ __all__ = [
     "IntentInput",
     "IntentResult",
     "MessageBrief",
+    "ReminderChainInput",
+    "ReminderContextData",
+    "ReminderContextParams",
+    "ReminderCustomer",
+    "ReminderItem",
+    "ReminderResult",
     "ReplyDraftInput",
     "ReplyDraftResult",
+    "ScheduleTaskWrite",
     "SnapshotBrief",
     "SnapshotUpdateInput",
     "SuggestedNext",
@@ -331,3 +338,95 @@ class TaskContextData(BaseModel):
     status: str
     tags: list[str] = []
     recent_events: list[EventBrief] = []
+
+
+# ==== v0.4 T4：提醒链 crm_follow_up_reminder 工序 Model（详设-v0.4 §10.1）====
+
+
+class ReminderChainInput(BaseModel):
+    """crm_follow_up_reminder 工序入参 / crm_reminder_chain 链入参（详设 §10.1）。
+
+    trigger_date：调度器注入的 YYYY-MM-DD 格式日期（当天日期）。
+    """
+
+    trigger_date: str  # YYYY-MM-DD 格式
+
+
+class ReminderItem(BaseModel):
+    """提醒项（crm_follow_up_reminder 工序输出元素）。
+
+    每超期客户一条：title/detail/days_since/evidence。
+    evidence 引用 provider 返回的 customer_id（白名单内，决策 16③）。
+    """
+
+    customer_id: int
+    title: str
+    detail: str
+    days_since: int
+    evidence: list[EvidenceRef]
+
+
+class ReminderResult(BaseModel):
+    """crm_follow_up_reminder 工序输出（详设 §10.1）。
+
+    reminders 空数组是合法产出（无超期客户）。
+    """
+
+    reminders: list[ReminderItem]
+
+
+# ==== v0.4 T3：提醒链 Context provider Model（详设-v0.4 §10.2）====
+
+
+class ReminderContextParams(BaseModel):
+    """crm_overdue_context provider 查询参数（context/crm.yaml params.model）。
+
+    无业务对象 id（清单类数据，参数为空）。
+    """
+
+    pass
+
+
+class ReminderCustomer(BaseModel):
+    """crm_overdue_context 返回：超期客户摘要。"""
+
+    customer_id: int
+    nickname: str
+    days_since: int
+    latest_summary: str
+
+
+class ReminderContextData(BaseModel):
+    """crm_overdue_context provider 返回数据（context/crm.yaml returns.model）。"""
+
+    customers: list[ReminderCustomer]
+
+
+# ==== v0.4 T2：定时任务写接口请求 Model（详设-v0.4 §8）====
+
+
+class ScheduleTaskSource(BaseModel):
+    """ScheduleTaskWrite 的 source 字段结构（详设 §6/§8）。"""
+
+    chain_id: str = ""
+    engine_task_id: str = ""
+    worker_id: str = ""
+    customer_id: int
+    reminder_date: str  # YYYY-MM-DD
+    audit_ids: list[str] = []
+
+
+class ScheduleTaskWrite(BaseModel):
+    """POST /api/biz/tm/schedule-tasks 请求体（详设 §8）。
+
+    防重：source.customer_id + source.reminder_date 必填；
+    evidence 非空（决策 16①）。
+    """
+
+    title: str = Field(min_length=1, max_length=80)
+    detail: str = ""
+    domain: str = "crm"
+    source: ScheduleTaskSource
+    role: str = "运营"
+    due: str  # YYYY-MM-DD
+    evidence: list[EvidenceRef] = Field(min_length=1, max_length=20)
