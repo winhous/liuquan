@@ -84,11 +84,9 @@ class TestRegistryCheck:
         assert rc == 0
         assert "[L4]" not in out
         assert "0 违规" in out
-        # 清单随声明：v0.3 T4 后工序 8（含 chat_translate/snapshot_update/todo_generate/
-        # customer_reply_draft/tm_intent）、链 6（含 crm_chat_chain/crm_reply_chain/
-        # tm_intent_chain）、provider 3（含 crm_chat_context/tm_task_context）、
-        # 事件 1、Action 2（demo_echo_record/tm.proposal；crm.candidate 待 T5）
-        for label in ("工序 8", "链 6", "Context provider 3", "事件 1", "Action 3"):
+        # 清单随声明：v0.4 批 3b 后工序 9（+crm_follow_up_reminder）、链 7（+crm_reminder_chain）、
+        # provider 4（+crm_overdue_context）、事件 1、Action 4（批 4 +tm.schedule）
+        for label in ("工序 9", "链 7", "Context provider 4", "事件 1", "Action 4"):
             assert label in out, f"清单应包含 {label}"
         assert "demo_echo" in out and "crm_translate" in out and "demo_propose" in out
         assert "chat_translate" in out and "tm_intent" in out

@@ -17,7 +17,7 @@ TestClient（TestClient portal 循环与 pytest 循环不串，承 test_web_tm �
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -356,3 +356,371 @@ async def test_task_context_assembly(biz_client: TestClient, biz_engine) -> None
 def test_task_context_404(biz_client: TestClient) -> None:
     resp = biz_client.get("/api/biz/tm/task-context/999", headers=_headers())
     assert resp.status_code == 404
+
+
+# =====================================================================
+# GET /api/biz/crm/overdue-customers
+# =====================================================================
+
+
+def test_overdue_customers_unauthorized(biz_client: TestClient) -> None:
+    """未带 token -> 401。"""
+    resp = biz_client.get("/api/biz/crm/overdue-customers", headers={})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_overdue_customers_empty(biz_client: TestClient, biz_engine) -> None:
+    """没有客户 -> 返回空列表。"""
+    resp = biz_client.get("/api/biz/crm/overdue-customers", headers=_headers())
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_overdue_customers_filter(biz_client: TestClient, biz_engine) -> None:
+    """在 follow_up_days 内的客户不返回，超出的返回且 days_since 正确。
+
+    默认 follow_up_days = 5（SettingsStore 读 sys.settings 无此 key 时回退默认）。
+    """
+    now = datetime.now(timezone.utc)
+    # 客户 A：3 天前更新 → 在 5 天内 → 不返回
+    recent_date = now - timedelta(days=3)
+    # 客户 B：10 天前更新 → 超出 5 天 → 返回
+    old_date = now - timedelta(days=10)
+    async with AsyncSession(biz_engine) as session, session.begin():
+        c1 = Customer(nickname="RecentBuyer", source_shop="shop1", remark="")
+        session.add(c1)
+        await session.flush()
+        c2 = Customer(nickname="OldBuyer", source_shop="shop2", remark="")
+        session.add(c2)
+        await session.flush()
+        # 更新 updated_at 为指定时间
+        await session.execute(
+            text(
+                "UPDATE crm.customer SET updated_at = :dt WHERE id = :id"
+            ),
+            {"dt": recent_date, "id": c1.id},
+        )
+        await session.execute(
+            text(
+                "UPDATE crm.customer SET updated_at = :dt WHERE id = :id"
+            ),
+            {"dt": old_date, "id": c2.id},
+        )
+    resp = biz_client.get("/api/biz/crm/overdue-customers", headers=_headers())
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["nickname"] == "OldBuyer"
+    assert items[0]["days_since"] == 10
+
+
+@pytest.mark.asyncio
+async def test_overdue_customers_archived_excluded(
+    biz_client: TestClient, biz_engine
+) -> None:
+    """归档客户即使超期也不返回。"""
+    now = datetime.now(timezone.utc)
+    old_date = now - timedelta(days=10)
+    async with AsyncSession(biz_engine) as session, session.begin():
+        c = Customer(nickname="ArchivedBuyer", source_shop="shop1", remark="")
+        session.add(c)
+        await session.flush()
+        await session.execute(
+            text(
+                "UPDATE crm.customer SET updated_at = :dt, follow_up_status = 'archived' "
+                "WHERE id = :id"
+            ),
+            {"dt": old_date, "id": c.id},
+        )
+    resp = biz_client.get("/api/biz/crm/overdue-customers", headers=_headers())
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_overdue_customers_on_hold_included(
+    biz_client: TestClient, biz_engine
+) -> None:
+    """on_hold 客户如果超期，应被包含。"""
+    now = datetime.now(timezone.utc)
+    old_date = now - timedelta(days=7)
+    async with AsyncSession(biz_engine) as session, session.begin():
+        c = Customer(nickname="OnHoldBuyer", source_shop="shop1", remark="")
+        session.add(c)
+        await session.flush()
+        await session.execute(
+            text(
+                "UPDATE crm.customer SET updated_at = :dt, follow_up_status = 'on_hold' "
+                "WHERE id = :id"
+            ),
+            {"dt": old_date, "id": c.id},
+        )
+    resp = biz_client.get("/api/biz/crm/overdue-customers", headers=_headers())
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["nickname"] == "OnHoldBuyer"
+
+
+@pytest.mark.asyncio
+async def test_overdue_customers_sorted_by_days(
+    biz_client: TestClient, biz_engine
+) -> None:
+    """多个超期客户按 days_since 降序排列。"""
+    now = datetime.now(timezone.utc)
+    dates = {
+        "Alpha": now - timedelta(days=8),
+        "Bravo": now - timedelta(days=20),
+        "Charlie": now - timedelta(days=15),
+    }
+    async with AsyncSession(biz_engine) as session, session.begin():
+        for name, dt in dates.items():
+            c = Customer(nickname=name, source_shop="shop1", remark="")
+            session.add(c)
+            await session.flush()
+            await session.execute(
+                text("UPDATE crm.customer SET updated_at = :dt WHERE id = :id"),
+                {"dt": dt, "id": c.id},
+            )
+    resp = biz_client.get("/api/biz/crm/overdue-customers", headers=_headers())
+    assert resp.status_code == 200
+    items = resp.json()
+    assert [it["nickname"] for it in items] == ["Bravo", "Charlie", "Alpha"]
+    assert items[0]["days_since"] > items[1]["days_since"] > items[2]["days_since"]
+
+
+@pytest.mark.asyncio
+async def test_overdue_customers_latest_summary(
+    biz_client: TestClient, biz_engine
+) -> None:
+    """返回的 latest_summary 来自 crm.customer.latest_summary。"""
+    now = datetime.now(timezone.utc)
+    old_date = now - timedelta(days=10)
+    async with AsyncSession(biz_engine) as session, session.begin():
+        c = Customer(
+            nickname="SummaryBuyer",
+            source_shop="shop1",
+            remark="",
+            latest_summary="买家想定制婚礼花束",
+        )
+        session.add(c)
+        await session.flush()
+        await session.execute(
+            text("UPDATE crm.customer SET updated_at = :dt WHERE id = :id"),
+            {"dt": old_date, "id": c.id},
+        )
+    resp = biz_client.get("/api/biz/crm/overdue-customers", headers=_headers())
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["latest_summary"] == "买家想定制婚礼花束"
+
+
+# =====================================================================
+# POST /api/biz/tm/schedule-tasks
+# =====================================================================
+
+
+def _schedule_task_payload(**overrides) -> dict:
+    """构建 POST /api/biz/tm/schedule-tasks 的请求体。"""
+    base = {
+        "title": "跟进客户：Mia（已 10 天未跟进）",
+        "detail": "买家想定制",
+        "domain": "crm",
+        "source": {
+            "chain_id": "crm_reminder_chain",
+            "engine_task_id": "e-000001",
+            "worker_id": "crm_follow_up_reminder",
+            "customer_id": 1,
+            "reminder_date": "2026-09-01",
+            "audit_ids": [],
+        },
+        "role": "运营",
+        "due": "2026-09-01",
+        "evidence": [{"kind": "message", "ref_id": "1", "quote": "Mia"}],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_schedule_task_unauthorized(biz_client: TestClient) -> None:
+    """未带 token -> 401。"""
+    resp = biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(),
+        headers={},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_ok(biz_client: TestClient, biz_engine) -> None:
+    """合法 payload -> 200，tm.task 落库且字段正确。"""
+    resp = biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(),
+        headers=_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["id"] > 0
+    # 验证 tm.task 落库
+    async with AsyncSession(biz_engine) as session:
+        row = await session.execute(
+            text(
+                "SELECT title, domain, status, source_type, source, created_by "
+                "FROM tm.task WHERE id = :id"
+            ),
+            {"id": body["id"]},
+        )
+        rec = row.one()
+        assert rec[0] == "跟进客户：Mia（已 10 天未跟进）"
+        assert rec[1] == "crm"
+        assert rec[2] == "open"
+        assert rec[3] == "schedule"
+        assert rec[4]["customer_id"] == 1
+        assert rec[4]["reminder_date"] == "2026-09-01"
+        assert rec[5] == "运营"
+    # 验证 task_event 也创建了
+    async with AsyncSession(biz_engine) as session:
+        ev_rows = await session.execute(
+            text("SELECT event_type FROM tm.task_event WHERE task_id = :id"),
+            {"id": body["id"]},
+        )
+        assert ev_rows.scalar_one() == "created"
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_duplicate_409(
+    biz_client: TestClient, biz_engine
+) -> None:
+    """同一 customer_id + reminder_date 第二次提交 -> 409。"""
+    biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(),
+        headers=_headers(),
+    )
+    resp = biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(),
+        headers=_headers(),
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_next_day_allowed(
+    biz_client: TestClient, biz_engine
+) -> None:
+    """不同 reminder_date -> 允许（不 409）。"""
+    biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(),
+        headers=_headers(),
+    )
+    resp = biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(
+            source={
+                "chain_id": "crm_reminder_chain",
+                "engine_task_id": "e-000001",
+                "worker_id": "crm_follow_up_reminder",
+                "customer_id": 1,
+                "reminder_date": "2026-09-02",
+                "audit_ids": [],
+            },
+            due="2026-09-02",
+        ),
+        headers=_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True
+
+
+def test_schedule_task_missing_customer_id(biz_client: TestClient) -> None:
+    """source.customer_id=0 -> 422（不能为空）。"""
+    resp = biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(
+            source={
+                "chain_id": "crm_reminder_chain",
+                "engine_task_id": "e-000001",
+                "worker_id": "crm_follow_up_reminder",
+                "customer_id": 0,
+                "reminder_date": "2026-09-01",
+                "audit_ids": [],
+            }
+        ),
+        headers=_headers(),
+    )
+    assert resp.status_code == 422
+
+
+def test_schedule_task_missing_reminder_date(biz_client: TestClient) -> None:
+    """source.reminder_date='' -> 422（不能为空）。"""
+    resp = biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(
+            source={
+                "chain_id": "crm_reminder_chain",
+                "engine_task_id": "e-000001",
+                "worker_id": "crm_follow_up_reminder",
+                "customer_id": 1,
+                "reminder_date": "",
+                "audit_ids": [],
+            }
+        ),
+        headers=_headers(),
+    )
+    assert resp.status_code == 422
+
+
+def test_schedule_task_empty_evidence(biz_client: TestClient) -> None:
+    """evidence=[] -> 422（无依据不出建议）。"""
+    resp = biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(evidence=[]),
+        headers=_headers(),
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_void_doesnt_block(
+    biz_client: TestClient, biz_engine
+) -> None:
+    """已有 status='void' 的任务不影响新任务创建（防重只排除非 void）。"""
+    # 先手动插一条 void 任务，模拟同一 customer_id + reminder_date
+    async with AsyncSession(biz_engine) as session, session.begin():
+        task = Task(
+            title="旧提醒",
+            detail="",
+            domain="crm",
+            role="运营",
+            due=date(2026, 9, 1),
+            source_type="schedule",
+            source={
+                "chain_id": "crm_reminder_chain",
+                "engine_task_id": "e-999999",
+                "worker_id": "crm_follow_up_reminder",
+                "customer_id": 1,
+                "reminder_date": "2026-09-01",
+                "audit_ids": [],
+            },
+            tags=[],
+            created_by="运营",
+            status="void",
+            result_note="已手动处理",
+        )
+        session.add(task)
+    # 新任务同 customer_id + reminder_date -> 应允许（void 不阻塞）
+    resp = biz_client.post(
+        "/api/biz/tm/schedule-tasks",
+        json=_schedule_task_payload(),
+        headers=_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True

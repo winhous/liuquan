@@ -226,6 +226,7 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
     assert set(registry.workers) == {
         "demo_echo",
         "crm_translate",
+        "crm_follow_up_reminder",
         "demo_propose",
         "chat_translate",
         "snapshot_update",
@@ -239,11 +240,18 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "tm_demo_chain",
         "crm_chat_chain",
         "crm_reply_chain",
+        "crm_reminder_chain",
         "tm_intent_chain",
     }
-    assert set(registry.context_providers) == {"demo_greeting", "crm_chat_context", "tm_task_context"}
+    assert set(registry.context_providers) == {
+        "demo_greeting",
+        "crm_chat_context",
+        "crm_overdue_context",
+        "tm_task_context",
+    }
     assert set(registry.events) == {"demo.echo_done"}
-    assert set(registry.actions) == {"demo_echo_record", "tm.proposal", "crm.candidate"}
+    # v0.4：tm.schedule Action（提醒任务直接落 tm.task，详设 §10.3）
+    assert set(registry.actions) == {"demo_echo_record", "tm.proposal", "crm.candidate", "tm.schedule"}
 
     # 工序声明字段（id/domain/risk/model 别名/retry/输入输出 Model 引用）
     echo = registry.workers["demo_echo"]

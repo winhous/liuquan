@@ -1255,11 +1255,15 @@ async def test_a25_dedup_hang_overdue_bar_and_filters(
 
     # 未完成任务一直挂着：自动清理机制不存在（决策 17：不自动清理/关闭/替代）。
     # v0.3 复核反馈 #6：delete_step/delete_customer 是人工删除（合法），排除；
-    # 无"自动"清理（cleanup/scheduler/cron）
+    # 无"自动"清理（cleanup）
     store_src = (REPO_ROOT / "web" / "tm_store.py").read_text(encoding="utf-8")
     assert "cleanup" not in store_src.lower()  # 无清理机制
+    # v0.4 修订（决策 33 定时触发底座 + 设置页定时任务）：cron 表达式/调度器是
+    # 「定时触发任务生成」（提醒任务自动就位），不是「自动清理任务」——A25 原
+    # 断言 'scheduler/cron not in web_src' 自 v0.4 起失效（_time_to_cron 等），
+    # 改为与 tm_store 同口径：断言无自动清理标识（变更日志 2026-09-01 留痕）
     web_src = (REPO_ROOT / "web" / "app.py").read_text(encoding="utf-8")
-    assert "scheduler" not in web_src.lower() and "cron" not in web_src.lower()  # 无定时清理
+    assert "cleanup" not in web_src.lower()  # 无自动清理机制（定时触发 ≠ 清理）
 
     # 逾期提醒条常驻 + 列表筛选可用（决策 17 第 5 条）
     _login(client)

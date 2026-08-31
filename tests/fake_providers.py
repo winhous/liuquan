@@ -30,6 +30,8 @@ from models.workers import (
     DemoGreeting,
     EventBrief,
     MessageBrief,
+    ReminderContextData,
+    ReminderCustomer,
     SnapshotBrief,
     TaskContextData,
     TaskContextParams,
@@ -39,6 +41,7 @@ __all__ = [
     "DemoInboxData",
     "DemoInboxObject",
     "FakeCrmChatContext",
+    "FakeCrmOverdueContext",
     "FakeDemoGreeting",
     "FakeDemoInbox",
     "FakeTmTaskContext",
@@ -185,3 +188,40 @@ class FakeTmTaskContext:
 
     def whitelist(self) -> list[str]:
         return ["9"]
+
+
+class FakeCrmOverdueContext:
+    """crm.overdue_context 测试桩：返回固定超期客户清单。
+
+    白名单 = {customer_id} 集合（决策 16③）。
+    """
+
+    def __init__(
+        self,
+        customers: list[dict] | None = None,
+    ) -> None:
+        self._customers = customers or [
+            {
+                "customer_id": 1,
+                "nickname": "Mia",
+                "days_since": 10,
+                "latest_summary": "买家想定制花束",
+            },
+            {
+                "customer_id": 2,
+                "nickname": "Luna",
+                "days_since": 7,
+                "latest_summary": "询问物流时效",
+            },
+        ]
+
+    async def __call__(self, params=None) -> ReminderContextData:
+        return ReminderContextData(
+            customers=[
+                ReminderCustomer(**c) for c in self._customers
+            ]
+        )
+
+    def whitelist(self) -> list[str]:
+        """白名单来源：超期客户 customer_id 集合。"""
+        return [str(c["customer_id"]) for c in self._customers]

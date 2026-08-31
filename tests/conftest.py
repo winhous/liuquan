@@ -268,6 +268,22 @@ def tm_pg_cluster(engine_pg_cluster: PgCluster) -> PgCluster:
             "CREATE SCHEMA crm",
         ]
     )
+    # v0.4：sys schema（详设 §2.1：settings/shop 住 sys schema，部署侧建）
+    _run(
+        [
+            str(_PGBIN / "psql"),
+            "-h",
+            _HOST,
+            "-p",
+            str(cluster.port),
+            "-U",
+            user,
+            "-d",
+            _TM_DB_NAME,
+            "-c",
+            "CREATE SCHEMA sys",
+        ]
+    )
     repo_root = Path(__file__).resolve().parents[1]
     _run(
         [

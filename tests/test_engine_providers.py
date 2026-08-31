@@ -16,10 +16,17 @@ from pytest_asyncio import fixture as async_fixture
 from engine.providers import (
     BizReadError,
     CrmChatContextHTTP,
+    CrmOverdueContextHTTP,
     TmTaskContextHTTP,
     build_providers,
 )
-from models.workers import ChatContextData, ChatContextParams, TaskContextData, TaskContextParams
+from models.workers import (
+    ChatContextData,
+    ChatContextParams,
+    ReminderContextData,
+    TaskContextData,
+    TaskContextParams,
+)
 
 
 def _crm_handler(req: httpx.Request) -> httpx.Response:
@@ -105,6 +112,33 @@ async def test_provider_missing_config_raises(monkeypatch: pytest.MonkeyPatch) -
 
 def test_build_providers_assembles() -> None:
     providers = build_providers(base_url="http" + "://test-" + "biz", token="test-token")
-    assert set(providers) == {"crm.chat_context", "tm.task_context"}
+    assert set(providers) == {"crm.chat_context", "crm.overdue_context", "tm.task_context"}
     assert isinstance(providers["crm.chat_context"], CrmChatContextHTTP)
+    assert isinstance(providers["crm.overdue_context"], CrmOverdueContextHTTP)
     assert isinstance(providers["tm.task_context"], TmTaskContextHTTP)
+
+
+@pytest.mark.asyncio
+async def test_overdue_provider_wraps_list_into_contract() -> None:
+    """crm.overdue_context：web 接口返回裸 list（集成验收实锤），provider 必须包装
+    进 ReminderContextData {customers: [...]}（R22 契约对齐，否则链 FAILED）。"""
+    from models.workers import ReminderChainInput
+
+    raw_list = [
+        {"customer_id": 4, "nickname": "验收客户", "days_since": 6, "latest_summary": ""},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/biz/crm/overdue-customers"
+        return httpx.Response(200, json=raw_list)
+
+    provider = CrmOverdueContextHTTP(
+        base_url="http" + "://test-" + "biz",
+        token="test-token",
+        transport=httpx.MockTransport(handler),
+    )
+    data = await provider(ReminderChainInput(trigger_date="2026-02-01"))
+    assert isinstance(data, ReminderContextData)
+    assert len(data.customers) == 1
+    assert data.customers[0].customer_id == 4
+    assert data.customers[0].days_since == 6
