@@ -26,6 +26,14 @@ if ! command -v uv >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
+# ---- uv 缓存可写性适配（v0.5 开发环境：文件沙箱可能拦截 $HOME/.cache/uv 写入）----
+# uv 初始化缓存失败会直接报错退出（Failed to initialize cache... Permission denied），
+# 四绿无法跑、pre-commit 被迫 --no-verify。探测默认缓存不可写时 fallback 到可写临时目录。
+if ! (umask 077 && : > "$HOME/.cache/uv/.liuquan-write-probe" 2>/dev/null); then
+  export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache}"
+  mkdir -p "$UV_CACHE_DIR" 2>/dev/null || true
+fi
+
 # ---- 落地任务号（v0.1 已全部落地：T2 lint P2/P3、T11 P1、T12b registry-check/verify）----
 REGISTRY_LAND_TASK="T12b"    # liuquan-engine registry-check（已实现，真跑）
 VERIFY_LAND_TASK="T12b"      # liuquan-engine verify（已实现，真跑）
