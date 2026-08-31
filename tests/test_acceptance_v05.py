@@ -656,3 +656,6 @@ def test_a56_v05_pages_render(biz_engine, monkeypatch) -> None:
         resp = client.get(path)
         assert resp.status_code == 200, f"{path} -> {resp.status_code}"
         assert needle in resp.text, f"{path} 缺关键内容 {needle!r}"
+        # 侧栏导航必须渲染（_ctx 传 modules；缺 modules = 侧栏空 + 布局塌陷，
+        # v0.3 /scrape 同款坑 2026-09-03 复发修复）
+        assert "任务中心" in resp.text, f"{path} 缺侧栏导航（modules 未传）"

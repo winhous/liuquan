@@ -444,14 +444,13 @@ def create_app(
 
         batches = await scrape_store.get_batches()
         images = await scrape_store.get_images(batch_id=batch_id, limit=200) if batch_id else []
-        data = {
-            "batches": batches,
-            "images": images,
-            "pending_proposal_count": 0,
-            "active_page": "scrape",
-            "current_user": request.cookies.get("role", "admin"),
-        }
-        return templates.TemplateResponse(request, "scrape/index.html", data)
+        # _ctx 补 modules/active（缺 modules = 侧栏不渲染、布局塌陷，v0.3 同款坑）；
+        # active = seo-scrape（扒图在 SEO 二级菜单下，MODULES id）
+        return templates.TemplateResponse(
+            request, "scrape/index.html",
+            _ctx(request, "seo-scrape", batches=batches, images=images,
+                 pending_proposal_count=0),
+        )
 
     @app.get("/scrape/thumbnail/{image_id}")
     async def scrape_thumbnail(request: Request, image_id: str):
