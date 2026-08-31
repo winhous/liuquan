@@ -1,0 +1,16 @@
+id: crm_image_caption
+domain: crm
+reason: llm
+model: default
+description: 识别CRM对话图片内容（vision未配置降级）
+input:
+  model: ImageCaptionInput
+output:
+  model: ImageCaptionResult
+prompt: prompt.md
+config_dir: config/
+retry:
+  max_attempts: 2
+  timeout_s: 30
+risk: suggest
+version: 1

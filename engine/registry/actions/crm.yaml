@@ -7,3 +7,11 @@
   risk: suggest
   output_model: TodoCandidateResult
   target: crm.todo_candidate
+# crm.image：crm_image_chain 产出 ImageSaveResult 关联的 Action
+# 链完成由消费者 crm_image_save 经写接口 PATCH /api/biz/crm/message-images/{id}
+# 落下载状态 + ocr_text（决策 26 接口化）。
+- action_id: crm.image
+  domain: crm
+  risk: suggest
+  output_model: ImageSaveResult
+  target: crm.todo_candidate  # 暂用 todo_candidate 作为 target，实际不落 tm.task

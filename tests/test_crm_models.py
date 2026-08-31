@@ -153,7 +153,7 @@ async def test_migration_creates_four_crm_tables(tm_engine) -> None:
     actual: dict[str, set[str]] = {}
     for table, column in rows:
         actual.setdefault(table, set()).add(column)
-    assert set(actual) == {"customer", "message", "snapshot", "todo_candidate"}
+    assert set(actual) == {"customer", "message", "snapshot", "todo_candidate", "message_image"}
     for table, cols in EXPECTED_COLUMNS.items():
         assert actual[table] == cols, f"{table} 列集合与详设 §3/ORM 不一致"
 
@@ -243,11 +243,15 @@ async def test_migration_foreign_keys_cascade(tm_engine) -> None:
         )
         rows = res.fetchall()
     defs = {tbl.split(".")[-1]: d for tbl, d in rows}
-    assert set(defs) == {"message", "snapshot", "todo_candidate"}
+    assert set(defs) == {"message", "snapshot", "todo_candidate", "message_image"}
     for table in ("message", "snapshot", "todo_candidate"):
         assert f"REFERENCES crm.customer(id) ON DELETE CASCADE" in defs[table], (
             f"{table}.customer_id 应为 ON DELETE CASCADE 外键"
         )
+    # message_image 外键到 message 表
+    assert "REFERENCES crm.message(id) ON DELETE CASCADE" in defs["message_image"], (
+        "message_image.message_id 应为 ON DELETE CASCADE 外键"
+    )
 
 
 # ---- 冒烟（crm）：插入 / 读取 / 默认值 / 级联 / 回填 ----

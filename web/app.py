@@ -118,6 +118,11 @@ CHAIN_INPUTS: dict[str, dict[str, Any]] = {
             {"name": "source", "label": "来源（xhs/xianyu/crm，留空自动识别）", "type": "text", "required": False},
         ]
     },
+    "crm_image_chain": {
+        "fields": [
+            {"name": "message_image_ids", "label": "图片 ID（逗号分隔）", "type": "text", "required": True},
+        ]
+    },
 }
 
 # 链 id -> 中文展示名（用户复核反馈：触发面板链名称改中文）。
@@ -131,6 +136,7 @@ CHAIN_LABELS: dict[str, str] = {
     "seo_optimize_chain": "SEO 优化链",
     "seo_healthcheck_chain": "listing 体检链",
     "scrape_suggest_chain": "扒图选品链",
+    "crm_image_chain": "对话图片链",
 }
 
 # 状态操作 -> 完成提示语（msg 展示）
@@ -461,6 +467,32 @@ def create_app(
         if not path.exists():
             return Response("File not found", status_code=404, media_type="text/plain")
         import mimetypes
+        ct = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+        return FileResponse(str(path), media_type=ct)
+
+    @app.get("/crm/thumbnail/{image_id}")
+    def crm_thumbnail(request: Request, image_id: int):
+        """返回 CRM 对话图片缩略图（从本地文件读取）。"""
+        from pathlib import Path
+        import mimetypes
+
+        async def _get_image():
+            from models.crm import MessageImage
+            from sqlalchemy import select
+            async with AsyncSession(request.app.state.crm_store._engine) as session:
+                img = await session.get(MessageImage, image_id)
+                if not img or not img.local_path:
+                    return None
+                return {"local_path": img.local_path, "status": img.status}
+
+        img = _run_async(_get_image())
+        if not img or not img.get("local_path"):
+            return Response("Not found", status_code=404, media_type="text/plain")
+
+        path = Path(img["local_path"])
+        if not path.exists():
+            return Response("File not found", status_code=404, media_type="text/plain")
+
         ct = mimetypes.guess_type(str(path))[0] or "image/jpeg"
         return FileResponse(str(path), media_type=ct)
 
@@ -827,6 +859,64 @@ def create_app(
                 f"/crm/{customer_id}?error={urlencode({'msg': f'引擎触发失败: {exc}'})}",
                 status_code=303,
             )
+
+        # v0.5 批 5：识别 source_text 中的图片链接，落 crm.message_image(pending)
+        # 正则提取 http(s) 图片链接（.jpg/.jpeg/.png/.webp/.gif）
+        import re
+        image_pattern = re.compile(r'https?://[^\s<>\"]+\.(jpg|jpeg|png|webp|gif)', re.IGNORECASE)
+        image_urls = image_pattern.findall(conversation)
+        if image_urls:
+            # 提取完整的 URL（而不是只匹配扩展名）
+            full_urls = re.findall(r'https?://[^\s<>\"]+\.(?:jpg|jpeg|png|webp|gif)', conversation, re.IGNORECASE)
+            # 落 crm.message_image(pending)
+            try:
+                async with request.app.state.crm_store._engine.begin() as conn:
+                    from sqlalchemy import text as _t
+                    # 先获取刚插入的 message_id（最后插入的）
+                    result = await conn.execute(
+                        _t("SELECT id FROM crm.message WHERE customer_id = :cid ORDER BY id DESC LIMIT 1"),
+                        {"cid": customer_id},
+                    )
+                    message_row = result.fetchone()
+                    if message_row:
+                        message_id = message_row[0]
+                        for url in full_urls:
+                            # 幂等检查：同 message_id + url 已存在
+                            existing = await conn.execute(
+                                _t("SELECT id FROM crm.message_image WHERE message_id = :mid AND url = :url"),
+                                {"mid": message_id, "url": url},
+                            )
+                            if not existing.fetchone():
+                                # 插入 pending 状态
+                                await conn.execute(
+                                    _t("INSERT INTO crm.message_image (message_id, url, status) VALUES (:mid, :url, 'pending')"),
+                                    {"mid": message_id, "url": url},
+                                )
+                        # 自动触发 crm_image_chain
+                        if full_urls:
+                            try:
+                                async with _engine_client(request) as img_client:
+                                    # 获取所有 pending 的 message_image_ids
+                                    pending_result = await conn.execute(
+                                        _t("SELECT id FROM crm.message_image WHERE message_id = :mid AND status = 'pending'"),
+                                        {"mid": message_id},
+                                    )
+                                    pending_ids = [row[0] for row in pending_result.fetchall()]
+                                    if pending_ids:
+                                        await img_client.create_task(
+                                            "crm_image_chain",
+                                            {"message_image_ids": pending_ids},
+                                            trigger_ref=request.cookies.get("role", "运营"),
+                                        )
+                            except Exception as e:
+                                # 图片处理失败不阻塞主流程
+                                import logging
+                                logging.getLogger(__name__).warning("触发图片处理链失败: %s", e)
+            except Exception as e:
+                # 图片处理失败不阻塞主流程
+                import logging
+                logging.getLogger(__name__).warning("处理图片链接失败: %s", e)
+
         # 异步：返回任务 id，页面 JS 轮询 -> 终态后调 apply 落库
         return RedirectResponse(f"/crm/{customer_id}?engine_task_id={engine_task_id}", status_code=303)
 

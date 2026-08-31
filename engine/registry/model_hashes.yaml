@@ -32,15 +32,39 @@ models:
   HealthcheckResult:
     version: 1
     hash: fd2c53a1ef54a3fc5cecdc89340c9f330cbf49f575e038a396e367cd19dd5ebf
+  ImageCaptionInput:
+    version: 1
+    hash: 0284725b3fb15296e014e6dc5b8c319cd15e449f9a5bda61d240196b1bbb7851
+  ImageCaptionResult:
+    version: 1
+    hash: a2ddb2669c4acaf4f0c77f8242af94ca8cecc4f1c32f569494e6718b55d18221
   ImageDownloadInput:
     version: 1
     hash: 0323eed00067e774661e79381d673be4a1ef367f10766eddddb20f4d3f770af0
+  ImageDownloadInputCRM:
+    version: 1
+    hash: 9364d47092689baea12bd84dd335996d249274d9bc5d0822e06f2007f3e6ffdb
+  ImageDownloadResult:
+    version: 1
+    hash: 95ffe03636fe4d4a2f7d3f43ff7bca1dc2a9f6c4c461a4190b69e9b6d30e95c8
   ImageInspectInput:
     version: 1
     hash: 11dbd8eed3790bb2b80b456ab2efeefde4d375af5edb1d3e4f40dbca9443b8a4
   ImagePack:
     version: 1
     hash: 3c44b34496be30de437d9732829d9fbe63d9d97370ced44b42d8867119c2eb0f
+  ImageSaveInput:
+    version: 1
+    hash: 8879f1970c4a6c0ef453e3a141be4d00f908d293a0de74a2e231e8f4b5c711d4
+  ImageSaveResult:
+    version: 1
+    hash: 464760890db5be6b1bf6ff72c3588266f5f9dcab1c6f8c435e0101ba2ead427f
+  ImageScanInput:
+    version: 1
+    hash: 1a6d84fa19c6983a4c6a45efa77fa0cd469264c87935298a3f3d52aeaeb16bd6
+  ImageScanResult:
+    version: 1
+    hash: 254c29325de90bb5b9e0ca4f73547693aba271c96228551ed7d21535da97dbc0
   InspectionResult:
     version: 1
     hash: 9b2b21b7949a984ace644089b979b9f716ed40aa78cc46ddf9cf5f9488d08184

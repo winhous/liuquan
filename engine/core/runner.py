@@ -646,10 +646,24 @@ class TaskRunner:
         memory: dict[str, Any],
         lines: list[PhaseLine],
     ) -> tuple[str | None, Any, dict[str, Any], str | None]:
-        """REASON：渲染 prompt -> call_llm -> 审计 -> 输出过 output Model 校验。"""
+        """REASON：渲染 prompt -> call_llm -> 审计 -> 输出过 output Model 校验。
+
+        v0.5 §6.1：vision 未配置降级——resolve(vision) 抛 ModelsConfigError 时
+        返回降级（REASON skipped + llm_output=None + note 识图模型未配置），
+        链继续（图片仍下载展示，识图文本留空）。
+        """
         if self._model_registry is None:
             raise ValueError("TaskRunner 未注入 model_registry，REASON 无法解析模型别名")
-        model_config = self._model_registry.resolve(worker.model)
+        try:
+            model_config = self._model_registry.resolve(worker.model)
+        except Exception as exc:
+            # v0.5 §6.1：vision 未配置降级——ModelsConfigError 时不 failed，链继续
+            from engine.core.llm.models_config import ModelsConfigError
+            if isinstance(exc, ModelsConfigError) and "未配置" in str(exc):
+                note = f"识图模型未配置（{worker.model}），跳过识图，链继续"
+                lines.append(PhaseLine("REASON", f"skipped: {note}"))
+                return EVENT_OUTPUT_VALID, None, memory, note
+            raise  # 其他异常照旧失败
         model_str = model_config.model
         out_cls = self._resolve_model(worker.output.model)
         if out_cls is None:

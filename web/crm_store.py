@@ -319,6 +319,21 @@ class CRMStore:
                 .scalars()
                 .all()
             )
+            # v0.5 批 5：查询对话图片
+            from models.crm import MessageImage
+            message_images = (
+                (
+                    await session.execute(
+                        select(MessageImage)
+                        .where(MessageImage.message_id.in_(
+                            select(Message.id).where(Message.customer_id == customer_id)
+                        ))
+                        .order_by(MessageImage.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
         return {
             "customer": self._customer_view(customer, follow_up_days),
             "messages": [
@@ -344,6 +359,20 @@ class CRMStore:
                     "evidence": list(c.evidence or []),
                 }
                 for c in candidates
+            ],
+            "message_images": [
+                {
+                    "id": img.id,
+                    "message_id": img.message_id,
+                    "url": img.url,
+                    "local_path": img.local_path,
+                    "status": img.status,
+                    "width": img.width,
+                    "height": img.height,
+                    "ocr_text": img.ocr_text,
+                    "created_at": img.created_at,
+                }
+                for img in message_images
             ],
         }
 

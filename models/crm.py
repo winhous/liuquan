@@ -230,3 +230,39 @@ class TodoCandidate(TmBase):
     )
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MessageImage(TmBase):
+    """crm.message_image：对话图片表（详设-v0.5 §4.1，决策 29 + 识图拍板）。
+
+    message 行不动（append-only 语义保持，决策 23），图片状态独立流转于新表。
+    status: pending → downloaded/failed/skipped
+    ocr_text: 识图模型输出文本（可空）
+    """
+
+    __tablename__ = "message_image"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','downloaded','failed','skipped')"
+        ),
+        Index("idx_crm_message_image_message", "message_id", "created_at"),
+        {"schema": "crm"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    message_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("crm.message.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)  # 原文中的图片链接
+    local_path: Mapped[str | None] = mapped_column(Text)  # 下载后相对 storage_dir 路径
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'")
+    )
+    width: Mapped[int | None] = mapped_column()  # 图片体检结果
+    height: Mapped[int | None] = mapped_column()
+    ocr_text: Mapped[str | None] = mapped_column(Text)  # 识图模型输出文本（可空）
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

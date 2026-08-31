@@ -22,3 +22,13 @@
   returns:
     model: ReminderContextData
   provider: crm.overdue_context
+
+# v0.5 批 5：CRM 对话图片数据供给（详设-v0.5 §6.3）
+- id: crm_message_images
+  domain: crm
+  description: crm 对话图片列表（message-images 读接口；crm_image_chain 白名单来源）
+  params:
+    model: MessageImageParams
+  returns:
+    model: MessageImageData
+  provider: crm.message_images

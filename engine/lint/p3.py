@@ -160,7 +160,7 @@ class P3Rule1WorkerSignature(Rule):
         tree, error = parse_module(run_path)
         if tree is None:
             return [Violation(self.rule_id, rel, 0, f"无法解析（fail-closed）：{error}")]
-        runs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run"]
+        runs = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "run"]
         if not runs:
             return [Violation(self.rule_id, rel, 1, "缺少顶层 run 函数（R6 工序契约）")]
         if len(runs) > 1:

@@ -1,0 +1,16 @@
+id: crm_image_scan
+domain: crm
+reason: none
+description: 提取对话消息中的图片链接
+input:
+  model: ImageScanInput
+output:
+  model: ImageScanResult
+model: default
+prompt: prompt.md
+config_dir: config/
+retry:
+  max_attempts: 1
+  timeout_s: 30
+risk: suggest
+version: 1

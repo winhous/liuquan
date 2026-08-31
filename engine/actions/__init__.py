@@ -13,6 +13,7 @@ audit_lookup / whitelist / biz_client / registry 全部由调用方注入（R12�
 
 from __future__ import annotations
 
+from .crm_image_save import consume_crm_image_save
 from .crm_candidate import consume_todo_candidates
 from .schedule_reminder import consume_schedule_reminder
 from .seo_healthcheck_proposal import consume_seo_healthcheck
@@ -30,6 +31,7 @@ __all__ = [
     "Consumer",
     "consume_task_proposal",
     "consume_todo_candidates",
+    "consume_crm_image_save",
     "consume_schedule_reminder",
     "consume_seo_healthcheck",
     "consume_seo_proposal",
@@ -37,7 +39,8 @@ __all__ = [
 ]
 
 # action_id -> 消费者（v0.2 tm.proposal；v0.3 + crm.candidate，决策 19；
-# v0.4 + tm.schedule，详设 §10.3；v0.5 批 3 + seo.report/seo.optimize/seo.healthcheck）
+# v0.4 + tm.schedule，详设 §10.3；v0.5 批 3 + seo.report/seo.optimize/seo.healthcheck；
+# v0.5 批 5 + crm.image）
 CONSUMERS: dict[str, Consumer] = {
     "tm.proposal": consume_task_proposal,
     "crm.candidate": consume_todo_candidates,
@@ -45,4 +48,5 @@ CONSUMERS: dict[str, Consumer] = {
     "seo.report": consume_seo_report,
     "seo.optimize": consume_seo_proposal,
     "seo.healthcheck": consume_seo_healthcheck,
+    "crm.image": consume_crm_image_save,
 }

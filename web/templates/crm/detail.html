@@ -91,6 +91,41 @@
     </div>
 
     <div class="card mt-3">
+      <div class="card-header"><h3 class="card-title">对话图片（{{ message_images|length }} 张）</h3></div>
+      <div class="card-body">
+        {% if message_images %}
+        <div class="row g-2">
+          {% for img in message_images %}
+          <div class="col-md-4 col-lg-3">
+            <div class="card h-100">
+              {% if img.local_path %}
+              <img src="/crm/thumbnail/{{ img.id }}" class="card-img-top" alt="对话图片" style="height:120px;object-fit:cover">
+              {% else %}
+              <div class="card-img-top bg-light d-flex align-items-center justify-content-center" style="height:120px">
+                <span class="text-muted">未下载</span>
+              </div>
+              {% endif %}
+              <div class="card-body p-2">
+                <div class="small text-muted">
+                  <div>状态：<span class="badge bg-{{ 'success' if img.status == 'downloaded' else 'warning' if img.status == 'pending' else 'danger' }}">{{ img.status }}</span></div>
+                  {% if img.ocr_text %}<div class="mt-1">{{ img.ocr_text[:100] }}{% if img.ocr_text|length > 100 %}...{% endif %}</div>{% endif %}
+                  {% if img.width and img.height %}<div>{{ img.width }}×{{ img.height }}</div>{% endif %}
+                </div>
+              </div>
+              <div class="card-footer p-1">
+                <button class="btn btn-sm btn-outline-primary w-100" onclick="reprocessImage({{ img.id }})">重新处理</button>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted text-center py-3">暂无对话图片——粘贴含图片链接的对话后自动处理。</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card mt-3">
       <div class="card-header"><h3 class="card-title">AI 待办候选（确认 = 人工审核 → 任务进任务中心）</h3></div>
       <div class="card-body">
         {% if candidates %}

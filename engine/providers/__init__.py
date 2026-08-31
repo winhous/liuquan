@@ -214,6 +214,49 @@ class ScrapeImageContextHTTP:
         return {"images": images}
 
 
+class CrmMessageImagesHTTP:
+    """crm.message_images 实现：GET /api/biz/crm/message-images -> {images: [...]}。
+
+    v0.5 批 5：CRM 对话图片工序数据供给，返回图片列表。
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        token: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = (base_url or _env_value(_BIZ_URL_ENV) or "").rstrip("/")
+        self._token = token or _env_value(_BIZ_TOKEN_ENV) or ""
+        self._transport = transport
+
+    async def __call__(self, params) -> dict:
+        if not self._base_url or not self._token:
+            raise BizReadError("biz 读接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
+
+        # 从 params 提取 message_id
+        message_id = getattr(params, "message_id", None)
+
+        url = f"{self._base_url}/api/biz/crm/message-images"
+        params_dict = {}
+        if message_id:
+            params_dict["message_id"] = message_id
+
+        async with httpx.AsyncClient(
+            trust_env=False, timeout=10.0, transport=self._transport
+        ) as client:
+            resp = await client.get(
+                url, headers={"X-Biz-Token": self._token}, params=params_dict
+            )
+
+        if resp.status_code != 200:
+            raise BizReadError(f"biz 读接口 HTTP {resp.status_code}: {resp.text[:200]}")
+
+        images = resp.json() if isinstance(resp.json(), list) else resp.json().get("items", [])
+        return {"images": images}
+
+
 def build_providers(
     *,
     base_url: str | None = None,
@@ -224,6 +267,7 @@ def build_providers(
     return {
         "crm.chat_context": CrmChatContextHTTP(base_url=base_url, token=token, transport=transport),
         "crm.overdue_context": CrmOverdueContextHTTP(base_url=base_url, token=token, transport=transport),
+        "crm.message_images": CrmMessageImagesHTTP(base_url=base_url, token=token, transport=transport),
         "tm.task_context": TmTaskContextHTTP(base_url=base_url, token=token, transport=transport),
         "seo.metric_history": SeoMetricHistoryHTTP(base_url=base_url, token=token, transport=transport),
         "scrape.image_context": ScrapeImageContextHTTP(base_url=base_url, token=token, transport=transport),
@@ -239,6 +283,7 @@ def _env_value(name: str) -> str | None:
 __all__ = [
     "BizReadError",
     "CrmChatContextHTTP",
+    "CrmMessageImagesHTTP",
     "CrmOverdueContextHTTP",
     "ScrapeImageContextHTTP",
     "TmTaskContextHTTP",

@@ -1,0 +1,19 @@
+id: crm_image_download
+domain: crm
+reason: none
+description: 下载CRM对话图片（pending状态）
+input:
+  model: ImageDownloadInputCRM
+output:
+  model: ImageDownloadResult
+model: default
+context:
+  - id: crm_message_images
+    params: {}
+prompt: prompt.md
+config_dir: config/
+retry:
+  max_attempts: 1
+  timeout_s: 30
+risk: suggest
+version: 1

@@ -1,0 +1,11 @@
+id: crm_image_chain
+domain: crm
+description: CRM对话图片处理链（扫描→下载→识图→保存）
+input:
+  model: CrmImageChainInput
+steps:
+  - worker: crm_image_scan
+  - worker: crm_image_download
+  - worker: crm_image_caption
+  - worker: crm_image_save
+version: 1

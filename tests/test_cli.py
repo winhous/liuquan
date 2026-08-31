@@ -84,10 +84,10 @@ class TestRegistryCheck:
         assert rc == 0
         assert "[L4]" not in out
         assert "0 违规" in out
-        # 清单随声明：v0.5 批 4 后工序 15（+image_download/image_inspect/product_suggestion）、
-        # 链 11（+scrape_suggest_chain）、provider 6（+scrape_image_context）、
-        # 事件 1、Action 8（+scrape.suggest）
-        for label in ("工序 15", "链 11", "Context provider 6", "事件 1", "Action 8"):
+        # 清单随声明：v0.5 批 5 后工序 19（+crm_image_scan/download/caption/save）、
+        # 链 12（+crm_image_chain）、provider 7（+crm_message_images）、
+        # 事件 1、Action 9（+crm.image）
+        for label in ("工序 19", "链 12", "Context provider 7", "事件 1", "Action 9"):
             assert label in out, f"清单应包含 {label}"
         assert "demo_echo" in out and "crm_translate" in out and "demo_propose" in out
         assert "chat_translate" in out and "tm_intent" in out

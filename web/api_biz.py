@@ -633,6 +633,126 @@ def create_biz_router(
         )
         return updated or {}
 
+    # ==== CRM 对话图片接口（v0.5 批 5，详设-v0.5 §10）====
+    from models.crm import MessageImage
+
+    @router.get(
+        "/crm/message-images",
+        dependencies=[Depends(_check_token)],
+    )
+    async def crm_message_images(
+        message_id: int | None = None,
+        status: str | None = None,
+    ) -> list[dict]:
+        """CRM 对话图片列表（白名单来源）。
+
+        - message_id：筛选指定消息的图片
+        - status：筛选指定状态的图片
+        """
+        async with async_sessionmaker(_resolve_engine(), expire_on_commit=False)() as s:
+            stmt = select(MessageImage)
+            if message_id is not None:
+                stmt = stmt.where(MessageImage.message_id == message_id)
+            if status is not None:
+                stmt = stmt.where(MessageImage.status == status)
+            stmt = stmt.order_by(MessageImage.created_at.desc())
+            rows = (await s.execute(stmt)).scalars().all()
+            return [
+                {
+                    "id": r.id,
+                    "message_id": r.message_id,
+                    "url": r.url,
+                    "local_path": r.local_path,
+                    "status": r.status,
+                    "width": r.width,
+                    "height": r.height,
+                    "ocr_text": r.ocr_text,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+
+    @router.post(
+        "/crm/message-images",
+        dependencies=[Depends(_check_token)],
+        status_code=201,
+    )
+    async def crm_message_images_create(payload: dict) -> dict:
+        """创建 CRM 对话图片记录（pending 状态）。
+
+        幂等：同 message_id + url 已存在返回 409。
+        """
+        message_id = payload.get("message_id")
+        url = payload.get("url")
+        if not message_id or not url:
+            raise HTTPException(status_code=400, detail="message_id 和 url 必填")
+
+        async with async_sessionmaker(_resolve_engine(), expire_on_commit=False)() as s:
+            # 幂等检查：同 message_id + url 已存在
+            existing = await s.execute(
+                select(MessageImage).where(
+                    MessageImage.message_id == message_id,
+                    MessageImage.url == url,
+                )
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise HTTPException(status_code=409, detail="同 message_id + url 已存在")
+
+            img = MessageImage(message_id=message_id, url=url, status="pending")
+            s.add(img)
+            await s.commit()
+            await s.refresh(img)
+            return {
+                "id": img.id,
+                "message_id": img.message_id,
+                "url": img.url,
+                "status": img.status,
+                "created_at": img.created_at.isoformat() if img.created_at else None,
+            }
+
+    @router.patch(
+        "/crm/message-images/{image_id}",
+        dependencies=[Depends(_check_token)],
+    )
+    async def crm_message_images_update(
+        image_id: int, payload: dict
+    ) -> dict:
+        """更新 CRM 对话图片（status/local_path/width/height/ocr_text）。"""
+        async with async_sessionmaker(_resolve_engine(), expire_on_commit=False)() as s:
+            row = (
+                await s.execute(
+                    select(MessageImage).where(MessageImage.id == image_id)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                raise HTTPException(status_code=404, detail="图片不存在")
+
+            # 只更新传入的字段
+            if "status" in payload:
+                row.status = payload["status"]
+            if "local_path" in payload:
+                row.local_path = payload["local_path"]
+            if "width" in payload:
+                row.width = payload["width"]
+            if "height" in payload:
+                row.height = payload["height"]
+            if "ocr_text" in payload:
+                row.ocr_text = payload["ocr_text"]
+
+            await s.commit()
+            await s.refresh(row)
+            return {
+                "id": row.id,
+                "message_id": row.message_id,
+                "url": row.url,
+                "local_path": row.local_path,
+                "status": row.status,
+                "width": row.width,
+                "height": row.height,
+                "ocr_text": row.ocr_text,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+
     return router
 
 

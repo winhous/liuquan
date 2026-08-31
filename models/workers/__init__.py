@@ -83,6 +83,19 @@ __all__ = [
     "InspectionResult",
     "SuggestionInput",
     "SuggestionResult",
+    # v0.5 批 5：CRM 对话图片工序 Model
+    "CrmImageChainInput",
+    "MessageImageParams",
+    "MessageImageData",
+    "ImageScanInput",
+    "ImageScanResult",
+    "ImageDownloadInputCRM",
+    "ImageDownloadResult",
+    "ImageCaptionInput",
+    "ImageCaptionResult",
+    "CaptionItem",
+    "ImageSaveInput",
+    "ImageSaveResult",
 ]
 
 
@@ -650,6 +663,104 @@ class SuggestionResult(BaseModel):
     """product_suggestion 工序输出：选品建议（走 TaskProposal 候选）。"""
 
     proposals: list[dict] = []
+    note: str = ""
+
+
+# ==== v0.5 批 5：CRM 对话图片工序 Model（详设-v0.5 §6.1）====
+
+
+class CrmImageChainInput(BaseModel):
+    """crm_image_chain 链入参（详设-v0.5 §6.2）。
+
+    message_image_ids: crm.message_image.id 列表
+    """
+
+    message_image_ids: list[int] = Field(min_length=1)
+
+
+class MessageImageParams(BaseModel):
+    """crm.message_images provider 入参。"""
+
+    message_id: int | None = None
+
+
+class MessageImageData(BaseModel):
+    """crm.message_images provider 返回。"""
+
+    images: list[dict] = []
+
+
+class ImageScanInput(BaseModel):
+    """crm_image_scan 工序入参（详设-v0.5 §6.1）。
+
+    message_id: 对话消息 id
+    """
+
+    message_id: int
+
+
+class ImageScanResult(BaseModel):
+    """crm_image_scan 工序输出：提取的图片链接列表。"""
+
+    urls: list[str] = []
+    note: str = ""
+
+
+class ImageDownloadInputCRM(BaseModel):
+    """crm_image_download 工序入参（详设-v0.5 §6.2）。
+
+    message_image_ids: crm.message_image.id 列表（pending 状态）
+    """
+
+    message_image_ids: list[int] = Field(min_length=1)
+
+
+class ImageDownloadResult(BaseModel):
+    """crm_image_download 工序输出：下载结果。"""
+
+    downloaded: list[dict] = []  # [{message_image_id, local_path, ok, note}]
+    note: str = ""
+
+
+class ImageCaptionInput(BaseModel):
+    """crm_image_caption 工序入参（详设-v0.5 §6.2）。
+
+    local_paths: 本地图片路径列表
+    message_image_ids: 对应的 message_image.id 列表
+    """
+
+    local_paths: list[str] = Field(min_length=1)
+    message_image_ids: list[int] = Field(min_length=1)
+
+
+class CaptionItem(BaseModel):
+    """识图结果单项。"""
+
+    message_image_id: int
+    text: str = ""
+    note: str = ""
+
+
+class ImageCaptionResult(BaseModel):
+    """crm_image_caption 工序输出：识图结果列表。"""
+
+    captions: list[CaptionItem] = []
+    note: str = ""
+
+
+class ImageSaveInput(BaseModel):
+    """crm_image_save 工序入参（详设-v0.5 §6.2）。
+
+    captions: 识图结果列表
+    """
+
+    captions: list[CaptionItem] = Field(min_length=1)
+
+
+class ImageSaveResult(BaseModel):
+    """crm_image_save 工序输出：更新结果。"""
+
+    updated: list[dict] = []  # [{message_image_id, ok, note}]
     note: str = ""
 
 

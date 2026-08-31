@@ -1,0 +1,16 @@
+id: crm_image_save
+domain: crm
+reason: none
+description: 保存CRM对话图片识图结果
+input:
+  model: ImageSaveInput
+output:
+  model: ImageSaveResult
+model: default
+prompt: prompt.md
+config_dir: config/
+retry:
+  max_attempts: 1
+  timeout_s: 30
+risk: suggest
+version: 1
