@@ -21,12 +21,22 @@ def test_ehunt_api_connector_registered():
     assert "ehunt_api" in CONNECTORS
 
 
-def test_ehunt_api_connector_available():
-    """ehunt_api connector 可用性检查（无 key 时不可用）。"""
+def test_ehunt_api_connector_available(monkeypatch: pytest.MonkeyPatch):
+    """ehunt_api connector 可用性检查（受 EHUNT_API_KEY 环境控制，不依赖实际 .env）。
+
+    v0.5 集成验收环境准备后 .env 已有 EHUNT_API_KEY（conftest load_dotenv），
+    原断言「无 key 时不可用」对环境敏感——改用 monkeypatch 显式控制。
+    注意 __init__ 构造时读 os.environ（_api_key 缓存），必须先控制环境再构造。
+    """
+    # 无 EHUNT_API_KEY 环境变量时不可用
+    monkeypatch.delenv("EHUNT_API_KEY", raising=False)
     connector = get_connector("ehunt_api", None)
     assert connector is not None
-    # 无 EHUNT_API_KEY 环境变量时不可用
     assert connector.available is False
+    # 有 EHUNT_API_KEY 时可用（monkeypatch 隔离，不依赖实际 .env 状态）
+    monkeypatch.setenv("EHUNT_API_KEY", "test-key")
+    connector2 = get_connector("ehunt_api", None)
+    assert connector2.available is True
 
 
 def test_ehunt_api_connector_fake_transport():

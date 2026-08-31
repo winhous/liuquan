@@ -13,3 +13,8 @@ dist/
 # pgserver 本地测试数据目录（tests 用到嵌入式 PG 时）
 .pgdata/
 tests/.pgdata/
+
+# v0.5 扒图外部依赖（不入库）：
+# XHS-Downloader vendor（186MB，从广成 studio/vendor/XHS-Downloader 部署时复制，
+# 见 docs/部署-v0.5-外部依赖.md）
+vendor/
