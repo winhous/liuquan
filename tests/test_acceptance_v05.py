@@ -598,3 +598,61 @@ def test_a54_crm_image_worker_registered() -> None:
 # A46: test_a46_nav_seo_children_scrape_first
 # A52: test_a52_scrape_storage_dir_setting
 # A53: test_a53_model_settings_and_engine_params
+
+# ==== A56：v0.5 页面路由渲染回归（2026-09-03 主代理集成修复后补）====
+# 背景：批 4/5 页面路由存在 4 类未覆盖 bug（app.state.templates 未注入 /
+# _run_async 未定义 / TemplateResponse 旧签名 / 模板 import 不存在宏），
+# 集成验收时页面 500；本断言锁住「v0.5 各页面渲染 200 + 关键内容」。
+
+
+def _engine_stub_handler(request: httpx.Request) -> httpx.Response:
+    """页面渲染用最小引擎桩（registry 空 + 建任务返回假 id，零网络）。"""
+    if request.url.path == "/api/engine/tasks" and request.method == "POST":
+        return httpx.Response(201, json={"task_id": "e-000010", "chain_id": "x"})
+    if request.url.path.startswith("/api/engine/tasks/"):
+        return httpx.Response(200, json={"status": "done", "task_id": "e-000010", "output": {}})
+    if request.url.path == "/api/engine/registry":
+        return httpx.Response(200, json={"chains": []})
+    return httpx.Response(404, json={"detail": "not found"})
+
+
+def test_a56_v05_pages_render(biz_engine, monkeypatch) -> None:
+    """A56：扒图页 / SEO 三页 / 模型选择 / 扒图设置 全 200 + 关键内容。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import web.db as webdb
+    from web.app import create_app
+    from web.crm_store import CRMStore
+    from web.engineapi.client import EngineAPIClient
+    from web.settings_store import SettingsStore
+    from web.tm_store import TMStore
+
+    # /scrape 页面走 web.db.get_db_session（函数式 DAO）——monkeypatch 指嵌入式 PG
+    monkeypatch.setattr(
+        webdb, "_maker", async_sessionmaker(biz_engine, expire_on_commit=False)
+    )
+
+    app = create_app(
+        crm_store=CRMStore(biz_engine),
+        settings_store=SettingsStore(biz_engine),
+        tm_store=TMStore(biz_engine),
+        engine_client_factory=lambda: EngineAPIClient(
+            base_url=_FAKE_BIZ_URL,
+            transport=httpx.MockTransport(_engine_stub_handler),
+        ),
+    )
+    client = TestClient(app, follow_redirects=False)
+    _login(client)
+
+    pages = {
+        "/scrape": "贴链接",
+        "/seo/keywords": "关键词研究",
+        "/seo/optimize": "SEO 优化",
+        "/seo/healthcheck": "体检",
+        "/settings/ai/model": "识图模型",
+        "/settings/scrape": "存储目录",
+    }
+    for path, needle in pages.items():
+        resp = client.get(path)
+        assert resp.status_code == 200, f"{path} -> {resp.status_code}"
+        assert needle in resp.text, f"{path} 缺关键内容 {needle!r}"

@@ -399,6 +399,10 @@ def create_app(
     app = FastAPI(title="刘全 · 综合智能运营系统（v0.2）", lifespan=_lifespan)
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
     templates = Jinja2Templates(directory=BASE / "templates")
+    # v0.5 批 4/5 新路由（/scrape、/seo/*）用 request.app.state.templates 渲染；
+    # 老路由走闭包 templates。注入 state 使两种方式一致可用（缺注入 = 新路由 500
+    # 'State' object has no attribute 'templates'，页面验收回归时补测）。
+    app.state.templates = templates
     app.state.tm_store = tm_store
     app.state.crm_store = crm_store
     app.state.settings_store = settings_store
@@ -434,33 +438,28 @@ def create_app(
 
     # ---- /scrape 扒图页 ----
     @app.get("/scrape")
-    def scrape_page(request: Request, batch_id: str | None = None):
+    async def scrape_page(request: Request, batch_id: str | None = None):
         """扒图页面：贴链接 + 图片网格。"""
         from web import scrape_store
 
-        async def _load():
-            batches = await scrape_store.get_batches()
-            images = await scrape_store.get_images(batch_id=batch_id, limit=200) if batch_id else []
-            pending_count = 0
-            return {
-                "batches": batches,
-                "images": images,
-                "pending_proposal_count": pending_count,
-                "active_page": "scrape",
-                "current_user": request.cookies.get("role", "admin"),
-            }
-        data = _run_async(_load())
-        return templates.TemplateResponse("scrape/index.html", data)
+        batches = await scrape_store.get_batches()
+        images = await scrape_store.get_images(batch_id=batch_id, limit=200) if batch_id else []
+        data = {
+            "batches": batches,
+            "images": images,
+            "pending_proposal_count": 0,
+            "active_page": "scrape",
+            "current_user": request.cookies.get("role", "admin"),
+        }
+        return templates.TemplateResponse(request, "scrape/index.html", data)
 
     @app.get("/scrape/thumbnail/{image_id}")
-    def scrape_thumbnail(request: Request, image_id: str):
+    async def scrape_thumbnail(request: Request, image_id: str):
         """返回图片缩略图（从本地文件读取）。"""
         from pathlib import Path
         from web import scrape_store
 
-        async def _get():
-            return await scrape_store.get_image_by_id(image_id)
-        img = _run_async(_get())
+        img = await scrape_store.get_image_by_id(image_id)
         if not img or not img.get("local_path"):
             return Response("Not found", status_code=404, media_type="text/plain")
         path = Path(img["local_path"])
@@ -471,25 +470,20 @@ def create_app(
         return FileResponse(str(path), media_type=ct)
 
     @app.get("/crm/thumbnail/{image_id}")
-    def crm_thumbnail(request: Request, image_id: int):
+    async def crm_thumbnail(request: Request, image_id: int):
         """返回 CRM 对话图片缩略图（从本地文件读取）。"""
         from pathlib import Path
         import mimetypes
 
-        async def _get_image():
-            from models.crm import MessageImage
-            from sqlalchemy import select
-            async with AsyncSession(request.app.state.crm_store._engine) as session:
-                img = await session.get(MessageImage, image_id)
-                if not img or not img.local_path:
-                    return None
-                return {"local_path": img.local_path, "status": img.status}
+        from models.crm import MessageImage
 
-        img = _run_async(_get_image())
-        if not img or not img.get("local_path"):
-            return Response("Not found", status_code=404, media_type="text/plain")
+        async with AsyncSession(request.app.state.crm_store._engine) as session:
+            img = await session.get(MessageImage, image_id)
+            if not img or not img.local_path:
+                return Response("Not found", status_code=404, media_type="text/plain")
+            local_path = img.local_path
 
-        path = Path(img["local_path"])
+        path = Path(local_path)
         if not path.exists():
             return Response("File not found", status_code=404, media_type="text/plain")
 
