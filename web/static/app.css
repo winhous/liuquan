@@ -148,8 +148,8 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
 /* 派生链接（a.badge 复用）已在徽章规则里统一黑字；统计卡图标 ti 图标继承
    父级文字色，随上面规则一并变黑（图标本身无色语义） */
 
-/* 4) 设置导航分组样式（v0.4 复核反馈 2026-09-01：分组标题须与一级菜单明显区分，
-   且所有设置项按大类归组——基础设置/AI 设置/系统设置） */
+/* 4) 设置导航分组样式（v0.4 复核反馈：分组标题须与一级菜单明显区分，且所有
+   设置项按大类归组——基础设置/AI 设置/系统设置；2026-09-01 浅色侧栏适配） */
 .navbar-vertical .nav-item-header {
   margin-top: 0.625rem;              /* 与上一组/叶子拉开距离 */
   padding: 0.25rem 0.5rem;
@@ -160,15 +160,15 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
   font-weight: 600;
   letter-spacing: 0.06em;            /* 字距拉开，类目感 */
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.42);  /* 淡灰（一级菜单近白）——明显弱于一级 */
+  color: #94a3b8;                    /* 浅灰分组标题（浅色侧栏） */
 }
-/* 两侧横线段（伪元素撑开，文字自然居中） */
+/* 两侧横线段（伪元素撑开，文字自然居中；浅色侧栏用深灰细线） */
 .navbar-vertical .nav-item-header::before,
 .navbar-vertical .nav-item-header::after {
   content: "";
   flex: 1 1 auto;
   height: 1px;
-  background: rgba(255, 255, 255, 0.14);  /* 细线弱于文字，分隔类目 */
+  background: rgba(15, 23, 42, 0.12);
 }
 /* 分组下叶子菜单：缩进体现层级（与分组标题、与一级菜单都区分） */
 .navbar-vertical .nav-sm .nav-item .nav-link {
@@ -176,14 +176,15 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
 }
 
 /* 5) 导航悬浮高亮（v0.4 复核反馈：导航所有内容——现在与将来的统一 hover 高亮；
-   选择器用通用类，将来新增导航项自动生效） */
+   选择器用通用类，将来新增导航项自动生效；浅色侧栏：淡灰底） */
 .navbar-vertical .nav-link {
   transition: background-color 0.15s ease, color 0.15s ease;
   border-radius: 0.25rem;
+  color: #334155;                    /* 菜单字体深灰（浅色侧栏） */
 }
 .navbar-vertical .nav-link:hover {
-  background-color: rgba(255, 255, 255, 0.10);  /* 悬浮淡白底 */
-  color: #fff;                                  /* 文字提亮 */
+  background-color: #f1f5f9;         /* 悬浮淡灰底 */
+  color: #0f172a;                    /* 文字加深 */
 }
 /* 分组标题（li.nav-item-header，不可点）同样悬浮高亮（稍淡，与可点项区分） */
 .navbar-vertical .nav-item-header {
@@ -191,5 +192,38 @@ a.badge.bg-primary-subtle:hover, a.badge.text-primary.bg-primary-subtle:hover {
   border-radius: 0.25rem;
 }
 .navbar-vertical .nav-item-header:hover {
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: rgba(15, 23, 42, 0.04);
+}
+
+/* 6) 侧边栏浅色方案（v0.4 复核反馈：白色浅色侧栏——Notion/Linear 现代风格；
+   背景白 + 深灰文字 + 品牌蓝 active 指示条） */
+.navbar-vertical {
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;   /* 侧栏与内容区细分隔线 */
+}
+/* 当前页 active：淡蓝底 + 品牌蓝文字 + 左侧 3px 指示条 */
+.navbar-vertical .nav-link.active,
+.navbar-vertical .nav-link.active:hover {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+  position: relative;
+}
+.navbar-vertical .nav-link.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.375rem;
+  bottom: 0.375rem;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: #3b82f6;
+}
+/* 品牌区（刘全 logo 文字）浅色背景下的颜色 */
+.navbar-vertical .navbar-brand {
+  color: #0f172a;
+}
+/* 展开/折叠箭头（Tabler .nav-link-toggle 用 border 画箭头，浅色下转深灰） */
+.navbar-vertical .nav-link-toggle::after {
+  border-color: #94a3b8;
 }
