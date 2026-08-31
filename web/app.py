@@ -28,7 +28,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -112,6 +112,12 @@ CHAIN_INPUTS: dict[str, dict[str, Any]] = {
             {"name": "keywords", "label": "体检关键词（逗号分隔，留空读设置）", "type": "text", "required": False},
         ]
     },
+    "scrape_suggest_chain": {
+        "fields": [
+            {"name": "urls", "label": "商品链接（逗号分隔）", "type": "text", "required": True},
+            {"name": "source", "label": "来源（xhs/xianyu/crm，留空自动识别）", "type": "text", "required": False},
+        ]
+    },
 }
 
 # 链 id -> 中文展示名（用户复核反馈：触发面板链名称改中文）。
@@ -124,6 +130,7 @@ CHAIN_LABELS: dict[str, str] = {
     "seo_keyword_chain": "关键词研究链",
     "seo_optimize_chain": "SEO 优化链",
     "seo_healthcheck_chain": "listing 体检链",
+    "scrape_suggest_chain": "扒图选品链",
 }
 
 # 状态操作 -> 完成提示语（msg 展示）
@@ -418,6 +425,44 @@ def create_app(
         resp = RedirectResponse("/tasks", status_code=303)
         resp.set_cookie("role", role, max_age=86400)  # 原型：明文角色 cookie
         return resp
+
+    # ---- /scrape 扒图页 ----
+    @app.get("/scrape")
+    def scrape_page(request: Request, batch_id: str | None = None):
+        """扒图页面：贴链接 + 图片网格。"""
+        from web import scrape_store
+
+        async def _load():
+            batches = await scrape_store.get_batches()
+            images = await scrape_store.get_images(batch_id=batch_id, limit=200) if batch_id else []
+            pending_count = 0
+            return {
+                "batches": batches,
+                "images": images,
+                "pending_proposal_count": pending_count,
+                "active_page": "scrape",
+                "current_user": request.cookies.get("role", "admin"),
+            }
+        data = _run_async(_load())
+        return templates.TemplateResponse("scrape/index.html", data)
+
+    @app.get("/scrape/thumbnail/{image_id}")
+    def scrape_thumbnail(request: Request, image_id: str):
+        """返回图片缩略图（从本地文件读取）。"""
+        from pathlib import Path
+        from web import scrape_store
+
+        async def _get():
+            return await scrape_store.get_image_by_id(image_id)
+        img = _run_async(_get())
+        if not img or not img.get("local_path"):
+            return Response("Not found", status_code=404, media_type="text/plain")
+        path = Path(img["local_path"])
+        if not path.exists():
+            return Response("File not found", status_code=404, media_type="text/plain")
+        import mimetypes
+        ct = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+        return FileResponse(str(path), media_type=ct)
 
     @app.get("/modules/{module_id}")
     def module_page(request: Request, module_id: str):

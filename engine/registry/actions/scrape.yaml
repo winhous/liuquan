@@ -1,0 +1,8 @@
+# scrape 域 Action 登记（详设-v0.5 §6.4）
+# scrape.suggest：product_suggestion 产出 SuggestionResult → 转提案（TaskProposal → tm.task_proposal）
+
+- action_id: scrape.suggest
+  domain: scrape
+  risk: suggest
+  output_model: SuggestionResult
+  target: tm.proposal

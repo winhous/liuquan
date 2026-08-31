@@ -1,0 +1,22 @@
+# image_download 工序声明（详设-v0.5 §6.1）
+# 纯代码工序（reason: none，无 LLM 调用，零 token 成本）：
+# 按域名路由 connector（xiaohongshu.com→xhs / goofish.com→xianyu / 其他 http 图→http_image）
+# → 输出 ImagePack（paths/count/desc/tags/author_id/day_dir/source/url）
+
+id: image_download
+domain: scrape
+version: 1
+risk: read
+description: 扒图下载：按 URL 域名路由 connector 下载图片（零 token）
+input:
+  model: ImageDownloadInput
+output:
+  model: ImagePack
+model: default
+reason: none
+retry:
+  max_attempts: 2
+  timeout_s: 120
+context: []
+prompt: prompt.md
+config_dir: config/

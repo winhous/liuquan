@@ -1,0 +1,5 @@
+# product_suggestion 工序配置（详设-v0.5 §6.1）
+# 业务值外置（R10）：suggested_role 默认值
+
+default_role: 运营
+default_due_days: 3

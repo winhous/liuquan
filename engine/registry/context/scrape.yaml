@@ -1,0 +1,11 @@
+# scrape 域 Context provider 登记（详设-v0.5 §6.3）
+
+# v0.5 批 4：图片元数据（product_suggestion 工序用）
+- id: scrape_image_context
+  domain: scrape
+  description: 扒图图片元数据（GET /api/biz/scrape/images 白名单来源）
+  params:
+    model: SuggestionInput
+  returns:
+    model: SuggestionResult
+  provider: scrape.image_context

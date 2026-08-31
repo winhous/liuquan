@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+{% from "macros/ui.html" import task_status_badge %}
+
+{% block title %}刘全 · 扒图{% endblock %}
+{% block page_title %}📸 扒图{% endblock %}
+
+{% block content %}
+<div class="px-4 md:px-8 pb-8">
+  <div class="max-w-6xl mx-auto mb-6">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h2 class="font-bold text-gray-900">📋 扒图任务</h2>
+        <span class="text-xs text-gray-500">{{ batches|length }} 个任务</span>
+      </div>
+      {% if batches %}
+      <div class="divide-y divide-gray-50">
+        {% for batch in batches %}
+        <div class="px-6 py-3 flex items-center justify-between hover:bg-gray-50 transition cursor-pointer"
+             onclick="switchToBatch('{{ batch.id }}')">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="text-lg">{{ batch.source_badge }}</span>
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-gray-900 truncate">{{ batch.name }}</p>
+              <p class="text-xs text-gray-500">{{ batch.image_count }} 张图 · {{ batch.source }} · {{ batch.created_at.strftime('%m-%d %H:%M') if batch.created_at else '—' }}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <span class="text-xs px-2 py-0.5 rounded-full {{ batch.status_badge }}">{{ batch.status_label }}</span>
+            {% if batch.pending_proposal_count %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">{{ batch.pending_proposal_count }} 待审</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="py-8 text-center text-gray-400 text-sm">还没有扒图任务，下方贴链接开始</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="max-w-6xl mx-auto">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      {# 左栏：贴链接 + 当前任务图片列表 #}
+      <div class="lg:col-span-2 space-y-4">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h3 class="font-bold text-gray-900 mb-3 text-sm">🔗 贴链接开始扒图</h3>
+          <div class="mb-3">
+            <label for="scrape-url-input" class="block text-sm font-medium text-gray-700 mb-1">商品链接</label>
+            <textarea id="scrape-url-input" rows="3"
+              placeholder="粘贴小红书、闲鱼商品链接，每行一个...&#10;支持自动识别来源"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"></textarea>
+          </div>
+          <div class="flex items-center gap-2 mb-3">
+            <span id="scrape-url-count" class="text-xs text-gray-500">识别到 0 个链接</span>
+            <span class="text-xs text-gray-300">|</span>
+            <span id="scrape-source-badge" class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">—</span>
+          </div>
+          <button id="btn-start-scrape" onclick="startScrapeTask()" disabled
+            class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium py-2.5 px-4 rounded-lg transition text-sm">
+            🚀 开始扒图
+          </button>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-gray-900 text-sm">📋 选品提案审核</p>
+              <p class="text-xs text-gray-500 mt-0.5">扒图产出的选品建议在「任务中心 → 提案」里审核</p>
+            </div>
+            <a href="/task-center#tab-proposals" class="bg-orange-50 hover:bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-xs font-medium transition">去审核 →</a>
+          </div>
+          {% if pending_proposal_count %}
+          <div class="mt-2 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+            <span class="text-orange-700 text-xs font-medium">⏳ {{ pending_proposal_count }} 个待审核提案</span>
+          </div>
+          {% endif %}
+        </div>
+
+        <div id="scrape-images-left" class="space-y-2">
+          {% if images %}
+            {% for img in images %}
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex hover:shadow-md transition relative"
+                 data-source="{{ img.source }}" data-id="{{ img.id }}">
+              <div class="w-24 h-24 flex-shrink-0 bg-gray-100 relative">
+                {% if img.local_path %}
+                <img src="/scrape/thumbnail/{{ img.id }}" alt="图片" class="w-full h-full object-cover" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="w-full h-full items-center justify-center text-gray-400 text-2xl" style="display:none">🖼️</div>
+                {% else %}
+                <div class="w-full h-full flex items-center justify-center text-gray-400 text-2xl">🖼️</div>
+                {% endif %}
+                {% if img.watermark %}
+                <div class="absolute bottom-0.5 right-0.5 bg-orange-500 text-white text-[8px] px-1 py-0.5 rounded font-medium">水印</div>
+                {% endif %}
+              </div>
+              <div class="flex-1 p-3 flex flex-col justify-between min-w-0">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 mb-1">
+                    {% if img.source == 'xhs' %}
+                    <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500 text-white font-medium">小红书</span>
+                    {% elif img.source == 'xianyu' %}
+                    <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500 text-white font-medium">闲鱼</span>
+                    {% else %}
+                    <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500 text-white font-medium">客户图</span>
+                    {% endif %}
+                    {% if img.width and img.height %}
+                    <span class="text-[10px] text-gray-400">{{ img.width }}×{{ img.height }}</span>
+                    {% endif %}
+                  </div>
+                  <p class="text-xs text-gray-700 truncate" title="{{ img.desc or '—' }}">{{ img.desc or '—' }}</p>
+                  {% if img.author_id %}
+                  <p class="text-[10px] text-gray-400 mt-0.5">@{{ img.author_id[:12] }}</p>
+                  {% endif %}
+                  {% if img.tags %}
+                  <div class="flex flex-wrap gap-1 mt-1">
+                    {% for tag in img.tags[:3] %}
+                    <span class="text-[10px] px-1 py-0.5 rounded bg-blue-50 text-blue-600">{{ tag }}</span>
+                    {% endfor %}
+                    {% if img.tags|length > 3 %}
+                    <span class="text-[10px] text-gray-400">+{{ img.tags|length - 3 }}</span>
+                    {% endif %}
+                  </div>
+                  {% endif %}
+                </div>
+                <div class="flex items-center justify-between mt-1">
+                  <span class="text-[10px] text-gray-400">{{ img.day_dir or '—' }}</span>
+                  {% if img.status == 'failed' %}
+                  <span class="text-[10px] text-red-500 font-medium">下载失败</span>
+                  {% elif img.status == 'pending' %}
+                  <span class="text-[10px] text-yellow-500 font-medium">处理中…</span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="absolute top-2 right-2">
+                <input type="checkbox" class="scrape-img-check rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                       data-id="{{ img.id }}" onchange="updateSelectedCount()">
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 py-8 text-center text-gray-400">
+            <div class="text-3xl mb-2">📸</div>
+            <p class="text-sm">还没有图片</p>
+            <p class="text-xs mt-1">在上方贴链接开始扒图</p>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {# 右栏：图片网格 + 筛选 #}
+      <div class="lg:col-span-3">
+        <div class="flex items-center gap-2 mb-4 flex-wrap">
+          <span class="text-sm font-medium text-gray-700">来源：</span>
+          <button onclick="filterBySource('all')" data-filter="all"
+                  class="filter-btn active text-xs px-3 py-1 rounded-full border border-blue-300 bg-blue-50 text-blue-700 font-medium">全部</button>
+          <button onclick="filterBySource('xhs')" data-filter="xhs"
+                  class="filter-btn text-xs px-3 py-1 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-red-300 hover:text-red-600">📕 小红书</button>
+          <button onclick="filterBySource('xianyu')" data-filter="xianyu"
+                  class="filter-btn text-xs px-3 py-1 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-yellow-300 hover:text-yellow-600">🐟 闲鱼</button>
+          <button onclick="filterBySource('crm')" data-filter="crm"
+                  class="filter-btn text-xs px-3 py-1 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-purple-300 hover:text-purple-600">💬 客户图</button>
+          <span class="text-xs text-gray-400 ml-auto" id="image-count-label">{{ images|length }} 张图</span>
+        </div>
+
+        <div id="scrape-images-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {% if images %}
+            {% for img in images %}
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group hover:shadow-md transition relative"
+                 data-source="{{ img.source }}" data-id="{{ img.id }}">
+              <div class="absolute top-2 left-2 z-10">
+                <input type="checkbox" class="scrape-img-check rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                       data-id="{{ img.id }}" onchange="updateSelectedCount()">
+              </div>
+              <div class="absolute top-2 right-2 z-10">
+                {% if img.source == 'xhs' %}
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500 text-white font-medium">小红书</span>
+                {% elif img.source == 'xianyu' %}
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500 text-white font-medium">闲鱼</span>
+                {% else %}
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500 text-white font-medium">客户图</span>
+                {% endif %}
+              </div>
+              <div class="aspect-square bg-gray-100 relative">
+                {% if img.local_path %}
+                <img src="/scrape/thumbnail/{{ img.id }}" alt="图片" class="w-full h-full object-cover" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="w-full h-full items-center justify-center text-gray-400 text-3xl" style="display:none">🖼️</div>
+                {% else %}
+                <div class="w-full h-full flex items-center justify-center text-gray-400 text-3xl">🖼️</div>
+                {% endif %}
+                {% if img.watermark %}
+                <div class="absolute bottom-1 right-1 bg-orange-500 text-white text-[9px] px-1 py-0.5 rounded font-medium">有水印</div>
+                {% endif %}
+                {% if img.status == 'failed' %}
+                <div class="absolute inset-0 bg-red-500/10 flex items-center justify-center">
+                  <span class="text-red-500 text-xs font-medium bg-white px-2 py-1 rounded">下载失败</span>
+                </div>
+                {% elif img.status == 'pending' %}
+                <div class="absolute inset-0 bg-yellow-500/10 flex items-center justify-center">
+                  <span class="text-yellow-600 text-xs font-medium bg-white px-2 py-1 rounded">处理中…</span>
+                </div>
+                {% endif %}
+              </div>
+              <div class="p-2">
+                <p class="text-[11px] text-gray-500 truncate" title="{{ img.desc or '—' }}">{{ img.desc or '—' }}</p>
+                <div class="flex items-center gap-1 mt-1 flex-wrap">
+                  {% if img.width and img.height %}
+                  <span class="text-[10px] text-gray-400">{{ img.width }}×{{ img.height }}</span>
+                  {% endif %}
+                  {% if img.author_id %}
+                  <span class="text-[10px] text-gray-400">@{{ img.author_id[:8] }}</span>
+                  {% endif %}
+                </div>
+                {% if img.tags %}
+                <div class="flex flex-wrap gap-1 mt-1.5">
+                  {% for tag in img.tags[:3] %}
+                  <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600">{{ tag }}</span>
+                  {% endfor %}
+                  {% if img.tags|length > 3 %}
+                  <span class="text-[10px] text-gray-400">+{{ img.tags|length - 3 }}</span>
+                  {% endif %}
+                </div>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="col-span-full py-16 text-center text-gray-400">
+            <div class="text-4xl mb-3">📸</div>
+            <p class="text-sm">还没有图片</p>
+            <p class="text-xs mt-1">在左边贴链接开始扒图</p>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <details class="bg-white rounded-xl shadow-sm border border-gray-200 mt-6">
+      <summary class="px-6 py-4 cursor-pointer text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-xl">❓ 常见问题</summary>
+      <div class="px-6 pb-4 space-y-3 text-sm text-gray-600 border-t border-gray-100">
+        <div>
+          <p class="font-medium text-gray-800">哪些平台支持？</p>
+          <p>小红书、闲鱼、通用HTTP图片链接。自动识别来源。</p>
+        </div>
+        <div>
+          <p class="font-medium text-gray-800">xsec_token 过期？</p>
+          <p>小红书 token 有效期约 30 天。若下载失败提示 token 过期，需重新复制链接获取新 token。</p>
+        </div>
+        <div>
+          <p class="font-medium text-gray-800">选品建议准确吗？</p>
+          <p>AI 基于图片信息和目标市场分析给出建议，仅供参考。最终选品决策请结合实际供应链情况。</p>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div id="batch-actions" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-gray-200 shadow-2xl rounded-2xl px-6 py-3 flex items-center gap-4 z-50">
+    <span class="text-sm text-gray-600">已选 <span id="selected-count" class="font-bold text-blue-600">0</span> 张</span>
+    <button onclick="selectAll()" class="text-xs text-blue-600 hover:text-blue-800">全选</button>
+    <button onclick="deselectAll()" class="text-xs text-gray-500 hover:text-gray-700">取消</button>
+    <div class="w-px h-6 bg-gray-200"></div>
+    <button onclick="batchSuggest()" class="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-xl transition">✨ 生成选品建议</button>
+  </div>
+</div>
+
+<script>
+  const scrapeChainName = 'scrape_suggest_chain';
+  const BATCH_STATUS = { running: '运行中', completed: '已完成', failed: '失败' };
+
+  function detectSourceAndCount() {
+    const ta = document.getElementById('scrape-url-input');
+    const lines = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
+    document.getElementById('scrape-url-count').textContent = `识别到 ${lines.length} 个链接`;
+    const btn = document.getElementById('btn-start-scrape');
+    btn.disabled = lines.length === 0;
+    if (lines.length === 0) {
+      document.getElementById('scrape-source-badge').textContent = '—';
+      document.getElementById('scrape-source-badge').className = 'text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500';
+    } else {
+      const hasXhs = lines.some(l => l.includes('xiaohongshu.com'));
+      const hasXy = lines.some(l => l.includes('goofish.com'));
+      const badge = document.getElementById('scrape-source-badge');
+      if (hasXhs && hasXy) { badge.textContent = '小红书+闲鱼'; badge.className = 'text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700'; }
+      else if (hasXhs) { badge.textContent = '小红书'; badge.className = 'text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700'; }
+      else if (hasXy) { badge.textContent = '闲鱼'; badge.className = 'text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700'; }
+      else { badge.textContent = '通用图片'; badge.className = 'text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700'; }
+    }
+  }
+
+  async function startScrapeTask() {
+    const ta = document.getElementById('scrape-url-input');
+    const lines = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+    const urls = lines.join(',');
+    const btn = document.getElementById('btn-start-scrape');
+    btn.disabled = true; btn.textContent = '⏳ 创建任务中…';
+    try {
+      const r = await fetch('/api/tasks/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chain_name: scrapeChainName, input: { urls, source: 'mixed' } })
+      });
+      const data = await r.json();
+      if (data.ok) {
+        btn.textContent = '✅ 已提交！';
+        ta.value = '';
+        document.getElementById('scrape-url-count').textContent = '识别到 0 个链接';
+        document.getElementById('scrape-source-badge').textContent = '—';
+        setTimeout(() => { btn.disabled = false; btn.textContent = '🚀 开始扒图'; }, 1500);
+        setTimeout(() => location.reload(), 2000);
+      } else {
+        alert('创建失败: ' + (data.error || '未知错误'));
+        btn.disabled = false; btn.textContent = '🚀 开始扒图';
+      }
+    } catch (e) {
+      alert('网络错误: ' + e.message);
+      btn.disabled = false; btn.textContent = '🚀 开始扒图';
+    }
+  }
+
+  function switchToBatch(batchId) { window.location.href = '/scrape?batch_id=' + batchId; }
+
+  function filterBySource(source) {
+    document.querySelectorAll('.filter-btn').forEach(b => {
+      b.classList.remove('active', 'border-blue-300', 'bg-blue-50', 'text-blue-700');
+      b.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
+    });
+    const activeBtn = document.querySelector(`.filter-btn[data-filter="${source}"]`);
+    if (activeBtn) {
+      activeBtn.classList.add('active', 'border-blue-300', 'bg-blue-50', 'text-blue-700');
+      activeBtn.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
+    }
+    let visibleCount = 0;
+    document.querySelectorAll('#scrape-images-grid [data-source]').forEach(card => {
+      const show = source === 'all' || card.dataset.source === source;
+      card.style.display = show ? '' : 'none';
+      if (show) visibleCount++;
+    });
+    const label = document.getElementById('image-count-label');
+    if (label) label.textContent = visibleCount + ' 张图';
+  }
+
+  function updateSelectedCount() {
+    const count = document.querySelectorAll('.scrape-img-check:checked').length;
+    document.getElementById('selected-count').textContent = count;
+    document.getElementById('batch-actions').classList.toggle('hidden', count === 0);
+  }
+  function selectAll() { document.querySelectorAll('.scrape-img-check:not(:checked)').forEach(c => { c.checked = true; }); updateSelectedCount(); }
+  function deselectAll() { document.querySelectorAll('.scrape-img-check:checked').forEach(c => { c.checked = false; }); updateSelectedCount(); }
+
+  async function batchSuggest() {
+    const ids = [...document.querySelectorAll('.scrape-img-check:checked')].map(c => c.dataset.id);
+    if (!ids.length) { alert('请先勾选图片'); return; }
+    const btn = event.target; btn.disabled = true; btn.textContent = '⏳ 提交中…';
+    try {
+      const r = await fetch('/api/tasks/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chain_name: 'scrape_suggest_chain',
+          input: { image_ids: ids, target_keywords: '', mode: 'batch' }
+        })
+      });
+      const data = await r.json();
+      if (data.ok) { btn.textContent = '✅ 已提交！'; setTimeout(() => location.reload(), 2000); }
+      else { alert('提交失败: ' + (data.error || '未知错误')); btn.disabled = false; btn.textContent = '✨ 生成选品建议'; }
+    } catch (e) { alert('网络错误: ' + e.message); btn.disabled = false; btn.textContent = '✨ 生成选品建议'; }
+  }
+
+  document.getElementById('scrape-url-input').addEventListener('input', detectSourceAndCount);
+</script>
+{% endblock %}

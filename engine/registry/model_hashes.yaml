@@ -32,6 +32,18 @@ models:
   HealthcheckResult:
     version: 1
     hash: fd2c53a1ef54a3fc5cecdc89340c9f330cbf49f575e038a396e367cd19dd5ebf
+  ImageDownloadInput:
+    version: 1
+    hash: 0323eed00067e774661e79381d673be4a1ef367f10766eddddb20f4d3f770af0
+  ImageInspectInput:
+    version: 1
+    hash: 11dbd8eed3790bb2b80b456ab2efeefde4d375af5edb1d3e4f40dbca9443b8a4
+  ImagePack:
+    version: 1
+    hash: 3c44b34496be30de437d9732829d9fbe63d9d97370ced44b42d8867119c2eb0f
+  InspectionResult:
+    version: 1
+    hash: 9b2b21b7949a984ace644089b979b9f716ed40aa78cc46ddf9cf5f9488d08184
   IntentInput:
     version: 1
     hash: bee836328347f34c95276e6f36e6f16d8c4867a957c7ad1a881b2130915c9607
@@ -65,6 +77,12 @@ models:
   SnapshotUpdateInput:
     version: 1
     hash: a4aedb0d719f434025aa72aba6e39252179c5dee6e32fe62b538065fbd8eebe7
+  SuggestionInput:
+    version: 1
+    hash: 4f49a464cbd60562047f8fb5bcaeef4f184599d24a1822b8c1dbfe74456287c2
+  SuggestionResult:
+    version: 1
+    hash: d65b9df42331d26ed4cc0a2c9147e8aa6169f217ddefc8d373f346fe37fcc7fb
   TaskProposal:
     version: 1
     hash: 3f6716b309cf826eb8e5f894635149d5b28eae45be075d4d2a1f7b2ae8016e4e

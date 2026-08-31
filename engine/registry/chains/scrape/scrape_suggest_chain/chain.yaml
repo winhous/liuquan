@@ -1,0 +1,13 @@
+# scrape_suggest_chain 链声明（详设-v0.5 §6.2）
+# 扒图选品链：image_download → image_inspect → product_suggestion
+# 链完成 → 消费者 scrape.suggest（TaskProposal → tm.task_proposal）
+
+id: scrape_suggest_chain
+domain: scrape
+description: 扒图选品链：下载图片 → 体检宽高/水印 → AI 生成选品建议
+input:
+  model: SuggestionInput
+steps:
+  - worker: image_download
+  - worker: image_inspect
+  - worker: product_suggestion

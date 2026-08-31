@@ -75,6 +75,14 @@ __all__ = [
     "HealthcheckInput",
     "HealthcheckItem",
     "HealthcheckResult",
+    # v0.5 批 4：扒图工序 Model
+    "ImageDownloadInput",
+    "ImagePack",
+    "ImageInspectInput",
+    "InspectionItem",
+    "InspectionResult",
+    "SuggestionInput",
+    "SuggestionResult",
 ]
 
 
@@ -556,6 +564,93 @@ class HealthcheckResult(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
     quota: dict[str, Any] | None = None
     note: str | None = None
+
+
+# ==== v0.5 批 4：扒图工序 Model（详设-v0.5 §6.1）====
+
+
+class ImageDownloadInput(BaseModel):
+    """image_download 工序入参（详设-v0.5 §6.1）。
+
+    url: 商品/图片链接
+    batch_id: 批次 id
+    source: 来源（xhs/xianyu/crm，可选，缺省按域名自动识别）
+    """
+
+    url: str
+    batch_id: str
+    source: str | None = None
+
+
+class ImagePack(BaseModel):
+    """image_download 工序输出：图片包（照广成 etsy-image-pack）。
+
+    paths: 本地落盘路径列表
+    count: 图片数量
+    desc: 商品描述（从元数据提取）
+    tags: 标签列表
+    author_id: 作者/卖家 ID
+    day_dir: 日期目录
+    source: 来源（xhs/xianyu/crm）
+    url: 原始链接
+    note: 降级说明
+    """
+
+    paths: list[str] = []
+    count: int = 0
+    desc: str = ""
+    tags: list[str] = []
+    author_id: str = ""
+    day_dir: str = ""
+    source: str = ""
+    url: str = ""
+    note: str = ""
+
+
+class ImageInspectInput(BaseModel):
+    """image_inspect 工序入参（详设-v0.5 §6.1）。
+
+    image_ids: image_file.id 列表（从写接口落库后取到的 id）
+    """
+
+    image_ids: list[int] = Field(min_length=1)
+
+
+class InspectionItem(BaseModel):
+    """图片体检结果单项。"""
+
+    image_id: int
+    width: int | None = None
+    height: int | None = None
+    watermark: bool = False
+    note: str = ""
+
+
+class InspectionResult(BaseModel):
+    """image_inspect 工序输出。"""
+
+    images: list[InspectionItem] = []
+    note: str = ""
+
+
+class SuggestionInput(BaseModel):
+    """product_suggestion 工序入参（详设-v0.5 §6.1）。
+
+    image_ids: image_file.id 列表
+    batch_id: 批次 id（可选）
+    target_keywords: 目标关键词（可选）
+    """
+
+    image_ids: list[int] = Field(min_length=1)
+    batch_id: str | None = None
+    target_keywords: str | None = None
+
+
+class SuggestionResult(BaseModel):
+    """product_suggestion 工序输出：选品建议（走 TaskProposal 候选）。"""
+
+    proposals: list[dict] = []
+    note: str = ""
 
 
 # 重建所有使用 Any 类型的 Model（from __future__ import annotations 导致延迟求值）

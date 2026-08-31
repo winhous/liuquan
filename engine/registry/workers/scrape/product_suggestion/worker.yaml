@@ -1,0 +1,27 @@
+# product_suggestion 工序声明（详设-v0.5 §6.1，修订：model=default 文本模型）
+# LLM 工序（reason: llm，model: default 文本模型，非 vision）：
+# 经 provider scrape.image_context 拿元数据 → AI 生成选品建议
+# → 输出 TaskProposal 候选（action_id=scrape.suggest，domain=scrape）
+#
+# 修订理由：vision 未配置时产品建议链不能失败（optional 语义），
+# 元数据已含商品信息，降低对视觉模型的依赖。
+# vision 识图留给批 5 crm image_caption。
+
+id: product_suggestion
+domain: scrape
+version: 1
+risk: suggest
+description: 扒图选品建议：基于图片元数据 AI 生成选品建议（default 文本模型）
+input:
+  model: SuggestionInput
+output:
+  model: SuggestionResult
+model: default
+reason: llm
+retry:
+  max_attempts: 2
+  timeout_s: 30
+context:
+  - id: scrape_image_context
+prompt: prompt.md
+config_dir: config/

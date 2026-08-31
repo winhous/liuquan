@@ -1,0 +1,76 @@
+"""scrape_proposal 消费者（详设-v0.5 §6.4）。
+
+scrape_suggest_chain 完成 → 消费者 scrape.suggest（action_id=scrape.suggest）：
+SuggestionResult → TaskProposal(domain=scrape) → POST /api/biz/tm/proposals。
+
+职责：
+1. 契约归一（dict -> SuggestionResult，R2）；
+2. 遍历 proposals 构造 TaskProposal；
+3. 复用 tm_proposal 转交器核心逻辑（禁幻觉三件套 + risk 标注 + HTTP 写接口）；
+4. 不 import web 任何代码（P3-2）。
+
+注入式设计（R12）：registry / audit_lookup / whitelist / biz_client 全部可注入。
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable, Collection
+
+from pydantic import ValidationError
+
+from engine.actions.biz_client import BizApiClient
+from engine.actions.tm_proposal import ConsumeOutcome, consume_task_proposal
+from models.contract.task import TaskProposal
+from models.workers import SuggestionResult
+
+logger = logging.getLogger(__name__)
+
+
+async def consume_scrape_proposal(
+    deliverable: dict,
+    *,
+    registry: object | None = None,
+    audit_lookup: Callable[[list[str]], bool] | None = None,
+    whitelist: Collection[str] | None = None,
+    biz_client: BizApiClient | None = None,
+    **_kwargs,
+) -> ConsumeOutcome:
+    """扒图选品提案消费者：SuggestionResult → TaskProposal → tm 转交器落库。"""
+    # ---- 0. 契约归一 ----
+    try:
+        result = SuggestionResult.model_validate(deliverable)
+    except ValidationError as exc:
+        return ConsumeOutcome(
+            "rejected", reason=f"选品结果未过 SuggestionResult 契约校验：{exc}"
+        )
+
+    if not result.proposals:
+        return ConsumeOutcome("accepted", note="无选品建议产出（proposals 为空）")
+
+    # ---- 1. 遍历 proposals 构造 TaskProposal ----
+    accepted = 0
+    rejected = 0
+    for prop_dict in result.proposals:
+        try:
+            proposal = TaskProposal(**prop_dict)
+            outcome = await consume_task_proposal(
+                proposal.model_dump(),
+                registry=registry,
+                audit_lookup=audit_lookup,
+                whitelist=whitelist,
+                biz_client=biz_client,
+            )
+            if outcome.status == "accepted":
+                accepted += 1
+            else:
+                rejected += 1
+                logger.warning("选品提案被拒: %s", outcome.reason)
+        except Exception as e:
+            rejected += 1
+            logger.warning("选品提案处理异常: %s", e)
+
+    return ConsumeOutcome(
+        "accepted",
+        note=f"选品提案处理完成：{accepted} 接受，{rejected} 拒绝",
+    )

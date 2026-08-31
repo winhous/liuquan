@@ -163,6 +163,57 @@ class SeoMetricHistoryHTTP:
         )
 
 
+class ScrapeImageContextHTTP:
+    """scrape.image_context 实现：GET /api/biz/scrape/images -> 图片元数据列表。
+
+    product_suggestion 工序用：基于图片元数据（desc/tags/author/source/宽高/水印）
+    AI 生成选品建议（model=default 文本模型，非 vision）。
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        token: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = (base_url or _env_value(_BIZ_URL_ENV) or "").rstrip("/")
+        self._token = token or _env_value(_BIZ_TOKEN_ENV) or ""
+        self._transport = transport
+
+    async def __call__(self, params) -> dict:
+        if not self._base_url or not self._token:
+            raise BizReadError("biz 读接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
+
+        # 从 params 提取 image_ids 或 batch_id
+        image_ids = getattr(params, "image_ids", None) or []
+        batch_id = getattr(params, "batch_id", None)
+
+        if image_ids:
+            # 按 id 批量获取
+            url = f"{self._base_url}/api/biz/scrape/images"
+            params_dict = {"ids": ",".join(str(i) for i in image_ids)}
+        elif batch_id:
+            url = f"{self._base_url}/api/biz/scrape/images"
+            params_dict = {"batch_id": batch_id}
+        else:
+            url = f"{self._base_url}/api/biz/scrape/images"
+            params_dict = {}
+
+        async with httpx.AsyncClient(
+            trust_env=False, timeout=10.0, transport=self._transport
+        ) as client:
+            resp = await client.get(
+                url, headers={"X-Biz-Token": self._token}, params=params_dict
+            )
+
+        if resp.status_code != 200:
+            raise BizReadError(f"biz 读接口 HTTP {resp.status_code}: {resp.text[:200]}")
+
+        images = resp.json() if isinstance(resp.json(), list) else resp.json().get("items", [])
+        return {"images": images}
+
+
 def build_providers(
     *,
     base_url: str | None = None,
@@ -175,6 +226,7 @@ def build_providers(
         "crm.overdue_context": CrmOverdueContextHTTP(base_url=base_url, token=token, transport=transport),
         "tm.task_context": TmTaskContextHTTP(base_url=base_url, token=token, transport=transport),
         "seo.metric_history": SeoMetricHistoryHTTP(base_url=base_url, token=token, transport=transport),
+        "scrape.image_context": ScrapeImageContextHTTP(base_url=base_url, token=token, transport=transport),
     }
 
 
@@ -188,6 +240,7 @@ __all__ = [
     "BizReadError",
     "CrmChatContextHTTP",
     "CrmOverdueContextHTTP",
+    "ScrapeImageContextHTTP",
     "TmTaskContextHTTP",
     "SeoMetricHistoryHTTP",
     "build_providers",

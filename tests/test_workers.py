@@ -236,6 +236,9 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "keyword_research",
         "seo_optimize",
         "listing_healthcheck",
+        "image_download",
+        "image_inspect",
+        "product_suggestion",
     }
     assert set(registry.chains) == {
         "demo_echo_chain",
@@ -248,6 +251,7 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "seo_keyword_chain",
         "seo_optimize_chain",
         "seo_healthcheck_chain",
+        "scrape_suggest_chain",
     }
     assert set(registry.context_providers) == {
         "demo_greeting",
@@ -255,12 +259,14 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "crm_overdue_context",
         "tm_task_context",
         "seo_metric_history",
+        "scrape_image_context",
     }
     assert set(registry.events) == {"demo.echo_done"}
-    # v0.4：tm.schedule Action；v0.5 批 3：seo.report / seo.optimize / seo.healthcheck
+    # v0.4：tm.schedule Action；v0.5 批 3：seo.report / seo.optimize / seo.healthcheck；批 4：scrape.suggest
     assert set(registry.actions) == {
         "demo_echo_record", "tm.proposal", "crm.candidate", "tm.schedule",
         "seo.report", "seo.optimize", "seo.healthcheck",
+        "scrape.suggest",
     }
 
     # 工序声明字段（id/domain/risk/model 别名/retry/输入输出 Model 引用）

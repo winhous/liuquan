@@ -546,6 +546,93 @@ def create_biz_router(
                 ],
             )
 
+    # ---- 扒图接口（v0.5 批 4，详设-v0.5 §10）----
+
+    @router.get("/scrape/images", dependencies=[Depends(_check_token)])
+    async def list_scrape_images(
+        batch_id: str | None = None,
+        source: str | None = None,
+        ids: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """GET /api/biz/scrape/images：白名单来源查询图片列表。"""
+        from web import scrape_store
+
+        _SOURCES = {"xhs", "xianyu", "crm"}
+
+        if ids:
+            id_list = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
+            images = []
+            for mid in id_list:
+                img = await scrape_store.get_image_by_id(mid)
+                if img:
+                    images.append(img)
+            return images
+
+        if source and source not in _SOURCES:
+            raise HTTPException(status_code=422, detail=f"source 必须是 {_SOURCES} 之一")
+
+        return await scrape_store.get_images(
+            batch_id=batch_id, source=source, limit=limit
+        )
+
+    @router.post("/scrape/images", dependencies=[Depends(_check_token)])
+    async def create_scrape_image(payload: dict) -> dict:
+        """POST /api/biz/scrape/images：落产物（batch_id 幂等 409）。"""
+        from web import scrape_store
+
+        batch_id = payload.get("batch_id", "")
+        url = payload.get("url", "")
+        if not batch_id or not url:
+            raise HTTPException(status_code=422, detail="batch_id 和 url 必填")
+
+        # 幂等检查
+        existing = await scrape_store.check_batch_idempotent(batch_id)
+        # 检查同 batch_id + url 是否已存在
+        images = await scrape_store.get_images(batch_id=batch_id, limit=1000)
+        for img in images:
+            if img.get("url") == url:
+                raise HTTPException(status_code=409, detail="同 batch_id + url 已存在（幂等防重）")
+
+        source = payload.get("source", "crm")
+        img = await scrape_store.create_image_file(
+            batch_id=batch_id,
+            source=source,
+            url=url,
+            local_path=payload.get("local_path"),
+            day_dir=payload.get("day_dir"),
+            desc=payload.get("desc"),
+            tags=payload.get("tags", []),
+            author_id=payload.get("author_id"),
+            width=payload.get("width"),
+            height=payload.get("height"),
+            watermark=payload.get("watermark", False),
+            status=payload.get("status", "pending"),
+        )
+        return img
+
+    @router.patch("/scrape/images/{image_id}", dependencies=[Depends(_check_token)])
+    async def update_scrape_image(image_id: int, payload: dict) -> dict:
+        """PATCH /api/biz/scrape/images/{id}：更新宽高/水印/状态。"""
+        from web import scrape_store
+
+        img = await scrape_store.get_image_by_id(str(image_id))
+        if not img:
+            raise HTTPException(status_code=404, detail="图片不存在")
+
+        updated = await scrape_store.update_image(
+            str(image_id),
+            width=payload.get("width"),
+            height=payload.get("height"),
+            watermark=payload.get("watermark"),
+            status=payload.get("status"),
+            local_path=payload.get("local_path"),
+            desc=payload.get("desc"),
+            tags=payload.get("tags"),
+            author_id=payload.get("author_id"),
+        )
+        return updated or {}
+
     return router
 
 
