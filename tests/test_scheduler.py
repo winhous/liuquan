@@ -617,7 +617,7 @@ async def test_scheduler_tick_exception_marks_failed(db_engine, registry) -> Non
 
 @pytest.mark.asyncio
 async def test_scheduler_seed_on_empty_table(db_engine, registry) -> None:
-    """空表 tick -> 种子 crm_reminder_chain 存在。"""
+    """空表 tick -> 种子 crm_reminder_chain + seo_healthcheck_chain 存在。"""
     fixed_now = datetime(2026, 1, 15, 7, 10, 0, tzinfo=timezone.utc)
     scheduler = Scheduler(
         db_engine, registry, interval=9999, now_fn=lambda: fixed_now
@@ -625,17 +625,19 @@ async def test_scheduler_seed_on_empty_table(db_engine, registry) -> None:
     await scheduler.tick()
 
     rows = await _db.list_schedules(db_engine)
-    assert len(rows) == 1
-    assert rows[0].chain_id == "crm_reminder_chain"
-    assert rows[0].cron == "0 7 * * *"
-    assert rows[0].enabled is True
-    # 种子创建后 next_run_at 为 None（需手动设或由 web 接口创建时计算）；
-    # 但 tick 后种子行存在即满足验收要求
+    assert len(rows) >= 1  # 至少 crm_reminder_chain
+    chain_ids = {r.chain_id for r in rows}
+    assert "crm_reminder_chain" in chain_ids
+    crm = next(r for r in rows if r.chain_id == "crm_reminder_chain")
+    assert crm.cron == "0 7 * * *"
+    assert crm.enabled is True
+    # v0.5 批 3：seo_healthcheck_chain 也应存在
+    assert "seo_healthcheck_chain" in chain_ids
 
 
 @pytest.mark.asyncio
 async def test_scheduler_seed_idempotent(db_engine, registry) -> None:
-    """非空表 tick -> 不重复插入种子。"""
+    """非空表 tick -> per-chain 幂等：已有链不重复，缺链补插。"""
     fixed_now = datetime(2026, 1, 15, 7, 10, 0, tzinfo=timezone.utc)
     # 预先插入一条
     await _db.create_schedule(
@@ -647,7 +649,13 @@ async def test_scheduler_seed_idempotent(db_engine, registry) -> None:
     await scheduler.tick()
 
     rows = await _db.list_schedules(db_engine)
-    assert len(rows) == 1  # 不重复
+    # crm_reminder_chain 不重复 + seo_healthcheck_chain 补插
+    chain_ids = {r.chain_id for r in rows}
+    assert "crm_reminder_chain" in chain_ids
+    assert "seo_healthcheck_chain" in chain_ids
+    # crm_reminder_chain 只有一条
+    crm_rows = [r for r in rows if r.chain_id == "crm_reminder_chain"]
+    assert len(crm_rows) == 1
 
 
 @pytest.mark.asyncio
@@ -706,7 +714,9 @@ async def test_scheduler_tick_null_then_fires_next_day(db_engine, registry) -> N
     )
     await scheduler.tick()  # 初始化锚点 -> 明天 07:00
 
-    # 第二天 07:00 整：到点触发
+    # 第二天 07:00 整：到点触发（crm_reminder_chain 07:00 触发）
+    # seo_healthcheck_chain 种子也在 tick 时创建，其 next_run_at=08:00（day1）
+    # 在 day2 07:00 时 seo_healthcheck_chain 的 next_run_at 已过，也会触发
     day2 = datetime(2026, 1, 16, 7, 0, 0, tzinfo=timezone.utc)
     scheduler2 = Scheduler(
         db_engine, registry, interval=9999, now_fn=lambda: day2
@@ -715,6 +725,9 @@ async def test_scheduler_tick_null_then_fires_next_day(db_engine, registry) -> N
     async with AsyncSession(db_engine) as session:
         from engine.core.db import EngineTask
         tasks = (await session.execute(select(EngineTask))).scalars().all()
-    assert len(tasks) == 1
-    assert tasks[0].trigger_type == "schedule"
-    assert tasks[0].input.get("trigger_date") == "2026-01-16"
+    # 至少有 crm_reminder_chain 触发的任务
+    trigger_types = [t.trigger_type for t in tasks]
+    assert "schedule" in trigger_types
+    # 验证 crm_reminder_chain 触发了
+    crm_tasks = [t for t in tasks if t.input.get("trigger_date") == "2026-01-16"]
+    assert len(crm_tasks) >= 1

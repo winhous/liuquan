@@ -1,0 +1,24 @@
+# listing_healthcheck 工序声明（详设-v0.5 §6.1；批 3 修订：纯代码两步）
+# 纯代码工序（reason: none，无 LLM 调用，零 token 成本）：
+# 拉取各关键词当前指标 → 经 provider seo.metric_history 读历史 →
+# 代码规则变化检测（config 阈值）→ 输出 HealthcheckResult
+# 链完成消费者 seo.healthcheck 模板生成提案（深度优化留给 seo_optimize_chain）
+
+id: listing_healthcheck
+domain: seo
+version: 1
+risk: suggest
+description: SEO listing 体检：拉取当前指标 + 变化检测（纯代码，零 token）
+input:
+  model: HealthcheckInput
+output:
+  model: HealthcheckResult
+model: default
+reason: none
+retry:
+  max_attempts: 2
+  timeout_s: 30
+context:
+  - id: seo_metric_history
+prompt: prompt.md
+config_dir: config/

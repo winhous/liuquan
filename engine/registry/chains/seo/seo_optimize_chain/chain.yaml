@@ -1,0 +1,10 @@
+# seo_optimize_chain 链声明（详设-v0.5 §6.2；批 3 新增）
+# 交互式 SEO 优化链：seo_optimize 单步（LLM 工序）
+# 链完成 → 消费者 seo.optimize（TaskProposal → tm.task_proposal 审核流）
+id: seo_optimize_chain
+domain: seo
+description: SEO 优化链（交互式，输入商品文本 → 分析+关键词策略+文案生成）
+input:
+  model: SeoOptimizeInput
+steps:
+  - worker: seo_optimize

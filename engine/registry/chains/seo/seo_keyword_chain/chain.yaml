@@ -1,0 +1,10 @@
+# seo_keyword_chain 链声明（详设-v0.5 §6.2；批 3 新增）
+# 交互式关键词研究链：keyword_research 单步（纯代码，eHunt API 竞品画像 + CDP 逐词指标）
+# 链完成 → 消费者 seo.report（POST /api/biz/seo/metrics 落 keyword_metric 表）
+id: seo_keyword_chain
+domain: seo
+description: SEO 关键词研究链（交互式，输入关键词 → 竞品画像 + 逐词指标）
+input:
+  model: KeywordResearchInput
+steps:
+  - worker: keyword_research

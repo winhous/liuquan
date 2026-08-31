@@ -26,6 +26,12 @@ models:
   DemoProposeInput:
     version: 1
     hash: 20185638483658f3a2d26f96c9a0ac76921586f42c89a115ae6e98511fd36f02
+  HealthcheckInput:
+    version: 1
+    hash: ccd21185ef1c94b543b8cb90408dec1a4feda8bb1cad49e019329867e0a54669
+  HealthcheckResult:
+    version: 1
+    hash: fd2c53a1ef54a3fc5cecdc89340c9f330cbf49f575e038a396e367cd19dd5ebf
   IntentInput:
     version: 1
     hash: bee836328347f34c95276e6f36e6f16d8c4867a957c7ad1a881b2130915c9607
@@ -55,7 +61,7 @@ models:
     hash: 5694e2f07c794eeaf1735b514446adc783f601eaf5a1705fc17c3cc121339d24
   SeoOptimizeInput:
     version: 1
-    hash: ec072d041e90e3349009390a7172408a47d1802e380a5bb74f4f59e029271161
+    hash: 750632383b41f37e06441be8e0810a754ffeb5a8d4f2794808fa7bcef1a2cacf
   SnapshotUpdateInput:
     version: 1
     hash: a4aedb0d719f434025aa72aba6e39252179c5dee6e32fe62b538065fbd8eebe7

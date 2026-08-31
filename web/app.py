@@ -91,6 +91,27 @@ CHAIN_INPUTS: dict[str, dict[str, Any]] = {
             {"name": "text", "label": "输入文本", "type": "text", "required": True},
         ]
     },
+    "seo_keyword_chain": {
+        "fields": [
+            {"name": "keywords", "label": "关键词（逗号分隔，最多 8 个）", "type": "text", "required": True},
+            {"name": "page_size", "label": "每页商品数", "type": "number", "required": False},
+        ]
+    },
+    "seo_optimize_chain": {
+        "fields": [
+            {"name": "title", "label": "商品标题", "type": "text", "required": False},
+            {"name": "tags", "label": "标签（逗号分隔）", "type": "text", "required": False},
+            {"name": "description", "label": "商品描述", "type": "textarea", "required": False},
+            {"name": "target_keywords", "label": "目标关键词（逗号分隔）", "type": "text", "required": False},
+            {"name": "playbook_key", "label": "Playbook", "type": "select", "required": False,
+             "options": ["", "wall_art", "digital", "jewelry", "clothing", "home_candle", "personalized", "general"]},
+        ]
+    },
+    "seo_healthcheck_chain": {
+        "fields": [
+            {"name": "keywords", "label": "体检关键词（逗号分隔，留空读设置）", "type": "text", "required": False},
+        ]
+    },
 }
 
 # 链 id -> 中文展示名（用户复核反馈：触发面板链名称改中文）。
@@ -100,6 +121,9 @@ CHAIN_LABELS: dict[str, str] = {
     "tm_demo_chain": "任务提案演示链",
     "demo_echo_chain": "回声冒烟链",
     "crm_translate_chain": "翻译雏形链",
+    "seo_keyword_chain": "关键词研究链",
+    "seo_optimize_chain": "SEO 优化链",
+    "seo_healthcheck_chain": "listing 体检链",
 }
 
 # 状态操作 -> 完成提示语（msg 展示）
@@ -1420,7 +1444,7 @@ def create_app(
 
     @app.post("/seo/keywords")
     async def seo_keywords_research(request: Request):
-        """关键词研究接口（HTMX 局部刷新）。"""
+        """关键词研究接口（HTMX 局部刷新，照 crm 粘贴链模式）。"""
         if not request.cookies.get("role"):
             return RedirectResponse("/login", status_code=303)
         form = await request.form()
@@ -1437,20 +1461,47 @@ def create_app(
         if len(keywords) > 8:
             keywords = keywords[:8]
 
-        # 调用引擎触发 keyword_research 工序（异步）
+        # 调用引擎 create_task 触发 seo_keyword_chain → 轮询 → 展示结果
         try:
-            # 这里应该调用引擎接口触发工序，但本批先做页面展示
-            # 实际实现需要 engineapi client 触发链
-            keyword_data = {
-                "source": "ehunt-api",
-                "keywords": {},
-                "quota": None,
-                "metrics_note": "本批占位：实际实现需要触发 keyword_research 工序",
-            }
-            return request.app.state.templates.TemplateResponse(
-                request, "seo/keywords.html",
-                {**_ctx(request, "seo-keywords"), "keyword_data": keyword_data}
-            )
+            async with EngineAPIClient() as engine_client:
+                created = await engine_client.create_task(
+                    "seo_keyword_chain",
+                    {"keywords": keywords, "page_size": page_size},
+                    "运营",
+                )
+                task_id = created["task_id"]
+
+                # 轮询引擎任务状态（最多 60s）
+                import asyncio
+                keyword_data = None
+                for _ in range(60):
+                    await asyncio.sleep(1)
+                    task = await engine_client.get_task(str(task_id))
+                    status = task.get("status", "")
+                    if status == "done":
+                        # 从 steps_output 取 keyword_research 产出
+                        steps_output = task.get("steps_output", {})
+                        if steps_output:
+                            last_step = steps_output.get("keyword_research", {})
+                            if last_step:
+                                keyword_data = last_step
+                        break
+                    elif status in ("failed", "paused"):
+                        return request.app.state.templates.TemplateResponse(
+                            request, "seo/keywords.html",
+                            {**_ctx(request, "seo-keywords"), "error": f"调研失败：{task.get('error', '任务失败')}"}
+                        )
+
+                if keyword_data:
+                    return request.app.state.templates.TemplateResponse(
+                        request, "seo/keywords.html",
+                        {**_ctx(request, "seo-keywords"), "keyword_data": keyword_data}
+                    )
+                else:
+                    return request.app.state.templates.TemplateResponse(
+                        request, "seo/keywords.html",
+                        {**_ctx(request, "seo-keywords"), "error": "调研超时或无结果"}
+                    )
         except Exception as exc:
             return request.app.state.templates.TemplateResponse(
                 request, "seo/keywords.html",
@@ -1468,7 +1519,7 @@ def create_app(
 
     @app.post("/seo/optimize")
     async def seo_optimize_action(request: Request):
-        """SEO 优化接口（HTMX 局部刷新）。"""
+        """SEO 优化接口（HTMX 局部刷新，照 crm 粘贴链模式）。"""
         if not request.cookies.get("role"):
             return RedirectResponse("/login", status_code=303)
         form = await request.form()
@@ -1487,19 +1538,48 @@ def create_app(
         tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
         target_keywords = [k.strip() for k in target_keywords_str.split(",") if k.strip()] if target_keywords_str else None
 
-        # 调用引擎触发 seo_optimize 工序（异步）
+        # 调用引擎 create_task 触发 seo_optimize_chain → 轮询 → 展示报告
         try:
-            # 这里应该调用引擎接口触发工序，但本批先做页面展示
-            # 实际实现需要 engineapi client 触发链
-            from models.workers import SeoOptimizationReport, SeoProductText
-            report = SeoOptimizationReport(
-                original=SeoProductText(title=title, tags=tags, description=description),
-                note="本批占位：实际实现需要触发 seo_optimize 工序",
-            )
-            return request.app.state.templates.TemplateResponse(
-                request, "seo/optimize.html",
-                {**_ctx(request, "seo-optimize"), "report": report}
-            )
+            product_text = {"title": title, "tags": tags, "description": description}
+            chain_input = {"product_text": product_text}
+            if target_keywords:
+                chain_input["target_keywords"] = target_keywords
+            if playbook_key:
+                chain_input["playbook_key"] = playbook_key
+
+            async with EngineAPIClient() as engine_client:
+                created = await engine_client.create_task(
+                    "seo_optimize_chain", chain_input, "运营",
+                )
+                task_id = created["task_id"]
+
+                import asyncio
+                report = None
+                for _ in range(120):  # SEO 优化 LLM 工序可能较慢，等 120s
+                    await asyncio.sleep(1)
+                    task = await engine_client.get_task(str(task_id))
+                    status = task.get("status", "")
+                    if status == "done":
+                        steps_output = task.get("steps_output", {})
+                        if steps_output:
+                            report = steps_output.get("seo_optimize", {})
+                        break
+                    elif status in ("failed", "paused"):
+                        return request.app.state.templates.TemplateResponse(
+                            request, "seo/optimize.html",
+                            {**_ctx(request, "seo-optimize"), "error": f"优化失败：{task.get('error', '任务失败')}"}
+                        )
+
+                if report:
+                    return request.app.state.templates.TemplateResponse(
+                        request, "seo/optimize.html",
+                        {**_ctx(request, "seo-optimize"), "report": report}
+                    )
+                else:
+                    return request.app.state.templates.TemplateResponse(
+                        request, "seo/optimize.html",
+                        {**_ctx(request, "seo-optimize"), "error": "优化超时或无结果"}
+                    )
         except Exception as exc:
             return request.app.state.templates.TemplateResponse(
                 request, "seo/optimize.html",
@@ -1545,15 +1625,30 @@ def create_app(
 
     @app.post("/seo/healthcheck/run")
     async def seo_healthcheck_run(request: Request):
-        """listing 体检立即运行（HTMX 局部刷新）。"""
+        """listing 体检立即运行（HTMX 局部刷新，照定时页立即运行模式）。"""
         if not request.cookies.get("role"):
             return RedirectResponse("/login", status_code=303)
 
-        # 调用引擎触发 seo_healthcheck_chain（异步）
         try:
-            # 这里应该调用引擎接口触发链，但本批先做页面展示
-            # 实际实现需要 engineapi client 触发链
-            return "<div class='alert alert-success'>体检已触发（本批占位）</div>"
+            async with EngineAPIClient() as engine_client:
+                # 先查 seo_healthcheck_chain 种子 schedule id
+                schedules = await engine_client.list_schedules()
+                hc_schedule = None
+                for s in schedules:
+                    if s.get("chain_id") == "seo_healthcheck_chain":
+                        hc_schedule = s
+                        break
+
+                if hc_schedule:
+                    # 立即运行种子 schedule
+                    await engine_client.run_schedule(hc_schedule["id"])
+                    return "<div class='alert alert-success'>体检已触发（定时链立即运行）</div>"
+                else:
+                    # 种子不存在，直接 create_task
+                    created = await engine_client.create_task(
+                        "seo_healthcheck_chain", {"keywords": []}, "运营",
+                    )
+                    return "<div class='alert alert-success'>体检已触发（直接创建任务）</div>"
         except Exception as exc:
             return f"<div class='alert alert-danger'>体检失败：{exc}</div>"
 

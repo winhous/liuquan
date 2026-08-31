@@ -84,14 +84,16 @@ class TestRegistryCheck:
         assert rc == 0
         assert "[L4]" not in out
         assert "0 违规" in out
-        # 清单随声明：v0.5 批 2 后工序 11（+keyword_research/+seo_optimize）、
-        # 链 7、provider 5（+seo_metric_history）、事件 1、Action 4
-        for label in ("工序 11", "链 7", "Context provider 5", "事件 1", "Action 4"):
+        # 清单随声明：v0.5 批 3 后工序 12（+listing_healthcheck）、
+        # 链 10（+seo_keyword_chain/+seo_optimize_chain/+seo_healthcheck_chain）、
+        # provider 5、事件 1、Action 7（+seo.report/+seo.optimize/+seo.healthcheck）
+        for label in ("工序 12", "链 10", "Context provider 5", "事件 1", "Action 7"):
             assert label in out, f"清单应包含 {label}"
         assert "demo_echo" in out and "crm_translate" in out and "demo_propose" in out
         assert "chat_translate" in out and "tm_intent" in out
-        assert "keyword_research" in out and "seo_optimize" in out
+        assert "keyword_research" in out and "seo_optimize" in out and "listing_healthcheck" in out
         assert "crm_chat_chain" in out and "tm_intent_chain" in out
+        assert "seo_keyword_chain" in out and "seo_optimize_chain" in out and "seo_healthcheck_chain" in out
         assert "tm_demo_chain" in out and "tm.proposal" in out
         assert "crm.candidate" in out
 

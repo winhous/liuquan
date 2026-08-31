@@ -73,6 +73,7 @@ __all__ = [
     "SeoOptimizationReport",
     "SeoProductText",
     "HealthcheckInput",
+    "HealthcheckItem",
     "HealthcheckResult",
 ]
 
@@ -480,15 +481,16 @@ class SeoProductText(BaseModel):
 
 
 class SeoOptimizeInput(BaseModel):
-    """seo_optimize 工序入参 / seo_optimize_chain 链入参（详设-v0.5 §6.1）。
+    """seo_optimize 工序入参 / seo_optimize_chain 链入参（详设-v0.5 §6.1；批 3 修订）。
 
-    product_text: 商品当前文本信息（title/tags/description）
+    product_text: 商品当前文本信息（title/tags/description），可空（无商品文案时
+    模型只输出关键词策略建议；交互式优化页仍传完整文案）
     image_path: 可选图片路径（vision 补全理解，本批不接 vision）
     target_keywords: 可选目标关键词（来自 keyword_research 输出）
     playbook_key: 可选 playbooks 键（wall_art/digital/jewelry/clothing/home_candle/personalized/general）
     """
 
-    product_text: SeoProductText
+    product_text: SeoProductText | None = None
     image_path: str | None = None  # vision 图片理解待批 4/5 接入
     target_keywords: list[str] | None = None
     playbook_key: str | None = None
@@ -527,17 +529,33 @@ class HealthcheckInput(BaseModel):
     date: str | None = None  # YYYY-MM-DD 格式
 
 
-class HealthcheckResult(BaseModel):
-    """listing_healthcheck 工序输出（详设-v0.5 §6.1）。
+class HealthcheckItem(BaseModel):
+    """体检单项：单个关键词的变化/稳定状态。"""
 
-    changed: 变化项（product_num 升降/均价波动）
+    keyword: str
+    product_num: int | None = None
+    prev_product_num: int | None = None
+    delta_pct: float | None = None
+    direction: str = ""  # improved / degraded / stable
+
+
+class HealthcheckResult(BaseModel):
+    """listing_healthcheck 工序输出（详设-v0.5 §6.1；批 3 修订）。
+
+    changed: 变化项（product_num 下降超阈值）
+    improved: 提升项（product_num 上升超阈值）
     stable: 稳定项
-    metrics_written: 本次写入的指标数
+    metrics: 逐词当前指标快照（keyword -> {product_num, avg_price_top, quota}）
+    quota: eHunt 配额回显
+    note: 降级/说明信息
     """
 
-    changed: list[dict[str, Any]] = Field(default_factory=list)
-    stable: list[dict[str, Any]] = Field(default_factory=list)
-    metrics_written: int = 0
+    changed: list[HealthcheckItem] = Field(default_factory=list)
+    improved: list[HealthcheckItem] = Field(default_factory=list)
+    stable: list[HealthcheckItem] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    quota: dict[str, Any] | None = None
+    note: str | None = None
 
 
 # 重建所有使用 Any 类型的 Model（from __future__ import annotations 导致延迟求值）

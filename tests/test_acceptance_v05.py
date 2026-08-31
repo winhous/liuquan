@@ -315,3 +315,138 @@ def test_connector_registry() -> None:
     assert result.ok is False
     assert result.note == "测试降级"
     assert result.data is None
+
+
+# ==== A49：listing 体检变化 → 提案落 tm.task_proposal ===
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a49_healthcheck_changed_proposes_task(biz_engine) -> None:
+    """A49：listing 体检：keyword_metric 两次数据（product_num 下降超阈值）
+    → 优化建议提案（domain=seo）落 tm.task_proposal。
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from engine.actions.seo_healthcheck_proposal import consume_seo_healthcheck
+
+    # 构造 fake BizApiClient
+    class _FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        async def post(self, path, payload):
+            self.calls.append((path, payload))
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {"ok": True, "id": 1}
+            return resp
+
+    client = _FakeClient()
+    data = {
+        "changed": [
+            {"keyword": "flower art", "product_num": 50, "prev_product_num": 100, "delta_pct": -50.0, "direction": "degraded"},
+        ],
+        "improved": [],
+        "stable": [],
+        "metrics": {"flower art": {"product_num": 50}},
+        "quota": None,
+    }
+
+    # 注入 registry + whitelist
+    from engine.registry import load_registry
+    from pathlib import Path
+    REPO = Path(__file__).resolve().parents[1]
+    try:
+        registry = load_registry(REPO)
+    except Exception:
+        registry = None
+
+    outcome = await consume_seo_healthcheck(
+        data, biz_client=client, registry=registry, whitelist={"flower art"},
+    )
+    # 应该有 metrics 落库 + 提案落库
+    assert len(client.calls) >= 2
+    # 第二个调用是 /tm/proposals（提案）
+    proposal_call = [c for c in client.calls if c[0] == "/tm/proposals"]
+    assert len(proposal_call) == 1
+    proposal_payload = proposal_call[0][1]
+    assert proposal_payload["domain"] == "seo"
+    assert "SEO 体检" in proposal_payload["title"]
+    assert "flower art" in proposal_payload["title"]
+
+
+# ==== A50：eHunt 配额透传落 keyword_metric.quota ===
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a50_quota_transparent_in_keyword_metric() -> None:
+    """A50：eHunt 配额记账：connector 透传服务端 quota 回显 → keyword_metric.quota 落库。"""
+    from unittest.mock import MagicMock as _MagicMock
+
+    from engine.actions.seo_report import consume_seo_report
+
+    class _FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        async def post(self, path, payload):
+            self.calls.append((path, payload))
+            resp = _MagicMock()
+            resp.status_code = 200
+            return resp
+
+    client = _FakeClient()
+    data = {
+        "source": "ehunt-api",
+        "keywords": {"kw1": {"product_num": 100, "avg_price_top": 25.0}},
+        "quota": {"used_today": 5, "remaining_today": 195},
+    }
+    await consume_seo_report(data, biz_client=client)
+
+    assert len(client.calls) == 1
+    payload = client.calls[0][1]
+    assert payload["quota"] == {"used_today": 5, "remaining_today": 195}
+    assert payload["keyword"] == "kw1"
+
+
+# ==== A55：seo_healthcheck_chain 种子可见 + 立即运行 ===
+
+
+@pytest.mark.version_acceptance
+def test_a55_healthcheck_chain_in_labels_and_inputs() -> None:
+    """A55：seo_healthcheck_chain 在 CHAIN_LABELS 和 CHAIN_INPUTS 中可见。"""
+    from web.app import CHAIN_INPUTS, CHAIN_LABELS
+
+    assert "seo_healthcheck_chain" in CHAIN_LABELS
+    assert CHAIN_LABELS["seo_healthcheck_chain"] == "listing 体检链"
+    assert "seo_healthcheck_chain" in CHAIN_INPUTS
+
+
+@pytest.mark.version_acceptance
+def test_a55_keyword_and_optimize_chains_registered() -> None:
+    """A55：seo_keyword_chain 和 seo_optimize_chain 在 CHAIN_LABELS 和 CHAIN_INPUTS 中可见。"""
+    from web.app import CHAIN_INPUTS, CHAIN_LABELS
+
+    assert "seo_keyword_chain" in CHAIN_LABELS
+    assert "seo_optimize_chain" in CHAIN_LABELS
+    assert "seo_keyword_chain" in CHAIN_INPUTS
+    assert "seo_optimize_chain" in CHAIN_INPUTS
+
+
+@pytest.mark.version_acceptance
+def test_a55_healthcheck_chain_seed_schedule() -> None:
+    """A55：seo_healthcheck_chain 种子在 ensure_seed_schedules 中注册。"""
+    # 验证 ensure_seed_schedules 包含 seo_healthcheck_chain
+    import inspect
+    from engine.core.db import ensure_seed_schedules
+
+    source = inspect.getsource(ensure_seed_schedules)
+    assert "seo_healthcheck_chain" in source, "ensure_seed_schedules 应包含 seo_healthcheck_chain 种子"
+
+
+# ==== regression: A46/A52/A53 已有测试（无需重复） ====
+# A46: test_a46_nav_seo_children_scrape_first
+# A52: test_a52_scrape_storage_dir_setting
+# A53: test_a53_model_settings_and_engine_params

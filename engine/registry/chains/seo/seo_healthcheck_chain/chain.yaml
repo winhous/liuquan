@@ -1,0 +1,11 @@
+# seo_healthcheck_chain 链声明（详设-v0.5 §6.2；批 3 修订：纯代码两步）
+# 定时体检链（种子 cron 0 8 * * *）：
+# listing_healthcheck（纯代码，拉取+变化检测）→ 链完成消费者 seo.healthcheck
+# （纯代码模板转提案，零 token；深度优化留给 seo_optimize_chain）
+id: seo_healthcheck_chain
+domain: seo
+description: SEO listing 体检链（定时，拉取当前指标 + 变化检测 + 模板提案）
+input:
+  model: HealthcheckInput
+steps:
+  - worker: listing_healthcheck

@@ -1,0 +1,8 @@
+# listing_healthcheck 工序配置（详设-v0.5 §6.1；批 3，R10 规格外置）
+# 业务规格值只许住这里，不许字面量进 run.py（lint P1 词表自动生成来源）
+
+# product_num 变化阈值（百分比）：超过此阈值判定为 changed/improved
+delta_pct: 20
+
+# 均价变化阈值（百分比）：超过此阈值判定为 changed/improved
+avg_price_delta_pct: 20

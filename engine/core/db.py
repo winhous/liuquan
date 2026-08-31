@@ -735,17 +735,32 @@ async def mark_schedule_run(
 
 
 async def ensure_seed_schedules(engine: AsyncEngine) -> None:
-    """幂等种子：schedule 表为空时插入 crm_reminder_chain（详设 §5）；非空不插。"""
+    """幂等种子：per-chain_id 幂等（chain_id 不存在才插；批 3 修订）。
+
+    v0.4 行为不变：表空时插 crm_reminder_chain。
+    v0.5 批 3：改为 per-chain 幂等（chain_id 不存在才插，老库非空也能补新链）。
+    新增种子：seo_healthcheck_chain（name「listing 体检」，cron 0 8 * * *，enabled true）。
+    """
+    # 获取已存在的 chain_id 列表
     async with _sessions(engine)() as session:
-        count = (await session.execute(select(func.count(Schedule.id)))).scalar_one()
-    if count == 0:
-        await create_schedule(
-            engine,
-            chain_id="crm_reminder_chain",
-            name="CRM 未跟进提醒",
-            cron="0 7 * * *",
-            enabled=True,
-        )
+        existing_rows = (
+            await session.execute(select(Schedule.chain_id))
+        ).scalars().all()
+    existing = set(existing_rows)
+
+    seeds = [
+        ("crm_reminder_chain", "CRM 未跟进提醒", "0 7 * * *", True),
+        ("seo_healthcheck_chain", "listing 体检", "0 8 * * *", True),
+    ]
+    for chain_id, name, cron, enabled in seeds:
+        if chain_id not in existing:
+            await create_schedule(
+                engine,
+                chain_id=chain_id,
+                name=name,
+                cron=cron,
+                enabled=enabled,
+            )
 
 
 def next_run_time(cron: str, after: datetime) -> datetime:

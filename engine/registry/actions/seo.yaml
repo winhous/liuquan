@@ -1,0 +1,22 @@
+# seo 域 Action 登记（详设-v0.5 §6.4；批 3 新增）
+# seo.report：keyword_research 产出 KeywordData → 落 keyword_metric 表
+# seo.optimize：seo_optimize 产出 SeoOptimizationReport → 转提案（TaskProposal → tm.task_proposal）
+# seo.healthcheck：listing_healthcheck 产出 HealthcheckResult → 落 metric + 模板转提案
+
+- action_id: seo.report
+  domain: seo
+  risk: read
+  output_model: KeywordData
+  target: tm.proposal
+
+- action_id: seo.optimize
+  domain: seo
+  risk: suggest
+  output_model: SeoOptimizationReport
+  target: tm.proposal
+
+- action_id: seo.healthcheck
+  domain: seo
+  risk: suggest
+  output_model: HealthcheckResult
+  target: tm.proposal

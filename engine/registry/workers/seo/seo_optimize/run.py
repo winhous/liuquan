@@ -6,7 +6,7 @@ LLM 工序（worker.yaml 的 reason: llm，model: default）：
 LLM 网关用刘全 PydanticAI output_type + re-ask（worker.yaml 声明 output model，
 runner REASON 相位自动校验，工序 run() 拿 llm_output 做归一化组装——不要在 run.py 里直调 LLM，R4）。
 
-归一化 = 纯 Python 硬约束（≤20 字符×13 标签、≤140×5 标题、≤13 材质、≤250 alt）。
+归一化 = 纯 Python 硬约束（标签/标题/材质/alt 上限在 config 可改，R10 规格外置）。
 
 注意：image_path 字段保留可选但本批不接 vision（注释标注「vision 图片理解待批 4/5 接入」，
 纯文字三段，与广成现状一致）。
@@ -96,9 +96,14 @@ def _normalize_report(llm_output: dict[str, Any], inputs: SeoOptimizeInput) -> S
     )
 
 
-def _normalize_tags(tags: list[str]) -> list[str]:
-    """标签归一化（照广成 _normalize_tags 逻辑）：去 #、空白折叠、截断 20 字符、
-    大小写不敏感去重、上限 13。"""
+def _normalize_tags(
+    tags: list[str],
+    *,
+    max_tag_length: int = 20,
+    max_tags: int = 13,
+) -> list[str]:
+    """标签归一化（照广成 _normalize_tags 逻辑）：去 #、空白折叠、截断、
+    大小写不敏感去重、上限。阈值可注入（R10 规格外置，默认值在签名）。"""
     seen: set[str] = set()
     result: list[str] = []
     for tag in tags:
@@ -106,14 +111,14 @@ def _normalize_tags(tags: list[str]) -> list[str]:
         t = str(tag).strip().lstrip("#").strip()
         if not t:
             continue
-        # 截断 20 字符
-        t = t[:20]
+        # 截断
+        t = t[:max_tag_length]
         # 大小写不敏感去重
         key = t.lower()
         if key in seen:
             continue
         seen.add(key)
         result.append(t)
-        if len(result) >= 13:
+        if len(result) >= max_tags:
             break
     return result

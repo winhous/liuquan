@@ -15,6 +15,9 @@ from __future__ import annotations
 
 from .crm_candidate import consume_todo_candidates
 from .schedule_reminder import consume_schedule_reminder
+from .seo_healthcheck_proposal import consume_seo_healthcheck
+from .seo_proposal import consume_seo_proposal
+from .seo_report import consume_seo_report
 from .tm_proposal import (
     ConsumeOutcome,
     Consumer,
@@ -28,12 +31,18 @@ __all__ = [
     "consume_task_proposal",
     "consume_todo_candidates",
     "consume_schedule_reminder",
+    "consume_seo_healthcheck",
+    "consume_seo_proposal",
+    "consume_seo_report",
 ]
 
 # action_id -> 消费者（v0.2 tm.proposal；v0.3 + crm.candidate，决策 19；
-# v0.4 + tm.schedule，详设 §10.3；loader L10 target 白名单扩展）
+# v0.4 + tm.schedule，详设 §10.3；v0.5 批 3 + seo.report/seo.optimize/seo.healthcheck）
 CONSUMERS: dict[str, Consumer] = {
     "tm.proposal": consume_task_proposal,
     "crm.candidate": consume_todo_candidates,
     "tm.schedule": consume_schedule_reminder,
+    "seo.report": consume_seo_report,
+    "seo.optimize": consume_seo_proposal,
+    "seo.healthcheck": consume_seo_healthcheck,
 }
