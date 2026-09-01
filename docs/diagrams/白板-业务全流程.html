@@ -49,7 +49,7 @@
 <body>
 <header>
   <h1>🖍 刘全业务流程白板</h1>
-  <span class="sub">讨论中逐步绘制 · 已确认：①素材采集 ②图片处理与图挂卖法</span>
+  <span class="sub">讨论中逐步绘制 · 已确认：①素材采集 ②图挂(SKU×店铺) ③上架必引系统内SKU</span>
   <div id="toolbar">
     <span id="speed">速度：中</span>
     <button id="btnPlay" class="primary">▶ 从头播放绘制过程</button>
@@ -65,7 +65,7 @@
 // ============ 白板数据（每确认一个点，往这里加）============
 const PHASES = [
   { id:"p1", title:"① 素材采集", x:40, y:60, w:940, h:560, color:"#2e7d32" },
-  { id:"p2", title:"② 图片处理 → 图挂卖法", x:1060, y:60, w:1480, h:560, color:"#1565c0" },
+  { id:"p2", title:"② 图片处理 → 图挂 SKU×店铺", x:1060, y:60, w:1480, h:560, color:"#1565c0" },
 ];
 
 const NODES = [
@@ -80,17 +80,17 @@ const NODES = [
     label:"COMFYUI 处理<br/>换背景/去水印/修图/生成<br/>（大部分图走这里）" },
   { id:"n-direct", type:"plain",x:760, y:360, w:240, h:86,  badge:"5",
     label:"不经过 COMFYUI<br/>直接用原图<br/>（一部分图）" },
-  // ---- ② 图片处理 → 可用商品图 → 图挂卖法（新增）----
+  // ---- ② 图片处理 → 可用商品图 → 图挂 SKU×店铺（新增）----
   { id:"n-usable", type:"pool", x:1100, y:250, w:250, h:86,  badge:"6",
     label:"可用商品图池<br/>处理后的图 + 直接用的图<br/>汇合" },
-  { id:"n-saleA",  type:"sale", x:1500, y:110, w:280, h:86,  badge:"7",
-    label:"卖法：单卖打火机<br/>挂打火机的图<br/>（多角度）" },
-  { id:"n-saleB",  type:"sale", x:1500, y:260, w:280, h:86,  badge:"8",
-    label:"卖法：单卖烟<br/>挂烟的图<br/>（多角度）" },
-  { id:"n-saleAB", type:"sale", x:1500, y:410, w:280, h:86,  badge:"9",
-    label:"卖法：套餐 打火机+烟<br/>挂套餐图<br/>（拼图或专门拍）" },
-  { id:"n-rule",   type:"rule", x:1960, y:250, w:520, h:110, badge:"★",
-    label:"关键规则：一图一卖法<br/>一张图只属于一个卖法（多角度除外）<br/>多主体图要分别售卖 → 先拆/补图<br/>套餐图只属于套餐卖法，不属于单品" },
+  { id:"n-saleA",  type:"sale", x:1500, y:100, w:300, h:92,  badge:"7",
+    label:"SKU-打火机 × 店铺A<br/>→ 一套图（主图/轮播/详情）<br/>店铺A的打火机图集" },
+  { id:"n-saleB",  type:"sale", x:1500, y:250, w:300, h:92,  badge:"8",
+    label:"SKU-打火机 × 店铺B<br/>→ 另一套图<br/>（同商品，店铺B风格）" },
+  { id:"n-saleAB", type:"sale", x:1500, y:400, w:300, h:92,  badge:"9",
+    label:"套餐(打火机+烟) × 店铺A<br/>→ 套餐图（拼图或专门拍）<br/>属于套餐卖法×店铺A" },
+  { id:"n-rule",   type:"rule", x:1930, y:250, w:560, h:110, badge:"★",
+    label:"关键规则：一套图 = 1 SKU × 1 店铺<br/>同一商品跨店各用各的图（风格/定位差异）<br/>店铺=通用实体（Etsy/闲鱼/未来平台无区别）<br/>系统里没有的 SKU 禁止上架" },
 ];
 
 const EDGES = [
@@ -99,12 +99,12 @@ const EDGES = [
   { id:"e2", from:"n-camera", to:"n-pool",  label:"" },
   { id:"e3", from:"n-pool",   to:"n-comfy", label:"大部分" },
   { id:"e4", from:"n-pool",   to:"n-direct",label:"一部分" },
-  // ---- ② 图片处理 → 图挂卖法 ----
+  // ---- ② 图片处理 → 图挂 SKU×店铺 ----
   { id:"e5", from:"n-comfy",  to:"n-usable", label:"处理后的图" },
   { id:"e6", from:"n-direct", to:"n-usable", label:"原图" },
-  { id:"e7", from:"n-usable", to:"n-saleA",  label:"打火机的图" },
-  { id:"e8", from:"n-usable", to:"n-saleB",  label:"烟的图" },
-  { id:"e9", from:"n-usable", to:"n-saleAB", label:"套餐图(拼/拍)" },
+  { id:"e7", from:"n-usable", to:"n-saleA",  label:"打火机×店A" },
+  { id:"e8", from:"n-usable", to:"n-saleB",  label:"打火机×店B" },
+  { id:"e9", from:"n-usable", to:"n-saleAB", label:"套餐×店A" },
 ];
 
 // ============ 渲染引擎 ============
