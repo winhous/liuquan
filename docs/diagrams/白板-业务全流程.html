@@ -31,7 +31,8 @@
   .pool { background:#fff3e0; border-color:#e65100; } .pool .badge{background:#e65100;}
   .imgp { background:#f3e5f5; border-color:#6a1b9a; } .imgp .badge{background:#6a1b9a;}
   .plain{ background:#fce4ec; border-color:#c62828; } .plain .badge{background:#c62828;}
-  .deco { background:#e3f2fd; border-color:#1565c0; } .deco .badge{background:#1565c0;}
+  .sale { background:#e3f2fd; border-color:#1565c0; } .sale .badge{background:#1565c0;}
+  .rule { background:#fffde7; border-color:#f9a825; border-style:dashed; } .rule .badge{background:#f9a825;}
   /* 连线 */
   svg.overlay { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
   .edge { opacity:0; }
@@ -48,7 +49,7 @@
 <body>
 <header>
   <h1>🖍 刘全业务流程白板</h1>
-  <span class="sub">讨论中逐步绘制 · 当前已确认：①素材采集</span>
+  <span class="sub">讨论中逐步绘制 · 已确认：①素材采集 ②图片处理与图挂卖法</span>
   <div id="toolbar">
     <span id="speed">速度：中</span>
     <button id="btnPlay" class="primary">▶ 从头播放绘制过程</button>
@@ -62,30 +63,48 @@
 
 <script>
 // ============ 白板数据（每确认一个点，往这里加）============
-// type: src=来源 pool=素材库 imgp=图片处理 plain=不经处理 deco=其他
-// edges: from/to = 节点 id；label = 连线说明
 const PHASES = [
-  { id:"p1", title:"① 素材采集", x:40, y:60, w:900, h:520, color:"#2e7d32" },
+  { id:"p1", title:"① 素材采集", x:40, y:60, w:940, h:560, color:"#2e7d32" },
+  { id:"p2", title:"② 图片处理 → 图挂卖法", x:1060, y:60, w:1480, h:560, color:"#1565c0" },
 ];
 
 const NODES = [
+  // ---- ① 素材采集（已确认）----
   { id:"n-grab",   type:"src",  x:90,  y:170, w:230, h:76,  badge:"1",
     label:"扒图<br/>填链接（小红书/闲鱼）<br/>图+标题/标签/作者" },
   { id:"n-camera", type:"src",  x:90,  y:330, w:230, h:76,  badge:"2",
     label:"相机拍摄<br/>自己拍的实拍图<br/>（无链接无标题）" },
-  { id:"n-pool",   type:"pool", x:420, y:250, w:230, h:76,  badge:"3",
+  { id:"n-pool",   type:"pool", x:430, y:250, w:230, h:76,  badge:"3",
     label:"素材<br/>两类图汇合" },
-  { id:"n-comfy",  type:"imgp", x:750, y:150, w:250, h:86,  badge:"4",
+  { id:"n-comfy",  type:"imgp", x:760, y:150, w:240, h:86,  badge:"4",
     label:"COMFYUI 处理<br/>换背景/去水印/修图/生成<br/>（大部分图走这里）" },
-  { id:"n-direct", type:"plain",x:750, y:360, w:250, h:86,  badge:"5",
+  { id:"n-direct", type:"plain",x:760, y:360, w:240, h:86,  badge:"5",
     label:"不经过 COMFYUI<br/>直接用原图<br/>（一部分图）" },
+  // ---- ② 图片处理 → 可用商品图 → 图挂卖法（新增）----
+  { id:"n-usable", type:"pool", x:1100, y:250, w:250, h:86,  badge:"6",
+    label:"可用商品图池<br/>处理后的图 + 直接用的图<br/>汇合" },
+  { id:"n-saleA",  type:"sale", x:1500, y:110, w:280, h:86,  badge:"7",
+    label:"卖法：单卖打火机<br/>挂打火机的图<br/>（多角度）" },
+  { id:"n-saleB",  type:"sale", x:1500, y:260, w:280, h:86,  badge:"8",
+    label:"卖法：单卖烟<br/>挂烟的图<br/>（多角度）" },
+  { id:"n-saleAB", type:"sale", x:1500, y:410, w:280, h:86,  badge:"9",
+    label:"卖法：套餐 打火机+烟<br/>挂套餐图<br/>（拼图或专门拍）" },
+  { id:"n-rule",   type:"rule", x:1960, y:250, w:520, h:110, badge:"★",
+    label:"关键规则：一图一卖法<br/>一张图只属于一个卖法（多角度除外）<br/>多主体图要分别售卖 → 先拆/补图<br/>套餐图只属于套餐卖法，不属于单品" },
 ];
 
 const EDGES = [
+  // ---- ① 素材采集 ----
   { id:"e1", from:"n-grab",   to:"n-pool",  label:"" },
   { id:"e2", from:"n-camera", to:"n-pool",  label:"" },
   { id:"e3", from:"n-pool",   to:"n-comfy", label:"大部分" },
   { id:"e4", from:"n-pool",   to:"n-direct",label:"一部分" },
+  // ---- ② 图片处理 → 图挂卖法 ----
+  { id:"e5", from:"n-comfy",  to:"n-usable", label:"处理后的图" },
+  { id:"e6", from:"n-direct", to:"n-usable", label:"原图" },
+  { id:"e7", from:"n-usable", to:"n-saleA",  label:"打火机的图" },
+  { id:"e8", from:"n-usable", to:"n-saleB",  label:"烟的图" },
+  { id:"e9", from:"n-usable", to:"n-saleAB", label:"套餐图(拼/拍)" },
 ];
 
 // ============ 渲染引擎 ============
@@ -120,9 +139,6 @@ function addNode(n) {
   order.push({ kind:"node", els:[d] });
 }
 
-function center(from, to) {
-  return { x:(from.x+from.w/2+to.x+to.w/2)/2, y:(from.y+from.h/2+to.y+to.h/2)/2 };
-}
 function anchor(n, side) {
   if (side==="r") return { x:n.x+n.w, y:n.y+n.h/2 };
   if (side==="l") return { x:n.x,     y:n.y+n.h/2 };
@@ -133,7 +149,6 @@ function anchor(n, side) {
 function addEdge(e) {
   const N = Object.fromEntries(NODES.map(n=>[n.id,n]));
   const a = N[e.from], b = N[e.to];
-  // 判断方向：a 在 b 左边 → 右出左入；否则上/下
   const aRight = a.x + a.w, bRight = b.x + b.w;
   let p1, p2;
   if (aRight <= b.x) { p1 = anchor(a,"r"); p2 = anchor(b,"l"); }
@@ -141,7 +156,6 @@ function addEdge(e) {
   else if (a.y + a.h <= b.y) { p1 = anchor(a,"b"); p2 = anchor(b,"t"); }
   else { p1 = anchor(a,"t"); p2 = anchor(b,"b"); }
   const mid = { x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2 };
-  // 贝塞尔曲线（水平走向中段偏移）
   const dx = Math.abs(p2.x-p1.x), dy = Math.abs(p2.y-p1.y);
   let c1, c2;
   if (dx > dy) {
@@ -159,7 +173,6 @@ function addEdge(e) {
   path.setAttribute("class","edge-path");
   path.setAttribute("d", `M${p1.x},${p1.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${p2.x},${p2.y}`);
   g.appendChild(path);
-  // 箭头
   const ang = Math.atan2(p2.y-c2.y, p2.x-c2.x);
   const arr = document.createElementNS("http://www.w3.org/2000/svg","polygon");
   const s=9, w=4.5;
@@ -179,15 +192,9 @@ function addEdge(e) {
   order.push({ kind:"edge", els:[g] });
 }
 
-// 建图
 PHASES.forEach(addPhase);
 NODES.forEach(addNode);
 EDGES.forEach(addEdge);
-
-// 连线起点/终点补丁（节点有 padding，手动微调个别线）
-function refreshEdges() {
-  // 已在 addEdge 时按 NODES 坐标计算；节点坐标即 NODES 定义值，一致。
-}
 
 // ============ 播放 ============
 let playing = false, timer = null, step = 0;
@@ -218,7 +225,6 @@ function play() {
 }
 
 document.getElementById("btnPlay").addEventListener("click", () => {
-  // 重置
   order.forEach(it => it.els.forEach(x => x.classList.remove("show")));
   step = 0; play();
 });
@@ -229,7 +235,6 @@ document.getElementById("btnFast").addEventListener("click", () => {
   speed = "fast"; document.getElementById("speed").textContent = "速度：快";
 });
 
-// 自动播放一次（让用户看到绘制过程）
 play();
 </script>
 </body>
