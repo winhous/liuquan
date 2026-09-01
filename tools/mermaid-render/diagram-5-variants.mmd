@@ -1,0 +1,55 @@
+flowchart TB
+    %% ===== 变体组合：A、B、A+B 的关系 =====
+    classDef sku fill:#fff3e0,stroke:#e65100,color:#bf360c
+    classDef single fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    classDef combo fill:#fce4ec,stroke:#c62828,color:#b71c1c
+    classDef seo fill:#fff8e1,stroke:#f9a825,color:#795548
+    classDef list fill:#e0f7fa,stroke:#00838f,color:#006064
+
+    subgraph IN["🏭 已有商品（每个有自己的 SKU）"]
+        direction LR
+        SA[SKU-A<br/>商品A] 
+        SB[SKU-B<br/>商品B]
+        SC[SKU-C<br/>商品C]
+    end
+
+    subgraph MODE["🧩 三种卖法（自由组合）"]
+        direction TB
+        M1["单卖 A<br/>独立 Listing"]
+        M2["单卖 B<br/>独立 Listing"]
+        M3["套餐 A+B<br/>组合 Listing<br/>（可再叠加 C…）"]
+    end
+
+    subgraph SEO["📝 SEO 优化（每个可售单元都做）"]
+        direction LR
+        SEO1["A 的 SEO<br/>标题/描述/标签"]
+        SEO2["B 的 SEO<br/>标题/描述/标签"]
+        SEO3["A+B 套餐的 SEO<br/>标题/描述/标签<br/>（突出套餐价值）"]
+    end
+
+    subgraph UP["🚀 上架"]
+        direction LR
+        UP1[上架 A]
+        UP2[上架 B]
+        UP3[上架 A+B 套餐]
+    end
+
+    SA --> M1
+    SB --> M2
+    SA --> M3
+    SB --> M3
+    SC --> M3
+
+    M1 --> SEO1
+    M2 --> SEO2
+    M3 --> SEO3
+
+    SEO1 --> UP1
+    SEO2 --> UP2
+    SEO3 --> UP3
+
+    class SA,SB,SC sku
+    class M1,M2 single
+    class M3 combo
+    class SEO1,SEO2,SEO3 seo
+    class UP1,UP2,UP3 list

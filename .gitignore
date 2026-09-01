@@ -18,3 +18,6 @@ tests/.pgdata/
 # XHS-Downloader vendor（186MB，从广成 studio/vendor/XHS-Downloader 部署时复制，
 # 见 docs/部署-v0.5-外部依赖.md）
 vendor/
+tools/mermaid-render/node_modules/
+tools/mermaid-render/package.json
+tools/mermaid-render/package-lock.json

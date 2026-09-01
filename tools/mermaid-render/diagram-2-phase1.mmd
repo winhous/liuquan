@@ -1,0 +1,47 @@
+flowchart TB
+    %% ===== 阶段 1：入口与队列（本次先做） =====
+    classDef user fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    classDef lq fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef timer fill:#fff8e1,stroke:#f9a825,color:#795548
+    classDef ext fill:#f3e5f5,stroke:#6a1b9a,color:#4a148c
+    classDef warn fill:#fce4ec,stroke:#c62828,color:#b71c1c
+
+    subgraph P["📄 扒图页面（用户视角）"]
+        direction LR
+        P1[输入框：粘贴链接<br/>一行一个] --> P2[按钮：立即扒]
+        P1 --> P3[按钮：加入定时队列]
+        P2 --> P4[结果区：下载中…完成，N 张图]
+        P3 --> P5[列表：待扒队列<br/>链接/状态/时间]
+    end
+
+    subgraph IMM["⚡ 立即扒这条路"]
+        direction TB
+        I1[提交链接] --> I2[下载链启动]
+        I2 --> I3{小红书 or 闲鱼?}
+        I3 -->|小红书| I4[XHS 下载器<br/>图+标题+标签+作者]
+        I3 -->|闲鱼| I5[闲鱼下载器<br/>图+标题+卖家]
+        I4 --> I6[图片体检<br/>分辨率/水印]
+        I5 --> I6
+        I6 --> I7[落素材库<br/>建链接记录+存图]
+        I7 --> I8[回显页面<br/>✓ 完成]
+    end
+
+    subgraph TIM["⏰ 定时扒这条路"]
+        direction TB
+        T1[链接存进待扒队列<br/>scrape.link_queue] --> T2[设置：定时时间<br/>scrape.schedule_time<br/>默认 08:00]
+        T2 --> T3[到点自动触发<br/>批量扒]
+        T3 --> T4[走下载链<br/>同上]
+        T4 --> T5[新增记录进素材库<br/>结果通知]
+    end
+
+    P2 --> IMM
+    P3 --> TIM
+    IMM --> R1[素材库：链接记录列表<br/>一链接一条]
+    TIM --> R1
+    R1 --> R2[点开看：全部图+元数据<br/>可勾选导出图包]
+    R2 --> R3[后续：选品建议/SEO 初稿<br/>（阶段 3）]
+
+    class P1,P2,P3,P4,P5 user
+    class I1,I2,I3,I4,I5,I6,I7,I8,R1,R2,R3 lq
+    class T1,T2,T3,T4,T5 timer
+    class I4,I5 ext

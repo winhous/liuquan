@@ -1,0 +1,47 @@
+flowchart LR
+    %% ===== 全景图：扒图在整条业务链里的位置 =====
+    classDef user fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    classDef liuquan fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef erp fill:#fff3e0,stroke:#e65100,color:#bf360c
+    classDef external fill:#f3e5f5,stroke:#6a1b9a,color:#4a148c
+    classDef timer fill:#fff8e1,stroke:#f9a825,color:#795548
+
+    subgraph U["👤 用户（选品岗）"]
+        direction TB
+        U1[闲鱼/小红书看中商品<br/>复制链接]
+    end
+
+    subgraph LQ["🏠 刘全系统（扒图 + AI）"]
+        direction TB
+        L1[扒图页<br/>粘贴链接] --> L2{"立即扒 or 定时扒?"}
+        L2 -->|立即| L3[下载链：下载→体检→落库]
+        L2 -->|定时| L4[待扒队列<br/>到点自动扒]
+        L3 --> L5[素材库<br/>一个链接=一条记录<br/>图+元数据+状态]
+        L4 --> L3
+        L5 --> L6[选品建议 / SEO 标题初稿<br/>（AI 生成）]
+        L6 --> L7[任务中心提案<br/>人批准/驳回]
+    end
+
+    subgraph E["📦 ERP 系统（三工作台 v3）"]
+        direction TB
+        E1[选品卡<br/>查重/换背景/建档]
+        E2[上架任务单<br/>→ Etsy]
+    end
+
+    subgraph S["🌐 外部源"]
+        direction TB
+        S1[小红书 XHS]
+        S2[闲鱼]
+    end
+
+    U1 --> L1
+    S1 --> L3
+    S2 --> L3
+    L7 -->|批准| E1
+    L5 -->|图包人工导出| E1
+    E1 --> E2
+
+    class U user
+    class L1,L2,L3,L4,L5,L6,L7 liuquan
+    class E1,E2 erp
+    class S1,S2 external

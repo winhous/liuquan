@@ -1,0 +1,34 @@
+flowchart LR
+    %% ===== 数据模型：素材库 =====
+    classDef core fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef child fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    classDef meta fill:#fff3e0,stroke:#e65100,color:#bf360c
+    classDef status fill:#fff8e1,stroke:#f9a825,color:#795548
+
+    subgraph DB["🗂️ 素材库（一个链接 = 一条记录）"]
+        direction LR
+        LINK["📌 链接记录<br/>（主记录）<br/>━━━━━━━━━━<br/>url：商品链接<br/>来源：小红书/闲鱼/通用<br/>状态：扒中/完成/失败<br/>图片数：N 张<br/>批次：batch_id<br/>落盘路径：…<br/>创建时间：…"]
+        IMG["🖼️ 图片（挂链接）<br/>一条链接 N 张图<br/>━━━━━━━━━━<br/>第几张/主图/详情图<br/>宽×高<br/>水印：有/无<br/>文件路径"]
+        META["📝 元数据<br/>━━━━━━━━━━<br/>标题<br/>标签<br/>作者/卖家<br/>描述<br/>（能读到就存，<br/>读不到标注降级）"]
+        LINK -->|1 : N| IMG
+        LINK -->|1 : 1| META
+    end
+
+    subgraph SET["⚙️ 设置项（进设置页）"]
+        SET1[定时扒默认时间<br/>scrape.schedule_time<br/>默认 08:00]
+        SET2[存储目录<br/>scrape.storage_dir<br/>本地路径]
+    end
+
+    subgraph OUT["📤 导出"]
+        OUT1[图包导出<br/>图+元数据清单<br/>供选品卡人工使用]
+    end
+
+    LINK --> OUT1
+    SET1 -.->|定时触发| LINK
+    SET2 -.->|决定存哪| IMG
+
+    class LINK core
+    class IMG child
+    class META meta
+    class SET1,SET2 status
+    class OUT1 child

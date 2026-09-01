@@ -1,0 +1,70 @@
+flowchart TB
+    %% ===== 端到端：填链接 → 扒图 → COMFYUI → SKU → 变体 → SEO → 上架 =====
+    classDef src fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    classDef grab fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef img fill:#f3e5f5,stroke:#6a1b9a,color:#4a148c
+    classDef sku fill:#fff3e0,stroke:#e65100,color:#bf360c
+    classDef combo fill:#fce4ec,stroke:#c62828,color:#b71c1c
+    classDef seo fill:#fff8e1,stroke:#f9a825,color:#795548
+    classDef list fill:#e0f7fa,stroke:#00838f,color:#006064
+
+    subgraph S1["① 素材采集"]
+        direction LR
+        A1[填链接<br/>小红书/闲鱼] --> A2[扒图<br/>图 + 标题/标签/作者]
+        A3[相机拍摄<br/>自己的实拍图] 
+        A2 --> A4[(素材库<br/>统一存所有图)]
+        A3 --> A4
+    end
+
+    subgraph S2["② 图片处理（COMFYUI）"]
+        direction LR
+        B1[素材库的图<br/>扒图的 + 相机拍的] --> B2[COMFYUI 处理<br/>换背景 / 去水印<br/>修图 / 生成图]
+        B2 --> B3[(处理后的商品图<br/>可用图池)]
+    end
+
+    subgraph S3["③ 生成 SKU"]
+        direction LR
+        C1[处理后的商品图<br/>+ 商品信息] --> C2[生成 SKU<br/>一个商品 = 一个 SKU]
+        C2 --> C3[SKU-A 商品A<br/>SKU-B 商品B<br/>SKU-C 商品C …]
+    end
+
+    subgraph S4["④ 自由组成变体（核心）"]
+        direction LR
+        D1[SKU-A] --> D2[单卖：A]
+        D1 --> D3[组合：A+B 套餐]
+        D1 --> D4[组合：A+B+C …]
+        D2 --> D5[可售单元列表<br/>A 单卖<br/>B 单卖<br/>A+B 套餐<br/>…]
+        D3 --> D5
+        D4 --> D5
+    end
+
+    subgraph S5["⑤ SEO 优化（每个可售单元都要做）"]
+        direction LR
+        E1[可售单元 A] --> E2[SEO：标题/描述/标签]
+        E3[可售单元 B] --> E4[SEO：标题/描述/标签]
+        E5[可售单元 A+B 套餐] --> E6[SEO：标题/描述/标签]
+        E2 --> E7[(优化后的内容<br/>每个单元一套)]
+        E4 --> E7
+        E6 --> E7
+    end
+
+    subgraph S6["⑥ 上架"]
+        direction LR
+        F1[可售单元 A] --> F2[上架 Etsy]
+        F3[可售单元 B] --> F4[上架 Etsy]
+        F5[可售单元 A+B] --> F6[上架 Etsy]
+    end
+
+    A4 --> B1
+    B3 --> C1
+    C3 --> D1
+    E7 --> F1
+    E7 --> F3
+    E7 --> F5
+
+    class A1,A2,A3 src
+    class A4,B1,B2,B3 grab
+    class C1,C2,C3 img
+    class D1,D2,D3,D4,D5 sku
+    class E1,E2,E3,E4,E5,E6,E7 combo
+    class F1,F2,F3,F4,F5,F6 seo

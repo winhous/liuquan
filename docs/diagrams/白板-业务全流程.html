@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>刘全业务流程白板（讨论中逐步绘制）</title>
+<style>
+  :root { --ink:#1a2b4d; --line:#5b6b8c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Noto Sans CJK SC","Microsoft YaHei",sans-serif; background:#f4f6fb; color:var(--ink); }
+  header { position:sticky; top:0; z-index:10; background:#fff; border-bottom:2px solid #dfe6f2; padding:10px 20px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:17px; margin:0; font-weight:700; }
+  header .sub { font-size:12px; color:#7a8aa8; }
+  #toolbar { margin-left:auto; display:flex; gap:8px; align-items:center; }
+  button { font:inherit; font-size:13px; padding:6px 14px; border:1px solid #c3cfe4; border-radius:6px; background:#fff; cursor:pointer; }
+  button:hover { background:#eef3fc; }
+  button.primary { background:#1565c0; color:#fff; border-color:#1565c0; }
+  button.primary:hover { background:#0d47a1; }
+  #speed { font-size:12px; color:#7a8aa8; }
+  #stage { overflow:auto; height:calc(100vh - 52px); }
+  #canvas { position:relative; width:2600px; height:1500px; background:#fff;
+    background-image:radial-gradient(circle,#e7ecf5 1px,transparent 1px); background-size:24px 24px; }
+  /* 节点 */
+  .node { position:absolute; width:230px; min-height:66px; border-radius:10px; padding:10px 12px;
+    font-size:13px; line-height:1.5; display:flex; align-items:center; justify-content:center; text-align:center;
+    border:2px solid; box-shadow:0 2px 6px rgba(26,43,77,.08); opacity:0; }
+  .node .badge { position:absolute; top:-9px; left:-9px; width:22px; height:22px; border-radius:50%;
+    color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .node.show { opacity:1; transition:opacity .6s ease; }
+  /* 类型配色 */
+  .src  { background:#e8f5e9; border-color:#2e7d32; } .src .badge{background:#2e7d32;}
+  .pool { background:#fff3e0; border-color:#e65100; } .pool .badge{background:#e65100;}
+  .imgp { background:#f3e5f5; border-color:#6a1b9a; } .imgp .badge{background:#6a1b9a;}
+  .plain{ background:#fce4ec; border-color:#c62828; } .plain .badge{background:#c62828;}
+  .deco { background:#e3f2fd; border-color:#1565c0; } .deco .badge{background:#1565c0;}
+  /* 连线 */
+  svg.overlay { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
+  .edge { opacity:0; }
+  .edge.show { opacity:1; transition:opacity .5s ease; }
+  .edge-path { stroke:var(--line); stroke-width:2; fill:none; }
+  .edge-label { font-size:12px; fill:#7a8aa8; }
+  /* 阶段标题 */
+  .phase-title { position:absolute; font-size:16px; font-weight:700; opacity:0; }
+  .phase-title.show { opacity:1; transition:opacity .6s ease; }
+  .phase-box { position:absolute; border:2px dashed #c3cfe4; border-radius:14px; opacity:0; }
+  .phase-box.show { opacity:1; transition:opacity .6s ease; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🖍 刘全业务流程白板</h1>
+  <span class="sub">讨论中逐步绘制 · 当前已确认：①素材采集</span>
+  <div id="toolbar">
+    <span id="speed">速度：中</span>
+    <button id="btnPlay" class="primary">▶ 从头播放绘制过程</button>
+    <button id="btnSlow">慢速</button>
+    <button id="btnFast">快速</button>
+  </div>
+</header>
+<div id="stage"><div id="canvas">
+  <svg class="overlay" id="svgOverlay"></svg>
+</div></div>
+
+<script>
+// ============ 白板数据（每确认一个点，往这里加）============
+// type: src=来源 pool=素材库 imgp=图片处理 plain=不经处理 deco=其他
+// edges: from/to = 节点 id；label = 连线说明
+const PHASES = [
+  { id:"p1", title:"① 素材采集", x:40, y:60, w:900, h:520, color:"#2e7d32" },
+];
+
+const NODES = [
+  { id:"n-grab",   type:"src",  x:90,  y:170, w:230, h:76,  badge:"1",
+    label:"扒图<br/>填链接（小红书/闲鱼）<br/>图+标题/标签/作者" },
+  { id:"n-camera", type:"src",  x:90,  y:330, w:230, h:76,  badge:"2",
+    label:"相机拍摄<br/>自己拍的实拍图<br/>（无链接无标题）" },
+  { id:"n-pool",   type:"pool", x:420, y:250, w:230, h:76,  badge:"3",
+    label:"素材<br/>两类图汇合" },
+  { id:"n-comfy",  type:"imgp", x:750, y:150, w:250, h:86,  badge:"4",
+    label:"COMFYUI 处理<br/>换背景/去水印/修图/生成<br/>（大部分图走这里）" },
+  { id:"n-direct", type:"plain",x:750, y:360, w:250, h:86,  badge:"5",
+    label:"不经过 COMFYUI<br/>直接用原图<br/>（一部分图）" },
+];
+
+const EDGES = [
+  { id:"e1", from:"n-grab",   to:"n-pool",  label:"" },
+  { id:"e2", from:"n-camera", to:"n-pool",  label:"" },
+  { id:"e3", from:"n-pool",   to:"n-comfy", label:"大部分" },
+  { id:"e4", from:"n-pool",   to:"n-direct",label:"一部分" },
+];
+
+// ============ 渲染引擎 ============
+const canvas = document.getElementById("canvas");
+const svg = document.getElementById("svgOverlay");
+const order = []; // 绘制顺序：阶段框 → 节点 → 连线
+
+function el(tag, cls, html) {
+  const d = document.createElement(tag);
+  if (cls) d.className = cls;
+  if (html !== undefined) d.innerHTML = html;
+  return d;
+}
+
+function addPhase(p) {
+  const box = el("div","phase-box");
+  box.style.cssText = `left:${p.x}px;top:${p.y}px;width:${p.w}px;height:${p.h}px;border-color:${p.color};`;
+  canvas.appendChild(box);
+  const t = el("div","phase-title");
+  t.style.cssText = `left:${p.x+14}px;top:${p.y+10}px;color:${p.color};`;
+  t.textContent = p.title;
+  canvas.appendChild(t);
+  order.push({ kind:"phase", els:[box, t] });
+}
+
+function addNode(n) {
+  const d = el("div","node " + n.type);
+  d.id = n.id;
+  d.style.cssText = `left:${n.x}px;top:${n.y}px;width:${n.w}px;min-height:${n.h}px;`;
+  d.innerHTML = `<span class="badge">${n.badge}</span>${n.label}`;
+  canvas.appendChild(d);
+  order.push({ kind:"node", els:[d] });
+}
+
+function center(from, to) {
+  return { x:(from.x+from.w/2+to.x+to.w/2)/2, y:(from.y+from.h/2+to.y+to.h/2)/2 };
+}
+function anchor(n, side) {
+  if (side==="r") return { x:n.x+n.w, y:n.y+n.h/2 };
+  if (side==="l") return { x:n.x,     y:n.y+n.h/2 };
+  if (side==="b") return { x:n.x+n.w/2, y:n.y+n.h };
+  return { x:n.x+n.w/2, y:n.y };
+}
+
+function addEdge(e) {
+  const N = Object.fromEntries(NODES.map(n=>[n.id,n]));
+  const a = N[e.from], b = N[e.to];
+  // 判断方向：a 在 b 左边 → 右出左入；否则上/下
+  const aRight = a.x + a.w, bRight = b.x + b.w;
+  let p1, p2;
+  if (aRight <= b.x) { p1 = anchor(a,"r"); p2 = anchor(b,"l"); }
+  else if (bRight <= a.x) { p1 = anchor(a,"l"); p2 = anchor(b,"r"); }
+  else if (a.y + a.h <= b.y) { p1 = anchor(a,"b"); p2 = anchor(b,"t"); }
+  else { p1 = anchor(a,"t"); p2 = anchor(b,"b"); }
+  const mid = { x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2 };
+  // 贝塞尔曲线（水平走向中段偏移）
+  const dx = Math.abs(p2.x-p1.x), dy = Math.abs(p2.y-p1.y);
+  let c1, c2;
+  if (dx > dy) {
+    const off = Math.max(30, Math.min(80, dx*0.35));
+    c1 = { x:p1.x + (p2.x>p1.x?off:-off), y:p1.y };
+    c2 = { x:p2.x + (p2.x>p1.x?-off:off), y:p2.y };
+  } else {
+    const off = Math.max(30, Math.min(80, dy*0.35));
+    c1 = { x:p1.x, y:p1.y + (p2.y>p1.y?off:-off) };
+    c2 = { x:p2.x, y:p2.y + (p2.y>p1.y?-off:off) };
+  }
+  const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+  g.setAttribute("class","edge"); g.id = e.id;
+  const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+  path.setAttribute("class","edge-path");
+  path.setAttribute("d", `M${p1.x},${p1.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${p2.x},${p2.y}`);
+  g.appendChild(path);
+  // 箭头
+  const ang = Math.atan2(p2.y-c2.y, p2.x-c2.x);
+  const arr = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+  const s=9, w=4.5;
+  arr.setAttribute("points",
+    `${p2.x},${p2.y} ${p2.x-s*Math.cos(ang)-w*Math.sin(ang)},${p2.y-s*Math.sin(ang)+w*Math.cos(ang)} ${p2.x-s*Math.cos(ang)+w*Math.sin(ang)},${p2.y-s*Math.sin(ang)-w*Math.cos(ang)}`);
+  arr.setAttribute("fill","#5b6b8c");
+  g.appendChild(arr);
+  if (e.label) {
+    const t = document.createElementNS("http://www.w3.org/2000/svg","text");
+    t.setAttribute("class","edge-label");
+    t.setAttribute("x", mid.x); t.setAttribute("y", mid.y-6);
+    t.setAttribute("text-anchor","middle");
+    t.textContent = e.label;
+    g.appendChild(t);
+  }
+  svg.appendChild(g);
+  order.push({ kind:"edge", els:[g] });
+}
+
+// 建图
+PHASES.forEach(addPhase);
+NODES.forEach(addNode);
+EDGES.forEach(addEdge);
+
+// 连线起点/终点补丁（节点有 padding，手动微调个别线）
+function refreshEdges() {
+  // 已在 addEdge 时按 NODES 坐标计算；节点坐标即 NODES 定义值，一致。
+}
+
+// ============ 播放 ============
+let playing = false, timer = null, step = 0;
+const speedBase = { slow: 900, mid: 450, fast: 150 };
+let speed = "mid";
+
+function showStep(i) {
+  const item = order[i];
+  if (!item) return;
+  item.els.forEach(x => x.classList.add("show"));
+}
+
+function play() {
+  if (playing) return;
+  playing = true;
+  document.getElementById("btnPlay").disabled = true;
+  step = 0;
+  showStep(step++);
+  timer = setInterval(() => {
+    if (step >= order.length) {
+      clearInterval(timer); playing = false;
+      document.getElementById("btnPlay").disabled = false;
+      document.getElementById("btnPlay").textContent = "↻ 重新播放";
+      return;
+    }
+    showStep(step++);
+  }, speedBase[speed]);
+}
+
+document.getElementById("btnPlay").addEventListener("click", () => {
+  // 重置
+  order.forEach(it => it.els.forEach(x => x.classList.remove("show")));
+  step = 0; play();
+});
+document.getElementById("btnSlow").addEventListener("click", () => {
+  speed = "slow"; document.getElementById("speed").textContent = "速度：慢";
+});
+document.getElementById("btnFast").addEventListener("click", () => {
+  speed = "fast"; document.getElementById("speed").textContent = "速度：快";
+});
+
+// 自动播放一次（让用户看到绘制过程）
+play();
+</script>
+</body>
+</html>
