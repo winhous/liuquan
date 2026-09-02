@@ -113,5 +113,6 @@ def _read_env(key: str, required: bool = False) -> str | None:
 from engine.connectors import ehunt_api  # noqa: E402
 from engine.connectors import ehunt_keyword  # noqa: E402
 from engine.connectors import http_image  # noqa: E402
+from engine.connectors import quark  # noqa: E402  # v0.6 批 7：夸克网盘（上传/登录状态探测，真跑才碰 subprocess）
 from engine.connectors import xhs  # noqa: E402
 from engine.connectors import xianyu  # noqa: E402

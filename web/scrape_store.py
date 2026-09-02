@@ -567,8 +567,14 @@ async def update_link(
         sets.append("netdisk_url = :netdisk_url")
         params["netdisk_url"] = netdisk_url
     if netdisk_uploaded_at is not _UNSET:
+        # 引擎侧经 JSON 传 ISO 字符串（asyncpg 绑定 TIMESTAMPTZ 需 datetime 对象）
+        raw_at = netdisk_uploaded_at
+        if isinstance(raw_at, str):
+            from datetime import datetime as _dt
+
+            raw_at = _dt.fromisoformat(raw_at)
         sets.append("netdisk_uploaded_at = :netdisk_uploaded_at")
-        params["netdisk_uploaded_at"] = netdisk_uploaded_at
+        params["netdisk_uploaded_at"] = raw_at
 
     if not sets:
         link = await get_link_by_id(link_id)
@@ -596,6 +602,42 @@ def _settings_store() -> Any:
     from web.settings_store import SettingsStore
 
     return SettingsStore(get_engine())
+
+
+async def rewrite_link_meta_netdisk(
+    link: dict[str, Any],
+    storage_root: str,
+    share_url: str,
+) -> bool:
+    """重写链接文件夹 meta.txt 的「网盘分享链接」行（批 7，详设 §15.2 技术定）。
+
+    上传成功后 PATCH handler 调本函数：按 link.storage_dir（相对路径）+ storage_root
+    （设置键 scrape.storage_dir）定位文件夹 → 逐行替换「网盘分享链接：…」为
+    share_url；meta.txt 缺失/无 storage_dir → 返回 False（不抛——文件同步是尽力而为）。
+    """
+    from pathlib import Path
+
+    rel = str(link.get("storage_dir") or "").strip()
+    share_url = str(share_url or "").strip()
+    if not rel or not share_url:
+        return False
+    folder = Path(str(storage_root)).resolve() / rel
+    meta = folder / "meta.txt"
+    if not meta.is_file():
+        return False
+    lines = meta.read_text(encoding="utf-8").splitlines()
+    replaced = False
+    out: list[str] = []
+    for line in lines:
+        if line.startswith("网盘分享链接："):
+            out.append(f"网盘分享链接：{share_url}")
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        out.append(f"网盘分享链接：{share_url}")
+    meta.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return True
 
 
 async def get_link_queue(settings: Any = None) -> list[str]:

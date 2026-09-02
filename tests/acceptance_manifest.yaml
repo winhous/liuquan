@@ -353,3 +353,19 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a69_link_folder_and_meta_txt"
     desc: "一链接一文件夹 + meta.txt（批 6）：下载链跑完 → 链接文件夹存在（含全部图片）+ meta.txt 内容齐全（标题/来源/原链接/作者ID/描述/标签/图片数/爬取时间 YYYY-MM-DD HH:MM:SS/批次/网盘分享链接行；作者缺失记「无」；降级 note 进备注行）"
+  # ---- 批 7（详设 §15.4）：夸克网盘上传 A70-A72（fake quark，真实授权延后 manual）----
+  - id: A70
+    version: v0.6
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a70_netdisk_upload_flow"
+    desc: "上传网盘 flow（批 7）：download 链跑完（fake connector 落盘 + fake quark connector 注入返回 share_url）→ upload_netdisk=true → 链完成消费者上传执行 → netdisk_status=uploaded + netdisk_url 回填 + meta.txt 网盘分享链接行更新为 share_url；upload_netdisk=false → netdisk_status=none 且零 quark 调用"
+  - id: A71
+    version: v0.6
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a71_netdisk_failure_note"
+    desc: "未授权/上传失败（批 7）：fake quark ok=False（-1408）→ netdisk_status=failed + error_note 含「夸克」登录提示 → 素材库读接口/列表页可见（上传失败徽章）"
+  - id: A72
+    version: v0.6
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a72_history_upload_entry"
+    desc: "历史补传入口（批 7）：素材库链接行「上传网盘」按钮 status=done 且未上传显示 / uploaded 隐藏（DOM/HTML 断言）+ POST /scrape/links/{id}/upload 置 pending 并 create_task(scrape_upload_chain, {link_ids:[id]})（mock 引擎客户端入参实锤）"

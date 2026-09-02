@@ -16,10 +16,11 @@
 
 <div class="row justify-content-center">
   <div class="col-md-8">
-    {# 三块独立提交（详设-v0.6 §3.2）：存储目录 / 定时默认时间 / 定时队列 #}
+    {# 独立提交块（详设-v0.6 §3.2 + §15.2）：存储目录 / 定时默认时间 / 定时队列 / 夸克登录 #}
     {% include "settings/_scrape_card.html" %}
     {% include "settings/_scrape_time_card.html" %}
     {% include "settings/_scrape_queue_card.html" %}
+    {% include "settings/_scrape_quark_card.html" %}
   </div>
 </div>
 {% endblock %}

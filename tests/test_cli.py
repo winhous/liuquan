@@ -88,8 +88,9 @@ class TestRegistryCheck:
         # 链 12（+crm_image_chain）、provider 7（+crm_message_images）、
         # 事件 1、Action 9（+crm.image）；
         # v0.6 批 4（+link_record_create/batch_image_download 工序、+scrape_download_chain
-        # 链、+scrape.link_context/scrape.link_queue provider、+scrape.download_done Action）
-        for label in ("工序 21", "链 13", "Context provider 9", "事件 1", "Action 10"):
+        # 链、+scrape.link_context/scrape.link_queue provider、+scrape.download_done Action）；
+        # v0.6 批 7（+link_netdisk_upload 工序、+scrape_upload_chain 链——夸克上传）
+        for label in ("工序 22", "链 14", "Context provider 9", "事件 1", "Action 10"):
             assert label in out, f"清单应包含 {label}"
         assert "demo_echo" in out and "crm_translate" in out and "demo_propose" in out
         assert "chat_translate" in out and "tm_intent" in out
@@ -99,6 +100,8 @@ class TestRegistryCheck:
         assert "crm_chat_chain" in out and "tm_intent_chain" in out
         assert "seo_keyword_chain" in out and "seo_optimize_chain" in out and "seo_healthcheck_chain" in out
         assert "scrape_suggest_chain" in out and "scrape_download_chain" in out
+        # v0.6 批 7（详设 §15.2）：补传链 + 上传工序（夸克网盘）
+        assert "scrape_upload_chain" in out and "link_netdisk_upload" in out
         assert "tm_demo_chain" in out and "tm.proposal" in out
         assert "crm.candidate" in out and "scrape.suggest" in out
         assert "scrape.download_done" in out

@@ -104,6 +104,9 @@ models:
   ScrapeBatchResult:
     version: 2
     hash: e03e29ec8bd8b24a3973081102df669123fac769adc41e02706b7d0ae78f1f3b
+  ScrapeUploadInput:
+    version: 1
+    hash: 7ae5a1c6eb8c159c2718d6ba89a73dfc2358336dcc76b1ce89b8e2d3ab252b0e
   SeoOptimizationReport:
     version: 1
     hash: 5694e2f07c794eeaf1735b514446adc783f601eaf5a1705fc17c3cc121339d24
@@ -128,3 +131,6 @@ models:
   TodoGenerateInput:
     version: 1
     hash: b652c1c83128ca4fc9c71e0d782e1210237d62da74619fb1a5b241db0f414918
+  UploadResult:
+    version: 1
+    hash: 845a5d245e2f9768ee80146ee3c22445101c3089c00672d195388c22272fc28a

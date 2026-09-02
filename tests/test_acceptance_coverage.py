@@ -37,7 +37,7 @@ def _build_full_manifest(
     overrides: {编号数字: 额外字段 dict}，用于覆盖默认值。
     """
     entries = []
-    for i in range(1, 70):  # A1-A69（批 6 起含 A69）
+    for i in range(1, 73):  # A1-A72（批 7 起含 A70-A72）
         aid = f"A{i}"
         if i in overrides:
             ov = overrides[i]

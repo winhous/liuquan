@@ -767,11 +767,23 @@ def create_biz_router(
 
     @router.patch("/scrape/links/{link_id}", dependencies=[Depends(_check_token)])
     async def update_scrape_link(link_id: int, payload: dict) -> dict:
-        """PATCH /api/biz/scrape/links/{id}：更新状态/图数/元数据/error_note/degraded_note。
+        """PATCH /api/biz/scrape/links/{id}：更新状态/图数/元数据/error_note/degraded_note
+        + netdisk 三列（批 7：netdisk_status/netdisk_url/netdisk_uploaded_at 回填）。
 
         batch_image_download 落链接终态（决策 26：写也走接口）。
+        批 7（详设 §15.2 技术定）：payload.netdisk_url 非空 → 同步重写该链接
+        本地文件夹 meta.txt 的「网盘分享链接」行（分享链接回填后本地留痕；
+        文件改写收敛在本写接口一处，引擎上传 helper 只回填 link_record 三列）。
         """
         from web import scrape_store
+
+        netdisk_kwargs: dict = {}
+        if "netdisk_status" in payload:
+            netdisk_kwargs["netdisk_status"] = payload["netdisk_status"]
+        if "netdisk_url" in payload:
+            netdisk_kwargs["netdisk_url"] = payload["netdisk_url"]
+        if "netdisk_uploaded_at" in payload:
+            netdisk_kwargs["netdisk_uploaded_at"] = payload["netdisk_uploaded_at"]
 
         updated = await scrape_store.update_link(
             link_id,
@@ -783,9 +795,27 @@ def create_biz_router(
             storage_dir=payload.get("storage_dir"),
             error_note=payload.get("error_note"),
             degraded_note=payload.get("degraded_note"),
+            **netdisk_kwargs,
         )
         if updated is None:
             raise HTTPException(status_code=404, detail="链接记录不存在")
+
+        # 批 7：上传成功（netdisk_url 非空）→ 同步本地文件夹 meta.txt 网盘行
+        if netdisk_kwargs.get("netdisk_url"):
+            from web.settings_store import SettingsStore
+
+            store = SettingsStore(_resolve_engine())
+            storage_root = await store.get(
+                "scrape.storage_dir", "/opt/liuquan/scrape/"
+            )
+            try:
+                await scrape_store.rewrite_link_meta_netdisk(
+                    updated, str(storage_root), str(netdisk_kwargs["netdisk_url"])
+                )
+            except Exception:  # noqa: BLE001 - 文件同步尽力而为，不阻断接口
+                logger.warning(
+                    "PATCH /scrape/links/%s: meta.txt 网盘行同步失败（忽略）", link_id
+                )
         return updated
 
     @router.post("/scrape/queue/clear", dependencies=[Depends(_check_token)])

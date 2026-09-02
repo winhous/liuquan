@@ -585,6 +585,11 @@ class QueueConsumer:
         elif batch_result is not None:
             # v0.6 §5.3：下载链消费者注入 task（读 task.input.from_queue/batch_id）
             kwargs["task"] = task
+            # v0.6 批 7（详设 §15.2）：下载链消费者还要拿 connectors（含 quark）+
+            # storage_dir（定位链接文件夹）执行夸克上传——从注入 runner 读取透传
+            # （runner 装配的 ctx.connectors 与扒图存储根同源，详见 §5.5/§15.1）
+            kwargs["connectors"] = getattr(self._runner, "connectors", None)
+            kwargs["storage_dir"] = getattr(self._runner, "storage_dir", None)
         try:
             payload = (
                 proposal if proposal is not None
@@ -748,10 +753,13 @@ _REMINDER_KEYS = frozenset({"reminders"})
 
 # ---- v0.6 §5.4：调度器 input 模板（T7，定时触发落地）----
 # 按 chain_id 构建定时/立即运行的任务 input：
-# - scrape_download_chain：{urls: [], batch_id: "sched-<ts>", from_queue: True}
+# - scrape_download_chain：{urls: [], batch_id: "sched-<ts>", from_queue: True,
+#   upload_netdisk: True}
 #   （定时扒：urls 显式空列表——链步骤 input 表达式 task.input.urls 缺键会解析失败
 #    （runner _path_get 引用路径不存在即抛，集成验收真跑实锤任务 failed），
-#    置空列表让表达式解析通过；urls 实际从定时队列读，链成功完成清队列，详设 §5.4）
+#    置空列表让表达式解析通过；urls 实际从定时队列读，链成功完成清队列，详设 §5.4。
+#    upload_netdisk=True 批 7（详设 §15.2）：定时扒默认同步上传夸克网盘，
+#    链完成消费者逐条上传回填——未来扒的都要传，用户拍板）
 # - 其余链（crm_reminder_chain / seo_healthcheck_chain）：{"trigger_date": 今天}
 #   行为不变（v0.4/v0.5 测试锁住）
 _SCHEDULE_INPUT_TEMPLATES: dict[str, Callable[[str], dict[str, Any]]] = {
@@ -759,6 +767,7 @@ _SCHEDULE_INPUT_TEMPLATES: dict[str, Callable[[str], dict[str, Any]]] = {
         "urls": [],
         "batch_id": f"sched-{ts}",
         "from_queue": True,
+        "upload_netdisk": True,
     },
 }
 

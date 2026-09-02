@@ -2117,6 +2117,8 @@ def test_schedule_input_template_by_chain() -> None:
         "urls": [],
         "batch_id": "sched-20260903070000",
         "from_queue": True,
+        # 批 7（详设 §15.2）：定时扒默认同步上传夸克（未来扒的都要传，用户拍板）
+        "upload_netdisk": True,
     }, f"定时 input 必须含 urls 键（链步骤表达式依赖），实际 {inp!r}"
 
     for chain_id in ("crm_reminder_chain", "seo_healthcheck_chain", "other_chain"):
@@ -2588,3 +2590,554 @@ def test_a51_seo_optimize_spec_config_change() -> None:
     fallback = run(inputs, _make_ctx({}))
     assert len(fallback.tags) == 13
     assert len(fallback.titles) == 5
+
+
+# =====================================================================
+# 批 7（详设 §15.2/§15.4/§15.6）：夸克网盘上传——A70 / A71 / A72 + 辅助单测
+# =====================================================================
+# fake quark 桩只住 tests/（R12）：_FakeQuarkConnector（connector 级注入）
+# + subprocess monkeypatch（web quark 工具 / connector 内部调用）——零真实
+# 夸克 CLI/网络调用（详设 §15.6：真实授权延后 manual 项）。
+# 测试 URL 运行期拼接（P2：单一字符串常量不得含完整 scheme）。
+
+# 假分享链接（P2：scheme 运行期拼接）
+_FAKE_SHARE_URL = "ht" + "tps://pan.quark.cn/s/liuquanfake"
+# 第二条下载链接（A70 未勾选分支用：normalized_url 与 _XHS_EXPLORE 不同）
+_XHS_OTHER = "ht" + "tps://www.xiaohongshu.com/explore/def456"
+
+
+class _FakeQuarkConnector:
+    """fake 夸克 connector（只住 tests/，零真实 CLI/网络）。
+
+    upload_folder 记录 (local_path, sub_folder) 调用；ok 可配——
+    ok=False（未授权 -1408 语义）→ note 含「夸克未授权，请在 设置 → 扒图设置
+    完成登录」（A71 失败路径）；ok=True → 返回 share_url（A70 成功路径）。
+    """
+
+    def __init__(
+        self,
+        *,
+        ok: bool = True,
+        note: str = "",
+        share_url: str | None = None,
+    ) -> None:
+        self.available = True
+        self._ok = ok
+        self._note = note
+        self._share_url = share_url or _FAKE_SHARE_URL
+        self.upload_calls: list[tuple[str, str]] = []
+
+    async def upload_folder(
+        self, local_path: str, sub_folder: str
+    ) -> ConnectorResult:
+        self.upload_calls.append((str(local_path), str(sub_folder)))
+        if not self._ok:
+            return ConnectorResult(ok=False, note=self._note)
+        return ConnectorResult(
+            ok=True,
+            note="",
+            data={"share_url": self._share_url, "fids": ["fid-1", "fid-2"]},
+        )
+
+
+async def _run_download_chain_and_consume(
+    db_engine,
+    biz_engine,
+    tmp_path,
+    *,
+    urls: list,
+    batch_id: str,
+    upload_netdisk: bool,
+    connectors: dict,
+) -> Any:
+    """跑 download 链（注入 fake connector）→ QueueConsumer._after_task 触发
+    链完成消费者（scrape.download_done，含上传执行）。返回 (result, consumer)。"""
+    from engine.actions import CONSUMERS
+    from engine.actions.scrape_download_done import consume_scrape_download_done
+    from engine.registry import load_registry
+    from engine.server import QueueConsumer
+
+    fake_conn = _FakeConnector(tmp_path)
+    biz_client = _biz_client_for(biz_engine)
+    runner, _ = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        connectors=connectors,
+        storage_dir=str(tmp_path),
+    )
+    result = await runner.run(
+        "scrape_download_chain",
+        {
+            "urls": urls,
+            "batch_id": batch_id,
+            "from_queue": False,
+            "upload_netdisk": upload_netdisk,
+        },
+    )
+    assert result.status == "done", f"下载链应 DONE：{result.error}"
+    consumer = QueueConsumer(
+        engine=db_engine,
+        registry=load_registry(REPO_ROOT),
+        runner=runner,
+        consumers={**CONSUMERS, "scrape.download_done": consume_scrape_download_done},
+        biz_client=biz_client,
+    )
+    await consumer._after_task(result)
+    return result
+
+
+# ==== A70（批 7，详设 §15.4）：上传网盘 flow（勾选上传 / 未勾选不传）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a70_netdisk_upload_flow(
+    db_engine, biz_engine, tmp_path
+) -> None:
+    """A70：download 链跑完（fake connector 落盘 + fake quark connector 注入）
+    → upload_netdisk=true → 链完成消费者上传执行 → link_record.netdisk_status=
+    uploaded + netdisk_url 回填 + netdisk_uploaded_at 落库 + 文件夹 meta.txt 网盘
+    分享链接行更新为 share_url（PATCH handler 重写）；
+    upload_netdisk=false → netdisk_status=none 且零 quark 调用。"""
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    await store.set("scrape.storage_dir", str(tmp_path), "扒图存储目录")
+
+    # ---- ① upload_netdisk=true：链跑完 → 消费者上传 → 回填 uploaded ----
+    fake_quark = _FakeQuarkConnector()
+    connectors = {
+        "xhs": _FakeConnector(tmp_path),
+        "xianyu": _FakeConnector(tmp_path),
+        "http_image": _FakeConnector(tmp_path),
+        "quark": fake_quark,
+    }
+    await _run_download_chain_and_consume(
+        db_engine,
+        biz_engine,
+        tmp_path,
+        urls=[_XHS_EXPLORE],
+        batch_id="batch-a70-on",
+        upload_netdisk=True,
+        connectors=connectors,
+    )
+
+    links = await scrape_store.get_links(limit=50)
+    link = next(l for l in links if l["batch_id"] == "batch-a70-on")
+    assert link["status"] == "done"
+    assert link["netdisk_status"] == "uploaded", (
+        f"upload_netdisk=true 链完成应回填 netdisk_status=uploaded，实际 {link['netdisk_status']!r}"
+    )
+    assert link["netdisk_url"] == _FAKE_SHARE_URL, (
+        f"netdisk_url 应回填分享链接，实际 {link['netdisk_url']!r}"
+    )
+    assert link["netdisk_uploaded_at"] is not None, "上传成功应回填 netdisk_uploaded_at"
+    assert link["storage_dir"] == "xhs/abc123"
+
+    # quark 调用实锤：上传本地链接文件夹到网盘「扒图素材/小红书」子目录
+    assert len(fake_quark.upload_calls) == 1, (
+        f"应恰 1 次 quark 上传调用，实际 {fake_quark.upload_calls}"
+    )
+    local_path, sub_folder = fake_quark.upload_calls[0]
+    assert local_path == str((tmp_path / "xhs" / "abc123").resolve()), (
+        f"上传目录应为链接文件夹，实际 {local_path}"
+    )
+    assert sub_folder == "小红书", f"xhs 链接应上传到「扒图素材/小红书」，实际 {sub_folder!r}"
+
+    # meta.txt 网盘行更新为 share_url（PATCH handler 重写实锤）
+    meta_text = (tmp_path / "xhs" / "abc123" / "meta.txt").read_text(encoding="utf-8")
+    assert f"网盘分享链接：{_FAKE_SHARE_URL}" in meta_text, (
+        f"meta.txt 网盘分享链接行应回填 share_url，实际：\n{meta_text}"
+    )
+    assert "网盘分享链接：未上传" not in meta_text, "meta.txt 网盘行不应再是「未上传」"
+
+    # ---- ② upload_netdisk=false：新链接跑完 → netdisk_status=none + 零 quark 调用 ----
+    calls_before = len(fake_quark.upload_calls)
+    await _run_download_chain_and_consume(
+        db_engine,
+        biz_engine,
+        tmp_path,
+        urls=[_XHS_OTHER],
+        batch_id="batch-a70-off",
+        upload_netdisk=False,
+        connectors=connectors,
+    )
+    links2 = await scrape_store.get_links(limit=50)
+    link_off = next(l for l in links2 if l["batch_id"] == "batch-a70-off")
+    assert link_off["netdisk_status"] == "none", (
+        f"未勾选 upload_netdisk → netdisk_status 应保持 none，实际 {link_off['netdisk_status']!r}"
+    )
+    assert len(fake_quark.upload_calls) == calls_before, (
+        "未勾选 upload_netdisk 不应触发任何 quark 上传调用"
+    )
+    meta_off = (tmp_path / "xhs" / "def456" / "meta.txt").read_text(encoding="utf-8")
+    assert "网盘分享链接：未上传" in meta_off, (
+        f"未勾选上传时 meta.txt 网盘行应保持「未上传」：\n{meta_off}"
+    )
+
+
+# ==== A71（批 7，详设 §15.4）：未授权/上传失败 → failed + error_note + 页面可见 ====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a71_netdisk_failure_note(
+    db_engine, biz_engine, tmp_path
+) -> None:
+    """A71：fake quark ok=False（-1408 未授权语义）→ upload_netdisk=true 链完成
+    → link_record.netdisk_status=failed + error_note 含「夸克」与登录提示
+    （页面可见：素材库读接口 + 列表页网盘失败徽章）。"""
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    await store.set("scrape.storage_dir", str(tmp_path), "扒图存储目录")
+
+    fake_quark = _FakeQuarkConnector(
+        ok=False,
+        note="夸克未授权，请在 设置 → 扒图设置 完成登录",
+    )
+    connectors = {
+        "xhs": _FakeConnector(tmp_path),
+        "xianyu": _FakeConnector(tmp_path),
+        "http_image": _FakeConnector(tmp_path),
+        "quark": fake_quark,
+    }
+    await _run_download_chain_and_consume(
+        db_engine,
+        biz_engine,
+        tmp_path,
+        urls=[_XHS_EXPLORE],
+        batch_id="batch-a71",
+        upload_netdisk=True,
+        connectors=connectors,
+    )
+
+    links = await scrape_store.get_links(limit=50)
+    link = next(l for l in links if l["batch_id"] == "batch-a71")
+    assert link["netdisk_status"] == "failed", (
+        f"未授权上传应回填 netdisk_status=failed，实际 {link['netdisk_status']!r}"
+    )
+    note = link["error_note"] or ""
+    assert "夸克" in note, f"error_note 应含「夸克」提示，实际 {note!r}"
+    assert "设置 → 扒图设置" in note or "登录" in note, (
+        f"error_note 应提示夸克登录入口，实际 {note!r}"
+    )
+    # 上传失败不阻断下载链本身（链接 status 仍 done）
+    assert link["status"] == "done"
+
+    # ---- 页面/读接口可见 ----
+    read_client = TestClient(_biz_app(biz_engine), raise_server_exceptions=False)
+    resp = read_client.get("/api/biz/scrape/links", headers={"X-Biz-Token": _BIZ_TOKEN})
+    assert resp.status_code == 200
+    body = resp.json()
+    row = next(l for l in body["links"] if l["batch_id"] == "batch-a71")
+    assert row["netdisk_status"] == "failed", "素材库读接口应可见 netdisk_status=failed"
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+    page = client.get("/scrape")
+    assert page.status_code == 200
+    assert "上传失败" in page.text, "素材库列表页应展示网盘状态徽章「上传失败」"
+    assert "夸克" in page.text, "素材库列表页应可见夸克上传失败提示"
+
+
+# ==== A72（批 7，详设 §15.4）：历史补传入口（按钮 + POST /scrape/links/{id}/upload）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a72_history_upload_entry(biz_engine) -> None:
+    """A72：素材库链接行「上传网盘」按钮——status=done 且 netdisk_status≠uploaded
+    时显示（DOM/HTML 断言），已上传（uploaded）行隐藏；POST /scrape/links/{id}/upload
+    → 先 PATCH netdisk_status=pending → create_task(scrape_upload_chain,
+    {link_ids: [id]})（mock 引擎客户端断言入参）；uploaded/非 done 链接拒绝。"""
+    import json as _json
+
+    from web import scrape_store
+
+    # ---- ① 造两条 done 链接：一条未上传、一条已上传 ----
+    l1 = await scrape_store.create_link("ht" + "tps://www.xiaohongshu.com/explore/aaa111", "xhs", "batch-a72")
+    l2 = await scrape_store.create_link("ht" + "tps://www.xiaohongshu.com/explore/bbb222", "xhs", "batch-a72")
+    l1 = await scrape_store.update_link(l1["id"], status="done", image_count=2)
+    l2 = await scrape_store.update_link(
+        l2["id"],
+        status="done",
+        image_count=2,
+        netdisk_status="uploaded",
+        netdisk_url=_FAKE_SHARE_URL,
+    )
+    assert l1 is not None and l2 is not None
+    link1_id, link2_id = l1["id"], l2["id"]
+
+    # ---- ② 素材库列表页：done 未上传行显示「上传网盘」，uploaded 行隐藏 ----
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+    page = client.get("/scrape")
+    assert page.status_code == 200
+    assert f'data-link-id="{link1_id}"' in page.text, (
+        f"done 未上传链接行应渲染「上传网盘」按钮（data-link-id={link1_id}）"
+    )
+    assert f'data-link-id="{link2_id}"' not in page.text, (
+        f"uploaded 链接行不应渲染「上传网盘」按钮（data-link-id={link2_id}）"
+    )
+    assert page.text.count("btn-netdisk-upload") == 1, (
+        f"仅未上传链接行应有「上传网盘」按钮（btn-netdisk-upload），"
+        f"实际出现 {page.text.count('btn-netdisk-upload')} 次"
+    )
+    assert _FAKE_SHARE_URL in page.text, "uploaded 链接行应展示可点的网盘分享链接"
+
+    # ---- ③ POST /scrape/links/{id}/upload：pending 前置 + create_task 入参实锤 ----
+    created: list[dict] = []
+
+    def _upload_engine_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/engine/tasks" and request.method == "POST":
+            body = _json.loads(request.content)
+            created.append(
+                {"chain_id": body.get("chain_id"), "input": body.get("input"),
+                 "trigger_ref": body.get("trigger_ref")}
+            )
+            return httpx.Response(201, json={"task_id": "e-000200", "chain_id": "scrape_upload_chain"})
+        if request.url.path == "/api/engine/registry":
+            return httpx.Response(200, json={"chains": []})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    app2 = _web_app(biz_engine, _upload_engine_handler)
+    client2 = TestClient(app2, follow_redirects=False, raise_server_exceptions=False)
+    _login(client2)
+    resp = client2.post(f"/scrape/links/{link1_id}/upload")
+    assert resp.status_code == 200, f"补传接口应 200，实际 {resp.status_code}: {resp.text}"
+    data = resp.json()
+    assert data.get("ok") is True
+    assert len(created) == 1, f"应 1 次 create_task，实际 {created}"
+    assert created[0]["chain_id"] == "scrape_upload_chain", (
+        f"补传应创建 scrape_upload_chain，实际 {created[0]['chain_id']}"
+    )
+    assert created[0]["input"] == {"link_ids": [link1_id]}, (
+        f"补传 input 应为 {{link_ids: [id]}}，实际 {created[0]['input']}"
+    )
+
+    # pending 前置落库（页面「上传中」徽章依据）
+    after = await scrape_store.get_link_by_id(link1_id)
+    assert after["link"]["netdisk_status"] == "pending", (
+        f"点击补传应先置 netdisk_status=pending，实际 {after['link']['netdisk_status']!r}"
+    )
+
+    # ---- ④ 已上传链接拒绝补传（不重复建任务）----
+    resp3 = client2.post(f"/scrape/links/{link2_id}/upload")
+    assert resp3.status_code in (400, 409), (
+        f"uploaded 链接补传应被拒，实际 {resp3.status_code}"
+    )
+    assert len(created) == 1, "uploaded 链接不应再 create_task"
+
+    # ---- ⑤ 非 done 链接拒绝补传 ----
+    lp = await scrape_store.create_link("ht" + "tps://www.xiaohongshu.com/explore/ccc333", "xhs", "batch-a72")
+    resp4 = client2.post(f"/scrape/links/{lp['id']}/upload")
+    assert resp4.status_code in (400, 409), (
+        f"非 done 链接补传应被拒，实际 {resp4.status_code}"
+    )
+    assert len(created) == 1, "非 done 链接不应再 create_task"
+
+
+# ==== 批 7 辅助单测：quark connector 子进程序列 / 设置页夸克登录块 ====
+
+
+def test_quark_connector_upload_sequence_ok(tmp_path, monkeypatch) -> None:
+    import asyncio
+    """quark connector：create-folder（顶层+子目录）→ upload → share 全命令序列
+    （subprocess 全 mock，零真实调用）→ ConnectorResult ok + share_url/fids 解析。"""
+    import json as _json
+    import subprocess as _sp
+
+    from engine.connectors.quark import QuarkConnector
+
+    calls: list[list[str]] = []
+    fid_counter = {"n": 0}
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> _sp.CompletedProcess:
+        calls.append(cmd)
+        name = cmd[1] if len(cmd) > 1 else ""
+        if name == "create-folder":
+            fid_counter["n"] += 1
+            data = {"fid": f"fid-root-{fid_counter['n']}"}
+            line = _json.dumps({"code": 0, "msg": "ok", "type": "result", "data": data})
+        elif name == "upload":
+            data = {
+                "successCount": 2,
+                "instantUpload": False,
+                "fids": ["file-fid-1", "file-fid-2"],
+            }
+            line = _json.dumps({"code": 0, "msg": "ok", "type": "result", "data": data})
+        elif name == "share":
+            data = {"share_url": _FAKE_SHARE_URL, "url_type": 1, "expired_type": 1}
+            line = _json.dumps({"code": 0, "msg": "ok", "type": "result", "data": data})
+        else:
+            line = _json.dumps({"code": -1408, "msg": "未登录", "type": "result", "data": {}})
+        return _sp.CompletedProcess(cmd, 0, line + "\n", "")
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    (tmp_path / "quark.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    conn = QuarkConnector(script_path=str(tmp_path / "quark.sh"))
+    result = asyncio.run(conn.upload_folder("/local/folder", "小红书"))
+    assert result.ok is True, f"应成功：{result.note}"
+    assert (result.data or {}).get("share_url") == _FAKE_SHARE_URL
+    assert (result.data or {}).get("fids") == ["file-fid-1", "file-fid-2"]
+
+    # 命令序列：create-folder（扒图素材 + 小红书）→ upload → share（url-type/expired-type 1）
+    names = [c[1] for c in calls]
+    assert names == ["create-folder", "create-folder", "upload", "share"], names
+    assert "--parent-fid" in calls[0] and "0" in calls[0], "顶层目录父 fid 应为根（0）"
+    assert "share" in calls[3] and "--url-type" in calls[3] and "--expired-type" in calls[3]
+    assert calls[3][calls[3].index("--url-type") + 1] == "1"
+    assert calls[3][calls[3].index("--expired-type") + 1] == "1"
+    # 公共 session 参数（照广成 quark_upload.py run_quark 全量形态）
+    assert all("--session-input" in c and "--session-id" in c for c in calls)
+
+
+def test_quark_connector_upload_unauthorized_note(tmp_path, monkeypatch) -> None:
+    import asyncio
+    """quark connector：-1408 未授权（首个命令即失败）→ ok=False + note 含
+    「夸克未授权，请在 设置 → 扒图设置 完成登录」提示。"""
+    import json as _json
+    import subprocess as _sp
+
+    from engine.connectors.quark import QuarkConnector
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> _sp.CompletedProcess:
+        line = _json.dumps(
+            {"code": -1408, "msg": "登录状态已失效", "type": "result", "data": {}}
+        )
+        return _sp.CompletedProcess(cmd, 0, line + "\n", "")
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    (tmp_path / "quark.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    conn = QuarkConnector(script_path=str(tmp_path / "quark.sh"))
+    result = asyncio.run(conn.upload_folder("/local/folder", "小红书"))
+    assert result.ok is False
+    assert "夸克未授权" in result.note
+    assert "设置 → 扒图设置" in result.note, f"note 应提示登录入口：{result.note}"
+
+
+def test_quark_connector_login_status(tmp_path, monkeypatch) -> None:
+    import asyncio
+    """quark connector login_status()：get-user-info code=0 → ok=True；
+    -1408 → ok=False（未授权提示）；工具路径缺失 available=False。"""
+    import json as _json
+    import subprocess as _sp
+
+    from engine.connectors.quark import QuarkConnector
+
+    mode = {"v": "ok"}
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> _sp.CompletedProcess:
+        if mode["v"] == "ok":
+            line = _json.dumps(
+                {"code": 0, "msg": "ok", "type": "result",
+                 "data": {"nickname": "测试用户"}}
+            )
+        else:
+            line = _json.dumps(
+                {"code": -1408, "msg": "未登录", "type": "result", "data": {}}
+            )
+        return _sp.CompletedProcess(cmd, 0, line + "\n", "")
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    (tmp_path / "quark.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    conn = QuarkConnector(script_path=str(tmp_path / "quark.sh"))
+    ok_res = asyncio.run(conn.login_status())
+    assert ok_res.ok is True
+    mode["v"] = "unauthorized"
+    bad_res = asyncio.run(conn.login_status())
+    assert bad_res.ok is False
+    assert "夸克未授权" in bad_res.note
+
+    # 工具路径缺失：available=False（纯文件系统判断，不触子进程）
+    conn2 = QuarkConnector(script_path=str(tmp_path / "no-quark.sh"))
+    assert conn2.available is False
+
+
+@pytest.mark.asyncio
+async def test_web_scrape_quark_settings_block(biz_engine, monkeypatch) -> None:
+    """设置 → 扒图设置 夸克登录块：页面含块与文案；授权码登录/检测/退出路由
+    （web 侧 subprocess 执行 quark.sh，测试 mock subprocess 零真实调用）；
+    执行完不回显授权码（R20 精神不落库不落盘）。"""
+    import json as _json
+    import subprocess as _sp
+
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+
+    calls: list[list[str]] = []
+    status_mode = {"v": "ok"}
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> _sp.CompletedProcess:
+        calls.append(cmd)
+        name = cmd[1] if len(cmd) > 1 else ""
+        if name == "login":
+            line = _json.dumps(
+                {"code": 0, "msg": "ok", "type": "result", "data": {"nickname": "u"}}
+            )
+        elif name == "get-user-info":
+            if status_mode["v"] == "ok":
+                line = _json.dumps(
+                    {"code": 0, "msg": "ok", "type": "result",
+                     "data": {"nickname": "测试用户"}}
+                )
+            else:
+                line = _json.dumps(
+                    {"code": -1408, "msg": "未登录", "type": "result", "data": {}}
+                )
+        elif name == "logout":
+            line = _json.dumps({"code": 0, "msg": "ok", "type": "result", "data": {}})
+        else:
+            line = _json.dumps({"code": -1, "msg": "unexpected", "type": "result", "data": {}})
+        return _sp.CompletedProcess(cmd, 0, line + "\n", "")
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+
+    # ---- ① 设置页含夸克登录块（独立块）----
+    page = client.get("/settings/scrape")
+    assert page.status_code == 200
+    assert "夸克网盘登录" in page.text or "夸克授权" in page.text, "设置页应含夸克登录块"
+    assert "授权码" in page.text, "夸克登录块应含授权码输入"
+
+    # ---- ② 授权码登录：执行 quark.sh login --token <code>；不回显授权码 ----
+    resp = client.post("/settings/scrape/quark-login", data={"code": "test-auth-code-xyz"})
+    assert resp.status_code == 200
+    login_calls = [c for c in calls if len(c) > 1 and c[1] == "login"]
+    assert login_calls, "登录应执行 quark.sh login"
+    assert "--token" in login_calls[-1]
+    assert "test-auth-code-xyz" in login_calls[-1], "授权码应传给 --token"
+    assert "test-auth-code-xyz" not in resp.text, "执行完不应在页面残留授权码"
+    assert "登录" in resp.text and ("成功" in resp.text or "已登录" in resp.text or "网盘" in resp.text)
+
+    # ---- ③ 未授权状态：quark-status 提示夸克登录 ----
+    status_mode["v"] = "unauthorized"
+    resp2 = client.post("/settings/scrape/quark-status")
+    assert resp2.status_code == 200
+    assert "未授权" in resp2.text or "登录" in resp2.text, (
+        f"未授权状态应提示登录，实际：{resp2.text[:200]}"
+    )
+
+    # ---- ④ 退出登录 ----
+    resp3 = client.post("/settings/scrape/quark-logout")
+    assert resp3.status_code == 200
+    logout_calls = [c for c in calls if len(c) > 1 and c[1] == "logout"]
+    assert logout_calls, "退出应执行 quark.sh logout"
+
+    # 授权码/登录态不落 settings 键（R20：一次性输入不落库不落盘）
+    async with AsyncSession(biz_engine) as session:
+        rows = (
+            await session.execute(
+                text("SELECT key FROM sys.settings WHERE key LIKE '%quark%'")
+            )
+        ).all()
+    assert not rows, f"quark 授权码/登录态不应落 settings 表：{rows}"

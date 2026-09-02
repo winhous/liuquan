@@ -122,6 +122,12 @@ CHAIN_INPUTS: dict[str, dict[str, Any]] = {
             {"name": "image_ids", "label": "图片 ID（逗号分隔）", "type": "text", "required": True},
         ]
     },
+    # v0.6 批 7（详设 §15.2）：手动补传链（素材库「上传网盘」按钮触发，页面展示 input 说明）
+    "scrape_upload_chain": {
+        "fields": [
+            {"name": "link_ids", "label": "链接记录 ID（逗号分隔）", "type": "text", "required": True},
+        ]
+    },
     # v0.6 批 4：下载链（贴链接立即扒走 /scrape/run；定时扒走调度器 input 模板，
     # 页面触发面板展示 input 说明）
     "scrape_download_chain": {
@@ -150,6 +156,7 @@ CHAIN_LABELS: dict[str, str] = {
     "seo_healthcheck_chain": "listing 体检链",
     "scrape_suggest_chain": "扒图选品链",
     "scrape_download_chain": "定时扒图",  # v0.6 批 4：拆两链后下载链（种子行展示名）
+    "scrape_upload_chain": "扒图补传链",  # v0.6 批 7（详设 §15.2）：历史素材夸克上传
     "crm_image_chain": "对话图片链",
 }
 
@@ -395,6 +402,20 @@ _SOURCE_MARK_META = {
     "authorized": ("授权", "bg-teal-lt"),
 }
 
+# 网盘上传状态徽章（批 7，详设 §15.2：未上传/上传中/已上传/失败）
+_NETDISK_STATUS_LABEL = {
+    "none": "未上传",
+    "pending": "上传中",
+    "uploaded": "已上传",
+    "failed": "上传失败",
+}
+_NETDISK_STATUS_BADGE = {
+    "none": "bg-secondary-lt",
+    "pending": "bg-blue-lt",
+    "uploaded": "bg-green-lt",
+    "failed": "bg-danger-lt",
+}
+
 
 def _truncate(s: object, n: int) -> str:
     """字符串截断展示（元数据 desc/链接摘要用）。"""
@@ -429,6 +450,18 @@ def _link_view(l: dict[str, Any]) -> dict[str, Any]:
         # 批 6（详设 §15.1）：链接文件夹相对路径（相对 scrape.storage_dir），
         # 页面展示「本地文件夹」；为空 = 未落盘（pending/failed）
         "storage_dir": l.get("storage_dir") or "",
+        # 批 7（详设 §15.2）：夸克网盘上传状态徽章 + 分享链接 + 补传按钮条件
+        # （status=done 且 netdisk_status≠uploaded → 显示「上传网盘」）
+        "netdisk_status": l.get("netdisk_status") or "none",
+        "netdisk_label": _NETDISK_STATUS_LABEL.get(
+            l.get("netdisk_status") or "none", "未上传"
+        ),
+        "netdisk_cls": _NETDISK_STATUS_BADGE.get(
+            l.get("netdisk_status") or "none", "bg-secondary-lt"
+        ),
+        "netdisk_url": l.get("netdisk_url") or "",
+        "can_upload": (l.get("status") == "done")
+        and (l.get("netdisk_status") or "none") != "uploaded",
     }
 
 
@@ -616,9 +649,12 @@ def create_app(
 
     @app.post("/scrape/run")
     async def scrape_run(request: Request):
-        """扒图页「立即扒」（详设-v0.6 §3.1/§7）：{urls: [...]} → web 生成 batch_id →
-        create_task(scrape_download_chain, {urls, batch_id, from_queue: false})。
+        """扒图页「立即扒」（详设-v0.6 §3.1/§7 + §15.2 批 7）：{urls: [...],
+        upload_netdisk?: bool} → web 生成 batch_id → create_task(scrape_download_chain,
+        {urls, batch_id, from_queue: false, upload_netdisk})。
 
+        upload_netdisk 缺省 true（扒图页「同步上传网盘」复选框默认勾选，用户拍板
+        §15.2；设置键 netdisk.upload_default 归批 8 A74）。
         引擎侧 422/404 错误透传友好提示（下载链批 4 才修通，本批提交失败给友好错误）。
         """
         import uuid
@@ -640,12 +676,18 @@ def create_app(
             urls = []
         if not urls:
             return JSONResponse({"ok": False, "error": "链接为空"}, status_code=400)
+        upload_netdisk = bool(data.get("upload_netdisk", True))
         batch_id = uuid.uuid4().hex
         try:
             async with _engine_client(request) as client:
                 resp = await client.create_task(
                     "scrape_download_chain",
-                    {"urls": urls, "batch_id": batch_id, "from_queue": False},
+                    {
+                        "urls": urls,
+                        "batch_id": batch_id,
+                        "from_queue": False,
+                        "upload_netdisk": upload_netdisk,
+                    },
                     request.cookies.get("role", "运营"),
                 )
         except _EngineAPIError as exc:
@@ -660,6 +702,59 @@ def create_app(
             )
         return JSONResponse(
             {"ok": True, "task_id": resp.get("task_id"), "batch_id": batch_id}
+        )
+
+    @app.post("/scrape/links/{link_id}/upload")
+    async def scrape_link_netdisk_upload(request: Request, link_id: int):
+        """素材库链接行/详情页「上传网盘」按钮（历史补传，详设 §15.2 批 7）：
+        守卫（status=done 且 netdisk_status≠uploaded）→ PATCH netdisk_status=pending
+        （页面「上传中」）→ create_task(scrape_upload_chain, {link_ids: [id]})。
+
+        返回 JSON {ok, task_id}；引擎 502/守卫失败 400/409 透传友好错误。
+        """
+        from web import scrape_store
+        from web.engineapi.client import EngineAPIError as _EngineAPIError
+
+        if not request.cookies.get("role"):
+            return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+        detail = await scrape_store.get_link_by_id(link_id)
+        if detail is None:
+            return JSONResponse({"ok": False, "error": "链接记录不存在"}, status_code=404)
+        link = detail["link"]
+        if link.get("status") != "done":
+            return JSONResponse(
+                {"ok": False, "error": "仅已完成的链接可补传网盘"},
+                status_code=409,
+            )
+        if (link.get("netdisk_status") or "none") == "uploaded":
+            return JSONResponse(
+                {"ok": False, "error": "该链接已上传网盘，无需补传"},
+                status_code=409,
+            )
+        # 页面「上传中」徽章（引擎补传链完成后回填 uploaded/failed）
+        await scrape_store.update_link(link_id, netdisk_status="pending")
+        try:
+            async with _engine_client(request) as client:
+                resp = await client.create_task(
+                    "scrape_upload_chain",
+                    {"link_ids": [link_id]},
+                    request.cookies.get("role", "运营"),
+                )
+        except _EngineAPIError as exc:
+            detail_msg = exc.detail if exc.detail is not None else str(exc)
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": f"引擎调用失败（{exc.status_code}）：{detail_msg}",
+                },
+                status_code=502,
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {"ok": False, "error": f"引擎调用失败：{exc}"}, status_code=502
+            )
+        return JSONResponse(
+            {"ok": True, "task_id": resp.get("task_id"), "link_id": link_id}
         )
 
     @app.post("/scrape/suggest")
@@ -1738,9 +1833,15 @@ def create_app(
     # 局部刷新，详设-v0.6 §3.2——定时相关设置统一进设置菜单，扒图页不做队列入口）
     @app.get("/settings/scrape")
     async def settings_scrape(request: Request):
-        """扒图设置页：存储目录 / 定时默认时间 / 定时队列三块独立提交。"""
+        """扒图设置页：存储目录 / 定时默认时间 / 定时队列 / 夸克登录四块独立提交。
+
+        夸克块页面 GET 不触子进程（批 7 技术定：状态探测只在显式动作执行）——
+        只做工具路径存在性判断（quark_available），真实登录状态经「检测登录状态」
+        按钮/登录/退出动作返回片段刷新。
+        """
         from datetime import time as _dtime
 
+        from web import quark_tool
         from web import scrape_store
 
         store = _settings_store(request)
@@ -1760,6 +1861,8 @@ def create_app(
                 schedule_time=schedule_time,
                 queue=queue,
                 queue_count=len(queue),
+                quark_available=quark_tool.tool_available(),
+                quark_status=None,
                 msg=request.query_params.get("msg", ""),
                 err=request.query_params.get("err", ""),
             ),
@@ -1909,6 +2012,89 @@ def create_app(
         if bool(request.headers.get("hx-request")):
             return await _scrape_queue_fragment(request, queue=queue, msg=msg, err=err)
         return _redirect("/settings/scrape", msg=msg)
+
+    # ---- 夸克网盘登录块（批 7，详设 §15.2：独立提交；页面 GET 不触子进程）----
+
+    async def _scrape_quark_fragment(
+        request: Request,
+        *,
+        quark_available: bool,
+        status: dict | None = None,
+        msg: str = "",
+        err: str = "",
+    ):
+        """夸克登录卡片片段（HTMX 局部刷新：登录/检测/退出后只刷本块）。"""
+        return templates.TemplateResponse(
+            request,
+            "settings/_scrape_quark_card.html",
+            _ctx(
+                request,
+                "settings-scrape",
+                quark_available=quark_available,
+                quark_status=status,
+                msg=msg,
+                err=err,
+            ),
+        )
+
+    @app.post("/settings/scrape/quark-login")
+    async def settings_scrape_quark_login(request: Request):
+        """夸克授权码登录（独立提交块）：执行 quark.sh login --token <code>。
+
+        授权码一次性输入（R20 精神）：不落库不落盘、页面不回显；登录后探测
+        get-user-info 状态随片段刷新。工具路径缺失（quark_available=False）直接
+        提示，不触子进程。
+        """
+        from web import quark_tool
+
+        available = quark_tool.tool_available()
+        if not available:
+            return await _scrape_quark_fragment(
+                request,
+                quark_available=False,
+                status=quark_tool.quark_status(),
+                err="夸克工具路径缺失（quark.sh 未安装），无法登录",
+            )
+        form = await request.form()
+        code = str(form.get("code", "")).strip()
+        ok, message = quark_tool.quark_login(code)
+        status = quark_tool.quark_status() if ok else None
+        if ok:
+            return await _scrape_quark_fragment(
+                request, quark_available=True, status=status, msg=message
+            )
+        return await _scrape_quark_fragment(
+            request, quark_available=True, status=status, err=message
+        )
+
+    @app.post("/settings/scrape/quark-status")
+    async def settings_scrape_quark_status(request: Request):
+        """检测夸克登录状态（显式动作，独立提交块）。"""
+        from web import quark_tool
+
+        status = quark_tool.quark_status()
+        err = "" if status.get("state") == "authorized" else str(status.get("note", ""))
+        return await _scrape_quark_fragment(
+            request,
+            quark_available=quark_tool.tool_available(),
+            status=status,
+            err=err,
+        )
+
+    @app.post("/settings/scrape/quark-logout")
+    async def settings_scrape_quark_logout(request: Request):
+        """退出夸克登录（独立提交块）。"""
+        from web import quark_tool
+
+        ok, message = quark_tool.quark_logout()
+        status = quark_tool.quark_status() if ok else None
+        if ok:
+            return await _scrape_quark_fragment(
+                request, quark_available=True, status=status, msg=message
+            )
+        return await _scrape_quark_fragment(
+            request, quark_available=True, status=status, err=message
+        )
 
     @app.post("/tasks/{task_id}/next-confirm")
     async def task_next_confirm(request: Request, task_id: int):

@@ -1,0 +1,27 @@
+# link_netdisk_upload 工序声明（详设-v0.6 §15.2/§15.6 批 7，新工序）
+# 纯代码工序（reason: none，无 LLM 调用，零 token 成本）：
+# 手动补传（历史数据）：素材库「上传网盘」按钮 → web create_task(scrape_upload_chain)
+# → 本工序逐条经 engine/netdisk.py upload_link_folder 上传（同一执行点与自动上传
+# 共用：GET 链接 → 守卫（done/未上传/文件夹有图）→ ctx.connectors["quark"]
+# upload_folder（建网盘目录「扒图素材/<来源子目录>」幂等 + 上传 + 永久公开分享）
+# → PATCH link_record netdisk 三列（web PATCH handler 同步 meta.txt 网盘行）
+# → 输出 UploadResult{uploaded[], failed[], skipped[], note}
+# 上传失败不阻断补传链（逐条独立 failed，详情在 link_record 可见，§15.2）
+
+id: link_netdisk_upload
+domain: scrape
+version: 1
+risk: write
+description: 夸克补传：逐链接上传本地文件夹到夸克网盘并回填网盘分享链接（历史素材手动补传，零 token）
+input:
+  model: ScrapeUploadInput
+output:
+  model: UploadResult
+model: default
+reason: none
+retry:
+  max_attempts: 2
+  timeout_s: 120
+context: []
+prompt: prompt.md
+config_dir: config/

@@ -19,6 +19,12 @@
                     placeholder="xiaohongshu.com/...&#10;goofish.com/..."></textarea>
           <span id="scrape-url-count" class="badge bg-secondary-lt mt-2">识别到 0 个链接</span>
         </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="upload-netdisk" checked>
+          <label class="form-check-label" for="upload-netdisk">
+            同步上传网盘 <span class="text-muted small">（扒完自动上传夸克「扒图素材」文件夹；未配置夸克授权时标记失败并提示）</span>
+          </label>
+        </div>
         <button id="btn-start-scrape" class="btn btn-primary w-100" onclick="startScrapeTask()" disabled>
           🚀 立即扒
         </button>
@@ -85,7 +91,7 @@
           <table class="table table-vcenter">
             <thead>
               <tr>
-                <th>来源</th><th>链接</th><th>状态</th><th>图数</th>
+                <th>来源</th><th>链接</th><th>状态</th><th>网盘</th><th>图数</th>
                 <th>元数据</th><th>批次</th><th>时间</th><th>操作</th>
               </tr>
             </thead>
@@ -103,6 +109,13 @@
                   {% endif %}
                 </td>
                 <td><span class="badge {{ l.status_badge }}">{{ l.status_label }}</span></td>
+                {# 批 7（详设 §15.2）：网盘上传状态徽章 + 分享链接（已上传可点） #}
+                <td>
+                  <span class="badge {{ l.netdisk_cls }}">{{ l.netdisk_label }}</span>
+                  {% if l.netdisk_url %}
+                  <div class="small"><a href="{{ l.netdisk_url }}" target="_blank" rel="noopener">分享链接 ↗</a></div>
+                  {% endif %}
+                </td>
                 <td>{{ l.image_count }}</td>
                 <td>
                   <div class="text-truncate small" style="max-width:160px" title="{{ l.desc }}">{{ l.desc or '—' }}</div>
@@ -119,6 +132,11 @@
                 <td>
                   <div class="btn-group btn-group-sm">
                     <a href="/scrape/links/{{ l.id }}" class="btn btn-outline-secondary">详情</a>
+                    {% if l.can_upload %}
+                    {# 批 7（详设 §15.2）：历史补传（status=done 且未上传显示；uploaded 隐藏） #}
+                    <button class="btn btn-outline-primary btn-netdisk-upload" data-link-id="{{ l.id }}"
+                            onclick="uploadNetdisk(this)">上传网盘</button>
+                    {% endif %}
                   </div>
                 </td>
               </tr>
@@ -170,7 +188,10 @@
     try {
       const r = await fetch('/scrape/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: lines })
+        body: JSON.stringify({
+          urls: lines,
+          upload_netdisk: document.getElementById('upload-netdisk').checked
+        })
       });
       const data = await r.json();
       if (data.ok) {
@@ -186,6 +207,30 @@
       resultBox.innerHTML =
         `<div class="alert alert-danger mb-0 py-2">⚠️ 网络错误：${e.message}</div>`;
       btn.disabled = false; btn.textContent = '🚀 立即扒';
+    }
+  }
+
+  // 批 7（详设 §15.2）：历史补传——单链接上传网盘（后端置 pending + 建补传链）
+  async function uploadNetdisk(btn) {
+    const id = btn.dataset.linkId;
+    if (!id) return;
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ 提交中…';
+    try {
+      const r = await fetch('/scrape/links/' + id + '/upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await r.json();
+      if (data.ok) {
+        btn.textContent = '✅ 已提交补传';
+        setTimeout(() => location.reload(), 1200);
+      } else {
+        alert('提交失败: ' + (data.error || '未知错误'));
+        btn.disabled = false; btn.textContent = original;
+      }
+    } catch (e) {
+      alert('网络错误: ' + e.message);
+      btn.disabled = false; btn.textContent = original;
     }
   }
 

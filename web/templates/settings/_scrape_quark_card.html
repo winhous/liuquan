@@ -1,0 +1,65 @@
+{# 夸克网盘登录卡片块（批 7，详设 §15.2：独立提交 + HTMX 局部刷新片段共用）
+   上下文：quark_available / quark_status（None=未检测）/ msg / err）
+   授权码一次性输入（password 型）；登录成功/失败随片段提示；页面 GET 不触子进程，
+   状态经「检测登录状态」/登录/退出动作刷新（批 7 技术定）。 #}
+<div class="card mt-4" id="scrape-quark-card">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <h3 class="card-title"><i class="ti ti-cloud-upload me-1"></i>夸克网盘登录</h3>
+    {% if quark_status %}
+    <span class="badge {{ 'bg-green-lt' if quark_status.state == 'authorized' else 'bg-danger-lt' if quark_status.state == 'unauthorized' else 'bg-yellow-lt' }}">
+      {% if quark_status.state == 'authorized' %}✅ 已登录{% elif quark_status.state == 'unauthorized' %}⚠️ 未授权{% else %}夸克工具异常{% endif %}
+    </span>
+    {% elif quark_available %}
+    <span class="badge bg-secondary-lt">未检测</span>
+    {% else %}
+    <span class="badge bg-danger-lt">工具路径缺失</span>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      <i class="ti ti-info-circle me-1"></i>
+      <strong>夸克授权为最后配置项</strong>：未配置时扒图上传会标记失败并提示登录入口（自动上传 / 素材库补传共用）。
+      登录方式 = 一次性授权码（quark.sh login --token，<strong>授权码不保存</strong>，执行完不留残留）。
+    </p>
+
+    {% if quark_available %}
+    {% if quark_status and quark_status.state == 'authorized' %}
+    <div class="alert alert-success mb-3 py-2">
+      <i class="ti ti-check me-1"></i>夸克网盘已登录{% if quark_status.nickname %}（{{ quark_status.nickname }}）{% endif %}
+    </div>
+    <form hx-post="/settings/scrape/quark-logout" hx-target="#scrape-quark-card" hx-swap="outerHTML"
+          hx-confirm="确定退出夸克登录？">
+      <button class="btn btn-outline-danger btn-sm">退出登录</button>
+    </form>
+    {% else %}
+    <form hx-post="/settings/scrape/quark-login" hx-target="#scrape-quark-card" hx-swap="outerHTML">
+      <div class="mb-3">
+        <label class="form-label">夸克授权码（一次性，登录后不留存）</label>
+        <input name="code" type="password" class="form-control" autocomplete="off"
+               placeholder="粘贴夸克授权码">
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary">登录</button>
+        <button class="btn btn-outline-secondary" hx-post="/settings/scrape/quark-status"
+                hx-target="#scrape-quark-card" hx-swap="outerHTML">检测登录状态</button>
+      </div>
+    </form>
+    {% endif %}
+    {% else %}
+    <div class="alert alert-danger mb-3 py-2">
+      <i class="ti ti-alert-triangle me-1"></i>夸克工具路径缺失（quark.sh 未安装）——无法登录，上传会标记失败。
+    </div>
+    {% endif %}
+
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>

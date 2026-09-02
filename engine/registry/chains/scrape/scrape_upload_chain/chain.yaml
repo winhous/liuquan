@@ -1,0 +1,17 @@
+# scrape_upload_chain 链声明（详设-v0.6 §15.2/§15.6 批 7）
+# 手动补传（历史数据）：素材库链接行/详情页「上传网盘」按钮 →
+# web POST /scrape/links/{id}/upload → create_task(scrape_upload_chain,
+# {link_ids: [id]}) → link_netdisk_upload 逐条上传本地文件夹到夸克网盘
+# （网盘目录「扒图素材/<来源子目录>」幂等 + 永久公开分享）→ PATCH link_record
+# netdisk 三列回填（web PATCH handler 同步文件夹 meta.txt 网盘分享链接行）
+# 链无 Action 消费者（UploadResult 不触发转交；失败详情在 link_record 可见）
+
+id: scrape_upload_chain
+domain: scrape
+description: 扒图补传链：历史素材逐条上传夸克网盘并回填分享链接（手动补传，零 token）
+input:
+  model: ScrapeUploadInput
+steps:
+  - worker: link_netdisk_upload
+    input:
+      link_ids: task.input.link_ids

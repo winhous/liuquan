@@ -94,6 +94,9 @@ __all__ = [
     "LinkQueueParams",
     "LinkQueueData",
     "ScrapeImageContextData",
+    # v0.6 批 7：夸克网盘上传 Model（详设-v0.6 §15.2/§15.6）
+    "ScrapeUploadInput",
+    "UploadResult",
     # v0.5 批 5：CRM 对话图片工序 Model
     "CrmImageChainInput",
     "MessageImageParams",
@@ -685,12 +688,17 @@ class ScrapeChainInput(BaseModel):
 
     - 立即扒：urls 填满，from_queue=false
     - 定时扒：urls 空，from_queue=true（urls 从定时队列读，§5.4 调度器 input 模板）
+    - upload_netdisk（批 7，详设 §15.2）：扒完后是否同步上传夸克网盘——web 扒图页
+      「同步上传网盘」复选框传参；定时 input 模板 upload_netdisk: True（未来扒的
+      都要传，用户拍板）；缺省 False（本批不读设置键，`netdisk.upload_default`
+      设置键归批 8 A74）；链完成消费者 scrape.download_done 读 task.input 判断
     """
 
     urls: list[str] = []
     batch_id: str
     source: str | None = None
     from_queue: bool = False
+    upload_netdisk: bool = False
 
 
 class LinkRecordCreateInput(BaseModel):
@@ -744,6 +752,30 @@ class ScrapeBatchResult(BaseModel):
     image_ids: list[int] = []
     from_queue: bool = False
     batch_id: str = ""
+    note: str = ""
+
+
+class ScrapeUploadInput(BaseModel):
+    """scrape_upload_chain 链入参 / link_netdisk_upload 工序入参（详设-v0.6 §15.2 批 7）。
+
+    手动补传（历史数据）：素材库链接行/详情页「上传网盘」按钮 → link_ids 单条 →
+    POST /scrape/links/{id}/upload → create_task(scrape_upload_chain, {link_ids})。
+    """
+
+    link_ids: list[int] = Field(min_length=1)
+
+
+class UploadResult(BaseModel):
+    """link_netdisk_upload 工序输出（批 7）。
+
+    逐条上传结果摘要（uploaded 带 netdisk_url；failed 带 note 全文——
+    已 PATCH link_record.netdisk_status/error_note；skipped 带原因——非 done/
+    已上传幂等）。链任务 DONE 即代表已尽力执行，失败详情在 link_record 可见。
+    """
+
+    uploaded: list[dict] = []
+    failed: list[dict] = []
+    skipped: list[dict] = []
     note: str = ""
 
 

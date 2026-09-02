@@ -241,6 +241,7 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "product_suggestion",
         "link_record_create",  # v0.6 批 4：拆两链新工序
         "batch_image_download",  # v0.6 批 4：拆两链新工序
+        "link_netdisk_upload",  # v0.6 批 7：夸克上传工序（详设 §15.2）
         "crm_image_scan",
         "crm_image_download",
         "crm_image_caption",
@@ -259,6 +260,7 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "seo_healthcheck_chain",
         "scrape_suggest_chain",
         "scrape_download_chain",  # v0.6 批 4：拆两链新链
+        "scrape_upload_chain",  # v0.6 批 7：手动补传链（夸克上传，详设 §15.2）
         "crm_image_chain",
     }
     assert set(registry.context_providers) == {

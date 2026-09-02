@@ -26,6 +26,11 @@
           <span class="badge bg-secondary-lt">{{ link.source_badge }} {{ link.source_label }}</span>
           <span class="badge {{ link.status_badge }}">{{ link.status_label }}</span>
           {% if link.image_count %}<span class="badge bg-secondary-lt">{{ link.image_count }} 张图</span>{% endif %}
+          {# 批 7（详设 §15.2）：网盘上传状态徽章 + 分享链接 #}
+          <span class="badge {{ link.netdisk_cls }}">{{ link.netdisk_label }}</span>
+          {% if link.netdisk_url %}
+          <a href="{{ link.netdisk_url }}" target="_blank" rel="noopener" class="badge bg-blue-lt text-decoration-none">网盘分享链接 ↗</a>
+          {% endif %}
         </div>
         <div class="small text-break mb-3" title="{{ link.url }}">{{ link.url }}</div>
         <dl class="row small mb-0">
@@ -58,6 +63,11 @@
           <i class="ti ti-folder me-1"></i>本地文件夹：{{ link.storage_dir }}
           <span class="text-muted">（相对存储目录，含图片 + meta.txt）</span>
         </div>
+        {% endif %}
+        {% if link.can_upload %}
+        <!-- 批 7（详设 §15.2）：历史补传（status=done 且未上传显示） -->
+        <button class="btn btn-outline-primary w-100 mt-3 btn-netdisk-upload" data-link-id="{{ link.id }}"
+                onclick="uploadNetdisk(this)">🚀 上传网盘</button>
         {% endif %}
         <a href="/scrape" class="btn btn-outline-secondary w-100 mt-3">← 返回素材库</a>
       </div>
@@ -157,6 +167,29 @@
     } catch (e) {
       alert('网络错误: ' + e.message);
       btnS.disabled = false; btnS.textContent = '✨ 生成选品建议';
+    }
+  }
+  // 批 7（详设 §15.2）：历史补传（详情页单链接上传网盘）
+  async function uploadNetdisk(btn) {
+    const id = btn.dataset.linkId;
+    if (!id) return;
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ 提交中…';
+    try {
+      const r = await fetch('/scrape/links/' + id + '/upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await r.json();
+      if (data.ok) {
+        btn.textContent = '✅ 已提交补传';
+        setTimeout(() => location.reload(), 1200);
+      } else {
+        alert('提交失败: ' + (data.error || '未知错误'));
+        btn.disabled = false; btn.textContent = original;
+      }
+    } catch (e) {
+      alert('网络错误: ' + e.message);
+      btn.disabled = false; btn.textContent = original;
     }
   }
 </script>

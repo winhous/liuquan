@@ -254,6 +254,18 @@ class TaskRunner:
 
     # ---- 公共 API（T12b CLI 契约）----
 
+    @property
+    def connectors(self) -> dict[str, Any]:
+        """装配注入的外部资源连接器（v0.6 批 7：QueueConsumer 转发给下载链消费者做
+        夸克上传；与 EngineContext.connectors 同源）。"""
+        return self._connectors
+
+    @property
+    def storage_dir(self) -> str | None:
+        """扒图存储根（v0.6 批 7：QueueConsumer 转发给下载链消费者定位链接文件夹；
+        与 EngineContext.storage_dir 同源）。"""
+        return self._storage_dir
+
     async def run(
         self,
         chain_id: str,
