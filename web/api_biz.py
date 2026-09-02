@@ -646,6 +646,60 @@ def create_biz_router(
         )
         return updated or {}
 
+    # ---- 扒图链接记录接口（v0.6 批 2，详设-v0.6 §7：link_record_create 写接口）----
+
+    def _infer_link_source(url: str) -> str:
+        """来源识别（默认 http）：域名含 xiaohongshu/xhslink → xhs；goofish → xianyu。"""
+        low = url.lower()
+        if "xiaohongshu" in low or "xhslink" in low:
+            return "xhs"
+        if "goofish" in low:
+            return "xianyu"
+        return "http"
+
+    @router.post("/scrape/links", dependencies=[Depends(_check_token)])
+    async def create_scrape_links(payload: dict) -> dict:
+        """POST /api/biz/scrape/links：批量建链接记录（normalized_url 幂等，决策 26）。
+
+        payload: {urls: [str], batch_id: str, source?: str}
+        每条 url 规范化（去 xsec_token 等易变 query，详设-v0.6 §4.1）后幂等：
+        已存在返回现有行（created/existing 标记），不重复建、不重复下载。
+        """
+        from web import scrape_store
+
+        raw_urls = payload.get("urls") or []
+        if isinstance(raw_urls, str):
+            raw_urls = [u.strip() for u in raw_urls.splitlines() if u.strip()]
+        elif isinstance(raw_urls, list):
+            raw_urls = [str(u).strip() for u in raw_urls if str(u).strip()]
+        if not raw_urls:
+            raise HTTPException(status_code=422, detail="urls 不能为空")
+        batch_id = str(payload.get("batch_id", "")).strip()
+        if not batch_id:
+            raise HTTPException(status_code=422, detail="batch_id 必填")
+        source_hint = str(payload.get("source", "")).strip() or None
+
+        links = []
+        for u in raw_urls:
+            source = source_hint or _infer_link_source(u)
+            row = await scrape_store.create_link(u, source, batch_id)
+            links.append(
+                {
+                    "url": u,
+                    "id": row["id"],
+                    "source": row["source"],
+                    "normalized_url": row["normalized_url"],
+                    "created": row["created"],
+                    "existing": row["existing"],
+                }
+            )
+        return {
+            "ok": True,
+            "links": links,
+            "created_count": sum(1 for l in links if l["created"]),
+            "existing_count": sum(1 for l in links if l["existing"]),
+        }
+
     # ==== CRM 对话图片接口（v0.5 批 5，详设-v0.5 §10）====
     from models.crm import MessageImage
 

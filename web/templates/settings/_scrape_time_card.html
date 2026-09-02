@@ -1,0 +1,29 @@
+{# 定时默认时间卡片块（整页 include + HTMX 局部刷新片段共用；上下文：schedule_time/msg/err） #}
+<div class="card mt-4" id="scrape-time-card">
+  <div class="card-header">
+    <h3 class="card-title">定时默认时间</h3>
+  </div>
+  <div class="card-body">
+    <form hx-post="/settings/scrape" hx-target="#scrape-time-card" hx-swap="outerHTML">
+      <div class="mb-3">
+        <label class="form-label">定时扒图默认时间</label>
+        <input name="schedule_time" type="time" class="form-control" value="{{ schedule_time or '07:00' }}">
+        <small class="text-muted">
+          <i class="ti ti-info-circle me-1"></i>
+          定时扒图（scrape_download_chain）默认每天该时间跑；保存时同步更新「设置 → 定时任务」页对应链的触发时间。
+        </small>
+      </div>
+      <button class="btn btn-primary">保存定时默认时间</button>
+    </form>
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>

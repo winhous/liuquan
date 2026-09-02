@@ -383,10 +383,14 @@ async def create_link(
 async def get_links(
     source: str | None = None,
     status: str | None = None,
+    status_in: list[str] | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """链接记录列表（来源/状态筛选 + 分页，照 get_images 模式）。"""
+    """链接记录列表（来源/状态筛选 + 分页，照 get_images 模式）。
+
+    status_in：多状态筛选（如「进行中」= pending + downloading，详设 §3.1 筛选口径）。
+    """
     conditions = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}
 
@@ -396,6 +400,10 @@ async def get_links(
     if status:
         conditions.append("status = :status")
         params["status"] = status
+    if status_in:
+        placeholders = ", ".join([f":st_{i}" for i in range(len(status_in))])
+        conditions.append(f"status IN ({placeholders})")
+        params.update({f"st_{i}": s for i, s in enumerate(status_in)})
 
     where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -413,6 +421,37 @@ async def get_links(
             params,
         )
         return _rows(result)
+
+
+async def count_links(
+    source: str | None = None,
+    status: str | None = None,
+    status_in: list[str] | None = None,
+) -> int:
+    """链接记录总数（来源/状态筛选，与 get_links 同口径；素材库分页用）。"""
+    conditions = []
+    params: dict[str, Any] = {}
+
+    if source:
+        conditions.append("source = :source")
+        params["source"] = source
+    if status:
+        conditions.append("status = :status")
+        params["status"] = status
+    if status_in:
+        placeholders = ", ".join([f":st_{i}" for i in range(len(status_in))])
+        conditions.append(f"status IN ({placeholders})")
+        params.update({f"st_{i}": s for i, s in enumerate(status_in)})
+
+    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    async with get_db_session() as session:
+        result = await session.execute(
+            text(f"SELECT COUNT(*) AS c FROM scrape.link_record {where}"),
+            params,
+        )
+        row = result.first()
+        return int(row[0]) if row else 0
 
 
 async def get_link_by_id(link_id: str | int) -> dict[str, Any] | None:

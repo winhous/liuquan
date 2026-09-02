@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}链接详情 · 扒图 · 刘全{% endblock %}
+{% block content_title %}链接详情{% endblock %}
+{% block content %}
+
+{% if msg %}
+<div class="alert alert-success" role="alert">
+  <i class="ti ti-check me-1"></i>{{ msg }}
+</div>
+{% endif %}
+{% if err %}
+<div class="alert alert-danger" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <!-- 左栏：链接信息 + 图包导出 + 选品建议入口 -->
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">链接信息</h3>
+      </div>
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-1 flex-wrap mb-2">
+          <span class="badge bg-secondary-lt">{{ link.source_badge }} {{ link.source_label }}</span>
+          <span class="badge {{ link.status_badge }}">{{ link.status_label }}</span>
+          {% if link.image_count %}<span class="badge bg-secondary-lt">{{ link.image_count }} 张图</span>{% endif %}
+        </div>
+        <div class="small text-break mb-3" title="{{ link.url }}">{{ link.url }}</div>
+        <dl class="row small mb-0">
+          <dt class="col-4">批次</dt>
+          <dd class="col-8 text-truncate" title="{{ link.batch_id }}">{{ link.batch_id }}</dd>
+          <dt class="col-4">时间</dt>
+          <dd class="col-8">{{ link.created_at.strftime('%Y-%m-%d %H:%M') if link.created_at else '—' }}</dd>
+          <dt class="col-4">描述</dt>
+          <dd class="col-8 text-break">{{ link.desc or '—' }}</dd>
+          <dt class="col-4">标签</dt>
+          <dd class="col-8">
+            {% for t in link.tags %}<span class="badge bg-blue-lt me-1">{{ t }}</span>{% else %}—{% endfor %}
+          </dd>
+          <dt class="col-4">作者</dt>
+          <dd class="col-8">@{{ link.author_id or '—' }}</dd>
+        </dl>
+        {% if link.error_note %}
+        <div class="alert alert-danger mt-3 mb-0 py-2">
+          <i class="ti ti-alert-triangle me-1"></i>{{ link.error_note }}
+        </div>
+        {% endif %}
+        {% if link.degraded_note %}
+        <div class="text-muted small mt-2">
+          <i class="ti ti-info-circle me-1"></i>降级：{{ link.degraded_note }}
+        </div>
+        {% endif %}
+        <a href="/scrape/links/{{ link.id }}/export" class="btn btn-primary w-100 mt-3">
+          <i class="ti ti-download me-1"></i>图包导出（zip）
+        </a>
+        <a href="/scrape" class="btn btn-outline-secondary w-100 mt-2">← 返回素材库</a>
+      </div>
+    </div>
+    {% if images %}
+    <div class="card mt-3">
+      <div class="card-body">
+        <button id="btn-suggest" class="btn btn-warning w-100" onclick="submitSuggest()" disabled>
+          ✨ 生成选品建议
+        </button>
+        <p class="text-muted small mt-2 mb-0">
+          勾选多图 → 选品建议进「任务中心 → 提案」审核（功能 v0.6 批 4 修通）。
+        </p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- 右栏：图片网格（缩略图 · 宽高 · 水印标记 · 来源标记徽章） -->
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h3 class="card-title mb-0">图片网格（{{ images|length }}）</h3>
+        <div>
+          <button class="btn btn-sm btn-link" onclick="toggleAll(true)">全选</button>
+          <button class="btn btn-sm btn-link text-muted" onclick="toggleAll(false)">取消</button>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if images %}
+        <div class="row row-cols-2 row-cols-md-3 g-3">
+          {% for img in images %}
+          <div class="col">
+            <div class="card mb-0 position-relative">
+              <div class="position-absolute" style="top:6px;left:6px;z-index:2;">
+                <input type="checkbox" class="form-check-input img-check" data-id="{{ img.id }}" onchange="updateSuggestState()">
+              </div>
+              <div style="aspect-ratio:1/1;background:#f3f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                {% if img.local_path %}
+                <img src="/scrape/thumbnail/{{ img.id }}" alt="图片" loading="lazy"
+                     style="width:100%;height:100%;object-fit:cover;"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <span style="display:none;font-size:32px;color:#9aa0ac;">🖼️</span>
+                {% else %}
+                <span style="font-size:32px;color:#9aa0ac;">🖼️</span>
+                {% endif %}
+              </div>
+              <div class="card-body p-2">
+                <div class="d-flex align-items-center gap-1 flex-wrap">
+                  <span class="badge {{ img.source_mark_cls }}">{{ img.source_mark_label }}</span>
+                  {% if img.watermark %}<span class="badge bg-orange-lt">水印</span>{% endif %}
+                  {% if img.width and img.height %}
+                  <span class="text-muted small">{{ img.width }}×{{ img.height }}</span>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+          <div class="h1 mb-2">🖼️</div>
+          <div>该链接还没有图片（下载未完成或失败）</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function updateSuggestState() {
+    const n = document.querySelectorAll('.img-check:checked').length;
+    document.getElementById('btn-suggest').disabled = n === 0;
+  }
+  function toggleAll(on) {
+    document.querySelectorAll('.img-check').forEach(c => { c.checked = on; });
+    updateSuggestState();
+  }
+  async function submitSuggest() {
+    const ids = [...document.querySelectorAll('.img-check:checked')].map(c => c.dataset.id);
+    if (!ids.length) { alert('请先勾选图片'); return; }
+    const btnS = document.getElementById('btn-suggest');
+    btnS.disabled = true; btnS.textContent = '⏳ 提交中…';
+    try {
+      const r = await fetch('/scrape/suggest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_ids: ids })
+      });
+      const data = await r.json();
+      if (data.ok) { btnS.textContent = '✅ 已提交！'; }
+      else {
+        alert('提交失败: ' + (data.error || '未知错误'));
+        btnS.disabled = false; btnS.textContent = '✨ 生成选品建议';
+      }
+    } catch (e) {
+      alert('网络错误: ' + e.message);
+      btnS.disabled = false; btnS.textContent = '✨ 生成选品建议';
+    }
+  }
+</script>
+{% endblock %}

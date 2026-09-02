@@ -28,7 +28,13 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -348,6 +354,92 @@ def _time_to_cron(trigger_time: str) -> str:
         return "0 7 * * *"
 
 
+def _scrape_time_cron(trigger_time: str) -> str:
+    """'HH:MM' → 定时扒图链 cron（不补前导零，照详设-v0.6 §8：'08:00' → '0 8 * * *'）。
+
+    v0.4 的 _time_to_cron 补零形态（'00 08 * * *'）被 test_schedule_create_sends_daily_cron
+    锁住，此处按 v0.6 详设口径独立实现；调用方已先做 HH:MM 校验。
+    """
+    h, m = (int(x) for x in trigger_time.split(":"))
+    return f"{m} {h} * * *"
+
+
+# ---- 素材库视图助手（v0.6 批 2：链接记录列表/详情 + 图片网格展示）----
+
+_SCRAPE_SOURCE_BADGE = {"xhs": "📕", "xianyu": "🐟", "http": "🔗"}
+_SCRAPE_SOURCE_LABEL = {"xhs": "小红书", "xianyu": "闲鱼", "http": "HTTP"}
+_LINK_STATUS_LABEL = {
+    "pending": "待处理",
+    "downloading": "下载中",
+    "done": "已完成",
+    "failed": "失败",
+}
+_LINK_STATUS_BADGE = {
+    "pending": "bg-yellow-lt",
+    "downloading": "bg-blue-lt",
+    "done": "bg-green-lt",
+    "failed": "bg-danger-lt",
+}
+_SOURCE_MARK_META = {
+    "scraped": ("扒图", "bg-blue-lt"),
+    "selfshot": ("自拍", "bg-green-lt"),
+    "ai_generated": ("AI", "bg-purple-lt"),
+    "authorized": ("授权", "bg-teal-lt"),
+}
+
+
+def _truncate(s: object, n: int) -> str:
+    """字符串截断展示（元数据 desc/链接摘要用）。"""
+    text = str(s or "")
+    return text if len(text) <= n else text[:n] + "…"
+
+
+def _link_view(l: dict[str, Any]) -> dict[str, Any]:
+    """链接记录行视图（素材库列表/详情共用）。"""
+    src = l.get("source") or ""
+    tags = list(l.get("tags") or [])
+    desc = l.get("desc") or ""
+    return {
+        "id": l["id"],
+        "url": l.get("url") or "",
+        "summary": _truncate(l.get("url") or "", 60),
+        "source": src,
+        "source_badge": _SCRAPE_SOURCE_BADGE.get(src, "🔗"),
+        "source_label": _SCRAPE_SOURCE_LABEL.get(src, src),
+        "status": l.get("status") or "",
+        "status_label": _LINK_STATUS_LABEL.get(l.get("status") or "", l.get("status") or ""),
+        "status_badge": _LINK_STATUS_BADGE.get(l.get("status") or "", "bg-secondary-lt"),
+        "image_count": l.get("image_count") or 0,
+        "desc": _truncate(desc, 40),
+        "tags": list(tags),
+        "tags_total": len(tags),
+        "author_id": l.get("author_id") or "",
+        "batch_id": l.get("batch_id") or "",
+        "created_at": l.get("created_at"),
+        "error_note": l.get("error_note") or "",
+        "degraded_note": l.get("degraded_note") or "",
+    }
+
+
+def _image_view(i: dict[str, Any]) -> dict[str, Any]:
+    """图片行视图（详情网格：宽高/水印/来源标记徽章）。"""
+    mark = i.get("source_mark") or "scraped"
+    label, cls = _SOURCE_MARK_META.get(mark, (mark, "bg-secondary-lt"))
+    return {
+        "id": i["id"],
+        "url": i.get("url") or "",
+        "source": i.get("source") or "",
+        "source_mark": mark,
+        "source_mark_label": label,
+        "source_mark_cls": cls,
+        "width": i.get("width"),
+        "height": i.get("height"),
+        "watermark": bool(i.get("watermark")),
+        "local_path": i.get("local_path") or "",
+        "created_at": i.get("created_at"),
+    }
+
+
 # 系统参数键清单（详设 §7.3：七键；每个键独立存/独立提交）
 _PARAM_DEFS: list[dict[str, Any]] = [
     {"key": "crm.follow_up_days", "description": "客户跟进逾期天数阈值（int）", "type": "int", "default": 5},
@@ -436,48 +528,236 @@ def create_app(
         resp.set_cookie("role", role, max_age=86400)  # 原型：明文角色 cookie
         return resp
 
-    # ---- /scrape 扒图页 ----
+    # ---- /scrape 扒图页（v0.6 批 2 重构：贴链接 + 素材库一页，详设-v0.6 §3.1）----
+
     @app.get("/scrape")
-    async def scrape_page(request: Request, batch_id: str | None = None):
-        """扒图页面：贴链接 + 图片网格。"""
+    async def scrape_page(
+        request: Request,
+        source: str = "",
+        status: str = "",
+        page: str = "1",
+    ):
+        """扒图页：区块 A 贴链接（立即扒）+ 区块 B 素材库（链接记录列表 + 筛选/分页）。
+
+        筛选：来源（xhs/xianyu/http）· 状态（全部/进行中/完成/失败，GET 参数）；
+        「进行中」= pending + downloading（详设 §3.1 筛选口径）。
+        """
         from web import scrape_store
 
-        batches = await scrape_store.get_batches()
-        images = await scrape_store.get_images(batch_id=batch_id, limit=200) if batch_id else []
-        # _ctx 补 modules/active（缺 modules = 侧栏不渲染、布局塌陷，v0.3 同款坑）；
-        # active = seo-scrape（扒图在 SEO 二级菜单下，MODULES id）
+        try:
+            page_no = max(1, int(page))
+        except ValueError:
+            page_no = 1
+        source_f = source if source in ("xhs", "xianyu", "http") else None
+        status_f = status if status in ("pending", "downloading", "done", "failed") else None
+        status_in = ["pending", "downloading"] if status == "processing" else None
+        page_size = 20
+        links = await scrape_store.get_links(
+            source=source_f,
+            status=status_f,
+            status_in=status_in,
+            limit=page_size,
+            offset=(page_no - 1) * page_size,
+        )
+        total = await scrape_store.count_links(
+            source=source_f, status=status_f, status_in=status_in
+        )
+        queue = await scrape_store.get_link_queue(settings=_settings_store(request))
         return templates.TemplateResponse(
-            request, "scrape/index.html",
-            _ctx(request, "seo-scrape", batches=batches, images=images,
-                 pending_proposal_count=0),
+            request,
+            "scrape/index.html",
+            _ctx(
+                request,
+                "seo-scrape",
+                links=[_link_view(l) for l in links],
+                total=total,
+                page=page_no,
+                page_size=page_size,
+                pages=(total + page_size - 1) // page_size,
+                filters={"source": source, "status": status},
+                queue_count=len(queue),
+                pending_proposal_count=0,
+            ),
         )
 
-    # ---- 扒图页 JSON 接口（页面 JS 用；触发引擎链，照 crm 粘贴链模式）----
+    @app.get("/scrape/links/{link_id}")
+    async def scrape_link_detail(request: Request, link_id: int):
+        """链接详情页：状态/元数据/error_note/degraded_note + 图片网格 + 图包导出按钮。"""
+        from web import scrape_store
+
+        detail = await scrape_store.get_link_by_id(link_id)
+        if detail is None:
+            return RedirectResponse("/scrape", status_code=303)
+        return templates.TemplateResponse(
+            request,
+            "scrape/link_detail.html",
+            _ctx(
+                request,
+                "seo-scrape",
+                link=_link_view(detail["link"]),
+                images=[_image_view(i) for i in detail["images"]],
+                msg=request.query_params.get("msg", ""),
+                err=request.query_params.get("err", ""),
+            ),
+        )
+
+    @app.get("/scrape/links/{link_id}/export")
+    async def scrape_link_export(request: Request, link_id: int):
+        """图包导出（详设-v0.6 §9）：zip = 图片（storage_dir 相对路径读，zip 成员名用
+        相对路径防穿越）+ metadata.json（链接记录字段 + 图片清单）→ StreamingResponse。
+
+        无图/文件缺失 → 降级重定向回详情页（err 提示，页面可见）。
+        """
+        import hashlib
+        import io
+        import json as _json
+        import zipfile
+        from pathlib import Path as _Path
+
+        from web import scrape_store
+
+        detail = await scrape_store.get_link_by_id(link_id)
+        if detail is None:
+            return RedirectResponse(
+                "/scrape?" + urlencode({"err": "链接不存在"}), status_code=303
+            )
+        link = detail["link"]
+        images = detail["images"]
+        if not images:
+            return RedirectResponse(
+                f"/scrape/links/{link_id}?" + urlencode({"err": "该链接暂无图片可导出"}),
+                status_code=303,
+            )
+        storage_root = _Path(
+            str(await _settings_store(request).get("scrape.storage_dir", "/opt/liuquan/scrape/"))
+        )
+        root = storage_root.resolve()
+
+        buf = io.BytesIO()
+        added = 0
+        image_list = []
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for img in images:
+                local = img.get("local_path")
+                member: str | None = None
+                if local:
+                    p = _Path(local)
+                    if not p.is_absolute():
+                        p = root / p
+                    try:
+                        p = p.resolve()
+                        rel = p.relative_to(root)
+                    except ValueError:
+                        rel = None
+                    if p.is_file():
+                        # 成员名用相对路径（防穿越：只在 root 内用相对路径，越界回退扁平名）
+                        member = (
+                            rel.as_posix()
+                            if rel is not None
+                            else f"images/{img['id']}-{p.name}"
+                        )
+                        zf.write(p, arcname=member)
+                        added += 1
+                image_list.append(
+                    {
+                        "url": img.get("url") or "",
+                        "source_mark": img.get("source_mark") or "scraped",
+                        "width": img.get("width"),
+                        "height": img.get("height"),
+                        "watermark": bool(img.get("watermark")),
+                        "local_path": local or "",
+                        "created_at": (
+                            img.get("created_at").isoformat()
+                            if img.get("created_at") is not None
+                            else None
+                        ),
+                    }
+                )
+            metadata = {
+                "url": link.get("url") or "",
+                "source": link.get("source") or "",
+                "status": link.get("status") or "",
+                "desc": link.get("desc") or "",
+                "tags": list(link.get("tags") or []),
+                "author_id": link.get("author_id"),
+                "batch_id": link.get("batch_id") or "",
+                "error_note": link.get("error_note"),
+                "degraded_note": link.get("degraded_note"),
+                "images": image_list,
+            }
+            zf.writestr(
+                "metadata.json",
+                _json.dumps(metadata, ensure_ascii=False, indent=2, default=str),
+            )
+        if added == 0:
+            return RedirectResponse(
+                f"/scrape/links/{link_id}?" + urlencode({"err": "图片文件缺失，无法导出"}),
+                status_code=303,
+            )
+        short_hash = hashlib.sha256(
+            f"{link_id}:{link.get('url') or ''}".encode()
+        ).hexdigest()[:8]
+        filename = f"link-{link_id}-{short_hash}.zip"
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # ---- 扒图页 JSON 接口（页面 JS 用；照 crm 粘贴链模式）----
+
     @app.post("/scrape/run")
     async def scrape_run(request: Request):
-        """扒图页：贴链接 → 立即触发 scrape_suggest_chain（JSON）。"""
+        """扒图页「立即扒」（详设-v0.6 §3.1/§7）：{urls: [...]} → web 生成 batch_id →
+        create_task(scrape_download_chain, {urls, batch_id, from_queue: false})。
+
+        引擎侧 422/404 错误透传友好提示（下载链批 4 才修通，本批提交失败给友好错误）。
+        """
+        import uuid
+
+        from web.engineapi.client import EngineAPIError as _EngineAPIError
+
         if not request.cookies.get("role"):
             return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
         try:
             data = await request.json()
         except Exception:
-            return {"ok": False, "error": "请求体非 JSON"}
-        urls = str(data.get("urls", "")).strip()
+            return JSONResponse({"ok": False, "error": "请求体非 JSON"}, status_code=400)
+        raw = data.get("urls")
+        if isinstance(raw, str):
+            urls = [u.strip() for u in raw.replace(",", "\n").splitlines() if u.strip()]
+        elif isinstance(raw, list):
+            urls = [str(u).strip() for u in raw if str(u).strip()]
+        else:
+            urls = []
         if not urls:
-            return {"ok": False, "error": "链接为空"}
-        client = _engine_client(request)
+            return JSONResponse({"ok": False, "error": "链接为空"}, status_code=400)
+        batch_id = uuid.uuid4().hex
         try:
-            resp = await client.create_task(
-                "scrape_suggest_chain", {"urls": urls, "source": "mixed"},
-                request.cookies.get("role", "运营"),
+            async with _engine_client(request) as client:
+                resp = await client.create_task(
+                    "scrape_download_chain",
+                    {"urls": urls, "batch_id": batch_id, "from_queue": False},
+                    request.cookies.get("role", "运营"),
+                )
+        except _EngineAPIError as exc:
+            detail = exc.detail if exc.detail is not None else str(exc)
+            return JSONResponse(
+                {"ok": False, "error": f"引擎调用失败（{exc.status_code}）：{detail}"},
+                status_code=502,
             )
-            return {"ok": True, "task_id": resp.get("task_id")}
         except Exception as exc:
-            return {"ok": False, "error": f"引擎调用失败：{exc}"}
+            return JSONResponse(
+                {"ok": False, "error": f"引擎调用失败：{exc}"}, status_code=502
+            )
+        return JSONResponse(
+            {"ok": True, "task_id": resp.get("task_id"), "batch_id": batch_id}
+        )
 
     @app.post("/scrape/suggest")
     async def scrape_suggest(request: Request):
-        """扒图页：勾选图片 → 批量生成选品建议（scrape_suggest_chain，JSON）。"""
+        """扒图页：勾选图片 → 批量生成选品建议（scrape_suggest_chain，JSON；功能批 4）。"""
         if not request.cookies.get("role"):
             return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
         try:
@@ -1540,27 +1820,135 @@ def create_app(
             return templates.TemplateResponse(request, "settings/_params_row.html", ctx)
         return _hx_redirect("/settings/params", msg=f"参数 {key} 已保存")
 
-    # v0.5 §3.5：扒图设置页（系统设置分组下新叶子，独立提交）
+    # v0.6 批 2：扒图设置页三块（存储目录 / 定时默认时间 / 定时队列，独立提交 + HTMX
+    # 局部刷新，详设-v0.6 §3.2——定时相关设置统一进设置菜单，扒图页不做队列入口）
     @app.get("/settings/scrape")
     async def settings_scrape(request: Request):
-        """扒图设置页（storage_dir 独立提交）。"""
+        """扒图设置页：存储目录 / 定时默认时间 / 定时队列三块独立提交。"""
+        from datetime import time as _dtime
+
+        from web import scrape_store
+
         store = _settings_store(request)
-        storage_dir = await store.get("scrape.storage_dir", "/opt/liuquan/scrape/")
-        ctx = _ctx(
-            request,
-            "settings-scrape",
-            storage_dir=storage_dir,
-            msg=request.query_params.get("msg", ""),
-            err=request.query_params.get("err", ""),
+        storage_dir = str(await store.get("scrape.storage_dir", "/opt/liuquan/scrape/"))
+        raw_time = await store.get("scrape.schedule_time", "07:00")
+        schedule_time = (
+            raw_time.strftime("%H:%M") if isinstance(raw_time, _dtime) else str(raw_time)
         )
-        return templates.TemplateResponse(request, "settings/scrape.html", ctx)
+        queue = await scrape_store.get_link_queue(settings=store)
+        return templates.TemplateResponse(
+            request,
+            "settings/scrape.html",
+            _ctx(
+                request,
+                "settings-scrape",
+                storage_dir=storage_dir,
+                schedule_time=schedule_time,
+                queue=queue,
+                queue_count=len(queue),
+                msg=request.query_params.get("msg", ""),
+                err=request.query_params.get("err", ""),
+            ),
+        )
+
+    async def _scrape_time_fragment(
+        request: Request,
+        *,
+        schedule_time: str,
+        msg: str = "",
+        err: str = "",
+    ):
+        """定时默认时间卡片片段（HTMX 局部刷新，独立提交只刷本块）。"""
+        return templates.TemplateResponse(
+            request,
+            "settings/_scrape_time_card.html",
+            _ctx(
+                request,
+                "settings-scrape",
+                schedule_time=schedule_time,
+                msg=msg,
+                err=err,
+            ),
+        )
+
+    async def _scrape_queue_fragment(
+        request: Request,
+        *,
+        queue: list,
+        msg: str = "",
+        err: str = "",
+    ):
+        """定时队列卡片片段（HTMX 局部刷新：加入/清空后只刷队列块）。"""
+        return templates.TemplateResponse(
+            request,
+            "settings/_scrape_queue_card.html",
+            _ctx(
+                request,
+                "settings-scrape",
+                queue=queue,
+                queue_count=len(queue),
+                msg=msg,
+                err=err,
+            ),
+        )
 
     @app.post("/settings/scrape")
     async def settings_scrape_save(request: Request):
-        """扒图设置保存（storage_dir 独立提交）。"""
+        """扒图设置保存：存储目录块 / 定时默认时间块各自独立提交（按表单字段区分）。
+
+        定时默认时间保存时同步引擎定时链 cron：list_schedules() 找到
+        chain_id=scrape_download_chain 的行则 update_schedule_time（详设 §8，A63 实锤）；
+        找不到行跳过不报错（种子批 4 才加），引擎未连接提示不阻塞设置保存。
+        """
+        from web import scrape_store
+
         store = _settings_store(request)
         is_hx = bool(request.headers.get("hx-request"))
         form = await request.form()
+
+        if "schedule_time" in form:
+            # ---- 定时默认时间块（独立提交）----
+            raw = str(form.get("schedule_time", "")).strip()
+            try:
+                hour_s, minute_s = raw.split(":")
+                h, m = int(hour_s), int(minute_s)
+                if not (0 <= h <= 23 and 0 <= m <= 59):
+                    raise ValueError
+                norm = f"{h:02d}:{m:02d}"
+            except ValueError:
+                if is_hx:
+                    return await _scrape_time_fragment(
+                        request, schedule_time=raw, err="时间格式应为 HH:MM"
+                    )
+                return _redirect("/settings/scrape", err="时间格式应为 HH:MM")
+            await store.set("scrape.schedule_time", norm, "扒图定时默认时间")
+            msg = f"定时默认时间已保存（{norm}）"
+            # 同步引擎定时链 cron（改设置生效实锤；找不到行跳过不报错）
+            try:
+                async with _engine_client(request) as client:
+                    schedules = await client.list_schedules()
+                    row = next(
+                        (
+                            s
+                            for s in schedules
+                            if s.get("chain_id") == "scrape_download_chain"
+                        ),
+                        None,
+                    )
+                    if row is not None:
+                        await client.update_schedule_time(
+                            int(row["id"]), _scrape_time_cron(norm)
+                        )
+                        msg += "，定时链已同步"
+            except EngineAPIError:
+                msg += "（引擎未连接，定时链 cron 未同步）"
+            if is_hx:
+                return await _scrape_time_fragment(
+                    request, schedule_time=norm, msg=msg, err=""
+                )
+            return _redirect("/settings/scrape", msg=msg)
+
+        # ---- 存储目录块（v0.5 原有，独立提交）----
         storage_dir = str(form.get("storage_dir", "/opt/liuquan/scrape/")).strip()
         if not storage_dir:
             storage_dir = "/opt/liuquan/scrape/"
@@ -1568,6 +1956,44 @@ def create_app(
         msg = "扒图设置已保存"
         if is_hx:
             return _hx_redirect("/settings/scrape", msg=msg)
+        return _redirect("/settings/scrape", msg=msg)
+
+    @app.post("/settings/scrape/queue")
+    async def settings_scrape_queue(request: Request):
+        """定时队列块（独立提交 + HTMX 局部刷新）：加入（normalized_url 去重追加）/
+        清空；队列存设置键 scrape.link_queue（json 数组）。"""
+        from web import scrape_store
+
+        store = _settings_store(request)
+        form = await request.form()
+        action = str(form.get("action", "add"))
+        queue = await scrape_store.get_link_queue(settings=store)
+        if action == "clear":
+            queue = []
+            await scrape_store.set_link_queue([], settings=store)
+            msg = "定时队列已清空"
+            err = ""
+        else:
+            raw = str(form.get("urls", ""))
+            urls = [l.strip() for l in raw.splitlines() if l.strip()]
+            if not urls:
+                return await _scrape_queue_fragment(
+                    request, queue=queue, err="请先粘贴链接"
+                )
+            # 按 normalized_url 去重追加（同作品不同 xsec_token 只留一条）
+            seen = {scrape_store.normalize_link_url(u) for u in queue}
+            added = 0
+            for u in urls:
+                norm = scrape_store.normalize_link_url(u)
+                if norm not in seen:
+                    queue.append(u)
+                    seen.add(norm)
+                    added += 1
+            await scrape_store.set_link_queue(queue, settings=store)
+            msg = f"已加入 {added} 条（去重后共 {len(queue)} 条）"
+            err = ""
+        if bool(request.headers.get("hx-request")):
+            return await _scrape_queue_fragment(request, queue=queue, msg=msg, err=err)
         return _redirect("/settings/scrape", msg=msg)
 
     @app.post("/tasks/{task_id}/next-confirm")
