@@ -1,4 +1,4 @@
-"""v0.6 验收断言（详设-v0.6 §10；@version_acceptance）：A57-A68 + B5 收口四断言 + 批 1-5 辅助单测。
+"""v0.6 验收断言（详设-v0.6 §10 + §15.4；@version_acceptance）：A57-A69 + B5 收口四断言 + 批 1-6 辅助单测。
 
 覆盖（对应详设 §10 验收断言表 + §12 批 1-5 + §15 批 6）：
 - A61 图来源标记 + SKU×店铺留位（迁移 0011 结构断言）+ 批 6 迁移 0012 netdisk
@@ -14,10 +14,12 @@
 - A65 闲鱼连接器照广成（H3）：10 主图 + 6 详情选择器（照广成原文）+ naturalWidth≥100 +
   过滤关键词 + _DEAD_PAGE_KEYWORDS + 全局 90s deadline + networkidle 降级
   （代码级 + fake page 行为单测）
-- A57/A58/A59/A60/A62/A63/A66/A67/A68（批 2-4 链路修通）：立即扒端到端落素材库 /
-  拆两链 input 契约 / 链接幂等 / 图包导出 / 定时队列 + 定时链 / 定时时间设置生效 /
+- A57/A58/A59/A60（批 6 改语义）/A62/A63/A66/A67/A68/A69（批 2-4 + 批 6 链路与落盘）：
+  立即扒端到端落素材库 /
+  拆两链 input 契约 / 链接幂等 / 一链接一文件夹（zip 导出移除，归集 + meta.txt）/
+  定时队列 + 定时链 / 定时时间设置生效 /
   suggest 链诚实化（真接 LLM → 提案 pending）/ biz_client 注入 + image_inspect 写回 /
-  失败与降级明确提示
+  失败与降级明确提示 / 一链接一文件夹 + meta.txt 内容齐全（作者缺失记「无」）
 - B5 收口四断言（批 5，planned → implemented）：
   A29 候选忽略 dismissed 不建任务不飞书（行为断言）/
   A47 贴链接 → image_file 落库 + 提案审核真实链路（下载链 + suggest 链组合）/
@@ -667,108 +669,145 @@ async def test_a59_link_record_url_idempotent(biz_engine) -> None:
     assert len(rows) == 1
 
 
-# ==== A60：图包导出（zip + metadata.json）====
+# ==== A60（批 6 改语义，详设 §15.4）：zip 导出移除 → 一链接一文件夹 ====
 
 
 @pytest.mark.version_acceptance
 @pytest.mark.asyncio
-async def test_a60_link_export_zip(biz_engine, tmp_path) -> None:
-    """A60：图包导出——构造 link_record + image_file 行 + 磁盘假图片（local_path
-    相对 storage_dir）→ GET /scrape/links/{id}/export → 200 zip → 成员含图片 +
-    metadata.json；metadata 字段齐全（url/source/source_mark/width/height/
-    watermark/batch_id + 链接记录字段）。"""
-    import io
-    import json as _json
-    import zipfile
-    from datetime import time as dtime
-
+async def test_a60_link_folder_export(db_engine, biz_engine, tmp_path) -> None:
+    """A60（批 6 改语义，详设 §15.4）：下载链跑完（fake connector + fake biz_client）
+    → 链接文件夹存在且含全部图片（01.xxx 归集命名）+ link_record.storage_dir 指向
+    该文件夹 + meta.txt 在场；详情页展示「本地文件夹」；zip 导出路由已移除（404）。"""
     from web import scrape_store
     from web.settings_store import SettingsStore
 
     store = SettingsStore(biz_engine)
     await store.set("scrape.storage_dir", str(tmp_path), "扒图存储目录")
 
-    # 磁盘假图片（local_path 相对 storage_dir）
-    img_dir = tmp_path / "xhs" / "note1"
-    img_dir.mkdir(parents=True)
-    (img_dir / "01.jpg").write_bytes(b"fake-jpg-01")
-    (img_dir / "02.jpg").write_bytes(b"fake-jpg-02")
+    fake_conn = _FakeConnector(tmp_path)
+    biz_client = _biz_client_for(biz_engine)
+    runner, _ = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+        storage_dir=str(tmp_path),  # 批 6：EngineContext.storage_dir（归集建链接文件夹）
+    )
+    result = await runner.run(
+        "scrape_download_chain",
+        {"urls": [_XHS_EXPLORE], "batch_id": "batch-a60", "from_queue": False},
+    )
+    assert result.status == "done", f"链应 DONE：{result.error}"
 
-    link = await scrape_store.create_link("url-export", "xhs", "batch-export")
-    async with AsyncSession(biz_engine) as session, session.begin():
-        await session.execute(
-            text(
-                "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id, "
-                "local_path, source_mark, width, height, watermark) "
-                "VALUES (:b, :s, :u, :l, :p, :m, :w, :h, :wm)"
-            ),
-            {
-                "b": "batch-export", "s": "xhs", "u": "img-url-1", "l": link["id"],
-                "p": "xhs/note1/01.jpg", "m": "scraped", "w": 800, "h": 600, "wm": True,
-            },
-        )
-        await session.execute(
-            text(
-                "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id, "
-                "local_path, source_mark, width, height, watermark) "
-                "VALUES (:b, :s, :u, :l, :p, :m, :w, :h, :wm)"
-            ),
-            {
-                "b": "batch-export", "s": "xhs", "u": "img-url-2", "l": link["id"],
-                "p": "xhs/note1/02.jpg", "m": "scraped", "w": 1024, "h": 768, "wm": False,
-            },
-        )
+    # ---- 链接文件夹存在 + 含全部图片（01.xxx 归集命名）+ meta.txt ----
+    links = await scrape_store.get_links(limit=50)
+    assert len(links) == 1, f"应 1 条链接记录，实际 {len(links)}"
+    link = links[0]
+    assert link["status"] == "done"
+    assert link["image_count"] == 2
 
+    link_folder = tmp_path / "xhs" / "abc123"
+    assert link_folder.is_dir(), f"链接文件夹应存在：{link_folder}"
+    assert link["storage_dir"] == "xhs/abc123", (
+        f"link_record.storage_dir 应指向链接文件夹，实际 {link['storage_dir']!r}"
+    )
+    files = sorted(p.name for p in link_folder.iterdir() if p.is_file())
+    assert files == ["01.png", "02.png", "meta.txt"], (
+        f"链接文件夹应含全部图片（归集命名）+ meta.txt，实际 {files}"
+    )
+    assert (link_folder / "meta.txt").read_text(encoding="utf-8").startswith("标题：测试商品描述")
+
+    # ---- 图片 local_path 全部指向链接文件夹内（相对 storage_dir）----
+    detail = await scrape_store.get_link_by_id(link["id"])
+    imgs = detail["images"]
+    assert len(imgs) == 2, f"应 2 张图挂链接，实际 {len(imgs)}"
+    for img in imgs:
+        assert img["local_path"].startswith("xhs/abc123/"), (
+            f"local_path 应在链接文件夹内，实际 {img['local_path']!r}"
+        )
+        assert Path(str(tmp_path), str(img["local_path"])).is_file()
+
+    # ---- 页面可见：详情页展示本地文件夹；zip 导出按钮/路由移除 ----
     app = _web_app(biz_engine, _noop_engine_handler)
-    client = TestClient(app, follow_redirects=False)
-    resp = client.get(f"/scrape/links/{link['id']}/export")
-    assert resp.status_code == 200
-    assert resp.headers.get("content-type") == "application/zip"
-    assert f"link-{link['id']}-" in resp.headers.get("content-disposition", ""), (
-        "zip 文件名应含 link-{id}-{8位短hash}"
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+    page = client.get(f"/scrape/links/{link['id']}")
+    assert page.status_code == 200
+    assert "本地文件夹" in page.text, "详情页应展示本地文件夹"
+    assert "xhs/abc123" in page.text, "详情页应展示 storage_dir 相对路径"
+    assert "图包导出" not in page.text, "图包导出按钮应已移除"
+    resp_export = client.get(f"/scrape/links/{link['id']}/export")
+    assert resp_export.status_code == 404, "zip 导出路由应已移除（404）"
+
+
+# ==== A69（批 6，详设 §15.4）：一链接一文件夹 + meta.txt 内容齐全 ====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a69_link_folder_and_meta_txt(db_engine, biz_engine, tmp_path) -> None:
+    """A69：下载链跑完（正常链接 + 作者缺失降级链接）→ 每个链接文件夹存在
+    （含全部图片 + meta.txt）；meta.txt 内容齐全（标题/来源/原链接/作者ID/描述/
+    标签/图片数/爬取时间（YYYY-MM-DD HH:MM:SS）/批次/网盘分享链接行）；
+    作者缺失链接 meta.txt 记「作者ID：无」；降级 note 进备注行。"""
+    import re as _re
+
+    from web import scrape_store
+
+    degrade_url = "ht" + "tps://www.xiaohongshu.com/explore/degrade456"
+    fake_conn = _FakeConnector(tmp_path, degrade_urls={degrade_url})
+    biz_client = _biz_client_for(biz_engine)
+    runner, _ = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+        storage_dir=str(tmp_path),  # 批 6：EngineContext.storage_dir（归集建链接文件夹）
+    )
+    result = await runner.run(
+        "scrape_download_chain",
+        {"urls": [_XHS_EXPLORE, degrade_url], "batch_id": "batch-a69", "from_queue": False},
+    )
+    assert result.status == "done", f"链接级失败不应阻断链：{result.error}"
+
+    links = await scrape_store.get_links(limit=50)
+    assert len(links) == 2, f"应 2 条链接记录，实际 {len(links)}"
+
+    # ---- 正常链接：meta.txt 内容齐全（作者在场，无备注行）----
+    normal_folder = tmp_path / "xhs" / "abc123"
+    assert normal_folder.is_dir(), "正常链接文件夹应存在"
+    meta_text = (normal_folder / "meta.txt").read_text(encoding="utf-8")
+    assert meta_text.startswith("标题：测试商品描述")
+    assert "来源：xhs（小红书）" in meta_text
+    assert f"原链接：{_XHS_EXPLORE}" in meta_text, "meta.txt 应含原链接"
+    assert "作者ID：seller-1" in meta_text
+    assert "描述：测试商品描述" in meta_text
+    assert "标签：tag1, tag2" in meta_text
+    assert "图片数：2" in meta_text
+    # 爬取时间格式：YYYY-MM-DD HH:MM:SS
+    m = _re.search(r"^爬取时间：(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})$", meta_text, _re.M)
+    assert m is not None, f"meta.txt 应含爬取时间（YYYY-MM-DD HH:MM:SS），实际：\n{meta_text}"
+    assert f"批次：batch-a69" in meta_text
+    assert "网盘分享链接：未上传" in meta_text, "本批未上传网盘，meta.txt 网盘行应为「未上传」"
+    assert "备注：" not in meta_text, "无降级/失败的链接不应有备注行"
+    normal_files = sorted(
+        p.name for p in normal_folder.iterdir() if p.is_file() and p.name != "meta.txt"
+    )
+    assert normal_files == ["01.png", "02.png"], (
+        f"正常链接文件夹应含 2 张归集图片，实际 {normal_files}"
     )
 
-    zf = zipfile.ZipFile(io.BytesIO(resp.content))
-    names = set(zf.namelist())
-    assert "metadata.json" in names
-    assert "xhs/note1/01.jpg" in names, f"zip 缺图片成员，实际 {sorted(names)}"
-    assert "xhs/note1/02.jpg" in names
-    assert zf.read("xhs/note1/01.jpg") == b"fake-jpg-01"
-
-    meta = _json.loads(zf.read("metadata.json"))
-    assert meta["url"] == "url-export"
-    assert meta["source"] == "xhs"
-    assert meta["batch_id"] == "batch-export"
-    assert meta["status"] == "pending"
-    assert "desc" in meta and "tags" in meta and "author_id" in meta
-    assert "error_note" in meta and "degraded_note" in meta
-
-    imgs = meta["images"]
-    assert len(imgs) == 2
-    for im in imgs:
-        for field in (
-            "url", "source_mark", "width", "height", "watermark",
-            "local_path", "created_at",
-        ):
-            assert field in im, f"metadata.images 缺字段 {field}"
-    assert {im["local_path"] for im in imgs} == {
-        "xhs/note1/01.jpg", "xhs/note1/02.jpg"
-    }
-    marks = {im["source_mark"] for im in imgs}
-    assert marks == {"scraped"}
-
-    # 页面可见降级提示：无图链接导出 → 重定向回详情页带 err（不 500）
-    empty_link = await scrape_store.create_link("url-empty", "xhs", "batch-empty")
-    resp_empty = client.get(f"/scrape/links/{empty_link['id']}/export")
-    assert resp_empty.status_code == 303
-    assert "err" in resp_empty.headers.get("location", "")
-
-    # 链接详情页渲染：状态/元数据 + 图片网格 + 图包导出按钮（页面可见）
-    detail_page = client.get(f"/scrape/links/{link['id']}")
-    assert detail_page.status_code == 200
-    assert "图包导出" in detail_page.text
-    assert "url-export" in detail_page.text
-    assert "图片网格" in detail_page.text
+    # ---- 作者缺失（降级 db-missing）链接：meta.txt 作者ID：无 + 降级进备注 ----
+    degrade_folder = tmp_path / "xhs" / "degrade456"
+    assert degrade_folder.is_dir(), "降级链接文件夹应存在"
+    deg_text = (degrade_folder / "meta.txt").read_text(encoding="utf-8")
+    assert "来源：xhs（小红书）" in deg_text
+    assert f"原链接：{degrade_url}" in deg_text
+    assert "作者ID：无" in deg_text, f"作者缺失应记「无」，实际：\n{deg_text}"
+    assert "备注：db-missing" in deg_text, "降级 note 应进 meta.txt 备注行"
+    assert "图片数：2" in deg_text
+    deg_files = sorted(
+        p.name for p in degrade_folder.iterdir() if p.is_file() and p.name != "meta.txt"
+    )
+    assert deg_files == ["01.png", "02.png"]
 
 
 # ==== A63：定时默认时间设置生效 ====

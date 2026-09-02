@@ -287,7 +287,7 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v05.py::test_a56_v05_pages_render"
     desc: "v0.5 页面渲染"
-  # ---- v0.6 扒图重做 A57-A68（分批开发，逐批登记）----
+  # ---- v0.6 扒图重做 A57-A69（分批开发，逐批登记；A60 批 6 改语义 + A69 新增）----
   - id: A57
     version: v0.6
     status: implemented
@@ -306,8 +306,8 @@ assertions:
   - id: A60
     version: v0.6
     status: implemented
-    test: "tests/test_acceptance_v06.py::test_a60_link_export_zip"
-    desc: "图包导出：链接记录导出 zip 含图片 + metadata.json（字段齐全：url/source/source_mark/width/height/watermark/batch_id）"
+    test: "tests/test_acceptance_v06.py::test_a60_link_folder_export"
+    desc: "一链接一文件夹（批 6 改语义，zip 图包导出移除）：下载链跑完 → 链接文件夹存在（含全部图片 01.xxx 归集命名 + meta.txt）+ link_record.storage_dir 指向该文件夹；详情页展示本地文件夹；zip 导出路由移除（404）"
   - id: A61
     version: v0.6
     status: implemented
@@ -348,3 +348,8 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a68_failure_and_degraded_notes"
     desc: "失败/降级明确提示（connector 失败 → failed + error_note；元数据降级 → degraded_note；页面/读接口可见）"
+  - id: A69
+    version: v0.6
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a69_link_folder_and_meta_txt"
+    desc: "一链接一文件夹 + meta.txt（批 6）：下载链跑完 → 链接文件夹存在（含全部图片）+ meta.txt 内容齐全（标题/来源/原链接/作者ID/描述/标签/图片数/爬取时间 YYYY-MM-DD HH:MM:SS/批次/网盘分享链接行；作者缺失记「无」；降级 note 进备注行）"

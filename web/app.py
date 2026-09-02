@@ -427,6 +427,9 @@ def _link_view(l: dict[str, Any]) -> dict[str, Any]:
         "created_at": l.get("created_at"),
         "error_note": l.get("error_note") or "",
         "degraded_note": l.get("degraded_note") or "",
+        # 批 6（详设 §15.1）：链接文件夹相对路径（相对 scrape.storage_dir），
+        # 页面展示「本地文件夹」；为空 = 未落盘（pending/failed）
+        "storage_dir": l.get("storage_dir") or "",
     }
 
 
@@ -591,7 +594,7 @@ def create_app(
 
     @app.get("/scrape/links/{link_id}")
     async def scrape_link_detail(request: Request, link_id: int):
-        """链接详情页：状态/元数据/error_note/degraded_note + 图片网格 + 图包导出按钮。"""
+        """链接详情页：状态/元数据/error_note/degraded_note + 本地文件夹提示 + 图片网格。"""
         from web import scrape_store
 
         detail = await scrape_store.get_link_by_id(link_id)
@@ -608,110 +611,6 @@ def create_app(
                 msg=request.query_params.get("msg", ""),
                 err=request.query_params.get("err", ""),
             ),
-        )
-
-    @app.get("/scrape/links/{link_id}/export")
-    async def scrape_link_export(request: Request, link_id: int):
-        """图包导出（详设-v0.6 §9）：zip = 图片（storage_dir 相对路径读，zip 成员名用
-        相对路径防穿越）+ metadata.json（链接记录字段 + 图片清单）→ StreamingResponse。
-
-        无图/文件缺失 → 降级重定向回详情页（err 提示，页面可见）。
-        """
-        import hashlib
-        import io
-        import json as _json
-        import zipfile
-        from pathlib import Path as _Path
-
-        from web import scrape_store
-
-        detail = await scrape_store.get_link_by_id(link_id)
-        if detail is None:
-            return RedirectResponse(
-                "/scrape?" + urlencode({"err": "链接不存在"}), status_code=303
-            )
-        link = detail["link"]
-        images = detail["images"]
-        if not images:
-            return RedirectResponse(
-                f"/scrape/links/{link_id}?" + urlencode({"err": "该链接暂无图片可导出"}),
-                status_code=303,
-            )
-        storage_root = _Path(
-            str(await _settings_store(request).get("scrape.storage_dir", "/opt/liuquan/scrape/"))
-        )
-        root = storage_root.resolve()
-
-        buf = io.BytesIO()
-        added = 0
-        image_list = []
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for img in images:
-                local = img.get("local_path")
-                member: str | None = None
-                if local:
-                    p = _Path(local)
-                    if not p.is_absolute():
-                        p = root / p
-                    try:
-                        p = p.resolve()
-                        rel = p.relative_to(root)
-                    except ValueError:
-                        rel = None
-                    if p.is_file():
-                        # 成员名用相对路径（防穿越：只在 root 内用相对路径，越界回退扁平名）
-                        member = (
-                            rel.as_posix()
-                            if rel is not None
-                            else f"images/{img['id']}-{p.name}"
-                        )
-                        zf.write(p, arcname=member)
-                        added += 1
-                image_list.append(
-                    {
-                        "url": img.get("url") or "",
-                        "source_mark": img.get("source_mark") or "scraped",
-                        "width": img.get("width"),
-                        "height": img.get("height"),
-                        "watermark": bool(img.get("watermark")),
-                        "local_path": local or "",
-                        "created_at": (
-                            img.get("created_at").isoformat()
-                            if img.get("created_at") is not None
-                            else None
-                        ),
-                    }
-                )
-            metadata = {
-                "url": link.get("url") or "",
-                "source": link.get("source") or "",
-                "status": link.get("status") or "",
-                "desc": link.get("desc") or "",
-                "tags": list(link.get("tags") or []),
-                "author_id": link.get("author_id"),
-                "batch_id": link.get("batch_id") or "",
-                "error_note": link.get("error_note"),
-                "degraded_note": link.get("degraded_note"),
-                "images": image_list,
-            }
-            zf.writestr(
-                "metadata.json",
-                _json.dumps(metadata, ensure_ascii=False, indent=2, default=str),
-            )
-        if added == 0:
-            return RedirectResponse(
-                f"/scrape/links/{link_id}?" + urlencode({"err": "图片文件缺失，无法导出"}),
-                status_code=303,
-            )
-        short_hash = hashlib.sha256(
-            f"{link_id}:{link.get('url') or ''}".encode()
-        ).hexdigest()[:8]
-        filename = f"link-{link_id}-{short_hash}.zip"
-        buf.seek(0)
-        return StreamingResponse(
-            buf,
-            media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
     # ---- 扒图页 JSON 接口（页面 JS 用；照 crm 粘贴链模式）----
@@ -789,7 +688,8 @@ def create_app(
 
     @app.get("/scrape/thumbnail/{image_id}")
     async def scrape_thumbnail(request: Request, image_id: str):
-        """返回图片缩略图（从本地文件读取）。"""
+        """返回图片缩略图（从本地文件读取；批 6：local_path 为相对 storage_dir
+        路径时经设置键 scrape.storage_dir 解析，绝对路径兼容存量）。"""
         from pathlib import Path
         from web import scrape_store
 
@@ -797,6 +697,12 @@ def create_app(
         if not img or not img.get("local_path"):
             return Response("Not found", status_code=404, media_type="text/plain")
         path = Path(img["local_path"])
+        if not path.is_absolute():
+            # 批 6（详设 §15.1）：归集后 local_path = 链接文件夹内相对路径
+            storage_root = Path(
+                str(await _settings_store(request).get("scrape.storage_dir", "/opt/liuquan/scrape/"))
+            )
+            path = storage_root / path
         if not path.exists():
             return Response("File not found", status_code=404, media_type="text/plain")
         import mimetypes

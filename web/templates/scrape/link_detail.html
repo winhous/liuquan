@@ -15,7 +15,7 @@
 {% endif %}
 
 <div class="row g-3">
-  <!-- 左栏：链接信息 + 图包导出 + 选品建议入口 -->
+  <!-- 左栏：链接信息 + 本地文件夹提示 + 选品建议入口 -->
   <div class="col-lg-4">
     <div class="card">
       <div class="card-header">
@@ -52,10 +52,14 @@
           <i class="ti ti-info-circle me-1"></i>降级：{{ link.degraded_note }}
         </div>
         {% endif %}
-        <a href="/scrape/links/{{ link.id }}/export" class="btn btn-primary w-100 mt-3">
-          <i class="ti ti-download me-1"></i>图包导出（zip）
-        </a>
-        <a href="/scrape" class="btn btn-outline-secondary w-100 mt-2">← 返回素材库</a>
+        {% if link.storage_dir %}
+        <!-- 批 6（详设 §15.1）：zip 导出移除 → 一链接一文件夹（本地文件 = 上传网盘单位） -->
+        <div class="alert alert-secondary mt-3 mb-0 py-2 small">
+          <i class="ti ti-folder me-1"></i>本地文件夹：{{ link.storage_dir }}
+          <span class="text-muted">（相对存储目录，含图片 + meta.txt）</span>
+        </div>
+        {% endif %}
+        <a href="/scrape" class="btn btn-outline-secondary w-100 mt-3">← 返回素材库</a>
       </div>
     </div>
     {% if images %}
