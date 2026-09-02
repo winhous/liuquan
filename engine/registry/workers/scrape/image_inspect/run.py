@@ -10,6 +10,9 @@ v0.6 批 4 修通（详设 §5.2）：
 - 文件缺失/路径不可读记 note 不阻断（单图失败不整体失败）
 - 下载链不引用（体检已内联 batch_image_download，2026-09-03 详设修正），
   本工序供「重新体检」独立场景 + A67 验收（worker 级测试）
+- 批 6（详设 §15.1 路径形态变化）：image_file.local_path 已改为**相对
+  storage_dir**（batch_image_download 归集到链接文件夹后落库）——本工序读路径
+  时若 local_path 非绝对路径，用 ctx.storage_dir（EngineContext 装配注入）解析
 
 水印启发式（照批 3 详设：右下角 15% 区域亮度方差 > 40 = 可能有水印）。
 """
@@ -97,7 +100,11 @@ async def run(inputs: ImageInspectInput, ctx: EngineContext) -> InspectionResult
             )
             note_parts.append("部分图片无 local_path")
             continue
+        # 批 6（详设 §15.1）：local_path 为相对 storage_dir 路径时用 ctx.storage_dir
+        # 解析（EngineContext.storage_dir 装配注入；绝对路径按原样用，兼容存量）
         path = Path(str(local_path))
+        if not path.is_absolute() and ctx.storage_dir:
+            path = Path(str(ctx.storage_dir)) / path
         if not path.exists():
             items.append(
                 InspectionItem(image_id=image_id, note=f"文件不存在: {local_path}")

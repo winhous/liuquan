@@ -54,3 +54,8 @@ class EngineContext:
     # 中间产物读非 AI 可见数据，白名单封闭机制（provider）留给 AI 可见数据）。
     # CLI/测试不注入（None，工序内降级 note，照现有 hasattr/缺 key 模式）。
     biz_client: Any | None = None
+    # v0.6 批 6（详设-v0.6 §15.1 技术定）：扒图存储根目录（scrape.storage_dir，
+    # 引擎启动经 engine-params 读取后装配注入，与 connector 落盘根同源）——
+    # batch_image_download 归集（一链接一文件夹 + meta.txt）用它建链接文件夹；
+    # image_inspect 用它把相对 local_path 解析为磁盘绝对路径。测试注入 tmp 目录。
+    storage_dir: str | None = None

@@ -1289,6 +1289,9 @@ def create_app(
                 **runner_kwargs,
                 **{k: v for k, v in params.items() if k in _runner_param_keys},
                 "connectors": build_connectors(params.get("scrape.storage_dir")),
+                # v0.6 §15.1（批 6）：扒图存储根注入 runner → EngineContext.storage_dir
+                # （batch_image_download 归集建链接文件夹用，与 connector 落盘根同源）
+                "storage_dir": params.get("scrape.storage_dir"),
             }
             return TaskRunner(engine, registry, **merged)
 
@@ -1381,6 +1384,7 @@ async def _build_app() -> tuple[Any, int]:
         providers=build_providers(),  # 决策 26 读取接口化：provider = HTTP 调 web 读接口
         connectors=connectors,  # v0.5 §5：外部资源连接器
         biz_client=biz_client,  # v0.6 §5.3：业务写接口客户端（T4 方案 A）
+        storage_dir=storage_dir,  # v0.6 §15.1（批 6）：扒图存储根（归集建链接文件夹）
     )
     app = create_app(
         engine=engine,

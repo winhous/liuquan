@@ -223,6 +223,7 @@ class TaskRunner:
         llm_model: str | None = None,  # v0.5 §7.1：模型名覆盖（engine-params 注入）
         vision_model: str | None = None,  # v0.5 §7.1：模型名覆盖（engine-params 注入）
         biz_client: Any | None = None,  # v0.6 §5.3（T4 方案 A）：业务写接口客户端
+        storage_dir: str | None = None,  # v0.6 §15.1：扒图存储根（engine-params 注入）
     ) -> None:
         self._engine = engine
         self._registry = registry
@@ -232,6 +233,7 @@ class TaskRunner:
         self._providers = dict(providers or {})
         self._connectors = dict(connectors or {})  # v0.5 §5：外部资源连接器
         self._biz_client = biz_client  # v0.6 §5.3：业务写接口客户端（None = 工序降级）
+        self._storage_dir = storage_dir  # v0.6 §15.1：扒图存储根（None = 工序降级）
         self._model_overrides: dict[str, str] = {}  # v0.5 §7.1：模型名覆盖
         if llm_model:
             self._model_overrides["default"] = llm_model
@@ -810,6 +812,7 @@ class TaskRunner:
                 chain_id=chain_id,
                 connectors=self._connectors,  # v0.5 §5：外部资源连接器
                 biz_client=self._biz_client,  # v0.6 §5.3：业务写接口客户端
+                storage_dir=self._storage_dir,  # v0.6 §15.1：扒图存储根（归集用）
             )
             output_value = await self._call_worker_run(worker, inputs_model, ctx)
             output_model = self._coerce_model(output_value, out_cls)

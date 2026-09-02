@@ -4,9 +4,9 @@
 
 id: image_inspect
 domain: scrape
-version: 1
+version: 2
 risk: read
-description: 扒图体检：PIL 读宽高 + 水印启发式判定（零 token）
+description: 扒图体检：PIL 读宽高 + 水印启发式判定（零 token）；批6 经 ctx.storage_dir 解析相对 local_path
 input:
   model: ImageInspectInput
 output:
