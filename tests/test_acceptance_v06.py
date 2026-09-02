@@ -1,11 +1,17 @@
-"""v0.6 验收断言 A61 + 批 1 数据地基单测（详设-v0.6 §10；@version_acceptance）。
+"""v0.6 验收断言 A61/A64/A65 + 批 1 数据地基 + 批 3 连接器单测（详设-v0.6 §10；@version_acceptance）。
 
-覆盖（对应详设 §10 验收断言表 + §12 批 1 数据地基）：
+覆盖（对应详设 §10 验收断言表 + §12 批 1 数据地基 / 批 3 连接器搬回）：
 - A61 图来源标记 + SKU×店铺留位（迁移 0011 结构断言）：scrape.link_record 表存在 +
   关键列（url/normalized_url/source/status/image_count/batch_id/error_note/
   degraded_note）+ UNIQUE(normalized_url)；scrape.image_file 增 link_record_id/
   source_mark/sku_id/shop_id 列 + source_mark 默认 'scraped' + CHECK 四值可插 +
   非法值报错 + uq_scrape_image_link_url 唯一索引存在
+- A64 xhs 连接器照广成（H1/H2）：脚本 from source import XHS（非 from main import
+  download）+ explore_data 中文列 SQL + 差集计数 + 未落盘 ok=False（xsec_token 提示）+
+  vendor source/__init__.py 完整度检查（代码级 + 行为级）
+- A65 闲鱼连接器照广成（H3）：10 主图 + 6 详情选择器（照广成原文）+ naturalWidth≥100 +
+  过滤关键词 + _DEAD_PAGE_KEYWORDS + 全局 90s deadline + networkidle 降级
+  （代码级 + fake page 行为单测）
 - 批 1 单测（非 acceptance）：scrape_store create_link 幂等（同 normalized_url
   二次调用返回现有行 created=false）/ get_links 筛选 / get_link_by_id（含图片列表）/
   update_link 落库 / get_link_queue/set_link_queue 读写 / normalize_link_url
@@ -20,10 +26,16 @@ image_file 不清 link_record，本文件要清全）。
 注意（本文件自身在 P2 扫描对象内，tests/ 只有 fixtures/ 豁免）：
 - URL/IP 一律运行期拼接，单一字符串常量不得含完整 scheme 或 IPv4 四段
 - 不读 os.environ / os.getenv（P2 规则4）
+- fake page / fake 连接器桩只住 tests/（R12 桩只住 tests/；P3-4 tests/ 豁免）
+- 连接器行为单测不真发网络请求（R12 零网络）：subprocess.run / sqlite3.connect /
+  sync_playwright 全部 monkeypatch 假对象
 """
 
 from __future__ import annotations
 
+import sqlite3
+import subprocess
+import time as _time
 from pathlib import Path
 
 import httpx
@@ -786,3 +798,428 @@ async def test_scrape_run_engine_error_friendly(biz_engine) -> None:
     assert data["ok"] is False
     assert "422" in data["error"], f"错误应透传引擎 422 详情：{data['error']}"
     assert "input 校验失败" in data["error"]
+
+
+# =====================================================================
+# 批 3：连接器搬回（详设 §6/§12 批 3）——A64 xhs / A65 闲鱼（照广成）
+# =====================================================================
+
+
+# ---- fake page 桩（只住 tests/，R12 桩只住 tests/；P3-4 tests/ 豁免）----
+
+
+class _FakeLocator:
+    """fake page.locator：每选择器一组 img 属性 dict（只住 tests/）。"""
+
+    def __init__(self, imgs: list[dict]) -> None:
+        self._imgs = imgs
+        self.first = _FakeElement(imgs[0]) if imgs else _FakeElement({})
+
+    def count(self) -> int:
+        return len(self._imgs)
+
+    def nth(self, i: int) -> "_FakeElement":
+        return _FakeElement(self._imgs[i])
+
+
+class _FakeElement:
+    """fake 元素：get_attribute / inner_text。"""
+
+    def __init__(self, attrs: dict) -> None:
+        self._attrs = attrs
+
+    def get_attribute(self, name: str) -> str | None:
+        return self._attrs.get(name)
+
+    def inner_text(self, timeout: int | None = None) -> str:
+        return self._attrs.get("_inner_text", "")
+
+
+class _FakeResponse:
+    """fake page.request.get 响应：ok + body。"""
+
+    def __init__(self, body: bytes) -> None:
+        self.ok = True
+        self._body = body
+
+    def body(self) -> bytes:
+        return self._body
+
+
+class _FakePage:
+    """fake playwright page（只住 tests/）：selector → img 列表；evaluate 按脚本特征分发。"""
+
+    def __init__(
+        self,
+        selectors: dict | None = None,
+        body_text: str = "",
+        title: str = "",
+        seller_eval: str = "",
+        harvest_srcs: tuple = (),
+        request_body: bytes = b"x" * 20_000,
+    ) -> None:
+        self._selectors = selectors or {}
+        self._body_text = body_text
+        self._title = title
+        self._seller_eval = seller_eval
+        self._harvest_srcs = list(harvest_srcs)
+        self._request_body = request_body
+        self.downloaded: list[str] = []
+        self.goto_calls: list[tuple[str, str | None]] = []
+
+    @property
+    def mouse(self) -> "_FakePage":
+        return self
+
+    @property
+    def request(self) -> "_FakePage":
+        return self
+
+    def wheel(self, dx: int = 0, dy: int = 0) -> None:
+        pass
+
+    def wait_for_timeout(self, ms: int) -> None:
+        pass
+
+    def goto(self, url: str, wait_until: str | None = None, timeout: int | None = None) -> None:
+        self.goto_calls.append((url, wait_until))
+
+    def locator(self, selector: str) -> _FakeLocator:
+        return _FakeLocator(self._selectors.get(selector, []))
+
+    def title(self) -> str:
+        return self._title
+
+    def evaluate(self, script: str):
+        if "innerText" in script:
+            return self._body_text
+        if "naturalWidth" in script:
+            return self._harvest_srcs
+        if "__INITIAL_STATE__" in script or "__PRELOADED_STATE__" in script:
+            return self._seller_eval
+        return None
+
+    def get(self, url: str, timeout: int | None = None) -> _FakeResponse:
+        self.downloaded.append(url)
+        return _FakeResponse(self._request_body)
+
+
+class _FakeSyncPlaywright:
+    """fake sync_playwright() 上下文（只住 tests/）：chromium.launch → browser → page。"""
+
+    def __init__(self, page: _FakePage) -> None:
+        self._page = page
+
+    def __enter__(self) -> "_FakePW":
+        return _FakePW(self._page)
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+class _FakePW:
+    """fake playwright 实例：pw.chromium（BrowserType）→ launch() → browser（new_page/close 挂本对象）。"""
+
+    def __init__(self, page: _FakePage) -> None:
+        self._page = page
+
+    @property
+    def chromium(self) -> "_FakePW":
+        # 真实 playwright 里 pw.chromium 是 BrowserType 对象（属性非方法），launch() 返回 Browser
+        return self
+
+    def launch(self, headless: bool = True) -> "_FakePW":
+        return self
+
+    def new_page(self, user_agent: str | None = None, viewport: dict | None = None) -> _FakePage:
+        return self._page
+
+    def close(self) -> None:
+        pass
+
+
+# ==== A64：xhs 连接器照广成（H1/H2，代码级 + 行为级）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a64_xhs_connector_studio_style(tmp_path, monkeypatch) -> None:
+    """A64：xhs 连接器照广成——源码断言（from source import XHS / explore_data 中文列 /
+    差集计数 / xsec_token 提示 / vendor source/__init__ 完整度）+ available 行为 +
+    差集下载行为（本次新增不算历史图）。"""
+    src = (REPO_ROOT / "engine" / "connectors" / "xhs.py").read_text(encoding="utf-8")
+
+    # H1：子进程脚本 from source import XHS（非 from main import download，后者必 ImportError）
+    assert "from source import XHS" in src, "子进程脚本应 from source import XHS"
+    assert "from main import download" not in src, "不得再 from main import download（必 ImportError）"
+    assert "folder_mode=True" in src
+    assert "image_format='JPEG'" in src
+    assert "xhs.extract" in src
+    # unset 代理 6 key（含 all_proxy）+ PATH 补 ~/.local/bin + 180s 超时
+    assert "all_proxy" in src
+    assert "http_proxy" in src and "https_proxy" in src
+    assert ".local" in src and "bin" in src
+    assert "180" in src
+
+    # H2：元数据 SQL explore_data 中文列（非 note_data 表/英文列）
+    assert "explore_data" in src and "作品描述" in src, "SQL 应查 explore_data 中文列"
+    assert "note_data" not in src, "note_data 表已废弃（表/列名全错）"
+
+    # 差集计数：扒前/扒后两次 rglob（before/after）
+    assert src.count("rglob") >= 2, "差集计数应两次 rglob（before/after）"
+    assert "before" in src and "after" in src
+
+    # 未落盘 → ok=False + xsec_token 过期提示
+    assert "xsec_token" in src, "未落盘 note 应含 xsec_token 提示"
+
+    # vendor 完整度：available 检查 source/__init__.py（非仅目录存在）
+    assert "__init__.py" in src and '"source"' in src
+
+    # vendor 完整度真测（B4-7）：真实 vendor 的 source/__init__.py 必须存在
+    real_vendor = REPO_ROOT / "vendor" / "XHS-Downloader" / "source" / "__init__.py"
+    assert real_vendor.is_file(), "vendor/XHS-Downloader/source/__init__.py 应存在（vendor 完整度真测）"
+
+    # available 行为：仅目录存在（无 source/__init__.py）→ False；补齐 → True
+    from engine.connectors.xhs import XHSConnector
+
+    connector = XHSConnector()
+    fake_vendor = tmp_path / "vendor-xhs"
+    fake_vendor.mkdir()
+    monkeypatch.setattr(connector, "_vendor", lambda: fake_vendor)
+    assert connector.available is False, "仅目录存在（无 source/__init__.py）不应判可用"
+    (fake_vendor / "source").mkdir()
+    (fake_vendor / "source" / "__init__.py").write_text("", encoding="utf-8")
+    assert connector.available is True
+
+    # 行为：下载成功 paths=本次新增（差集语义）——历史图不算进本次 count/paths
+    storage = tmp_path / "storage"
+    out_dir = storage / "xhs"
+    dl = out_dir / "Download"
+    dl.mkdir(parents=True)
+    (dl / "old.jpg").write_bytes(b"old-historical")  # 历史图（before 已含）
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        new_dir = dl / "note1"
+        new_dir.mkdir(exist_ok=True)
+        (new_dir / "01.jpg").write_bytes(b"new-download")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    result = await connector.download(
+        _XHS_EXPLORE + "?xsec_token=TOK1",
+        batch_id="batch-a64",
+        storage_dir=str(storage),
+    )
+    assert result.ok is True, result.note
+    assert result.data is not None
+    assert result.data["count"] == 1, f"差集语义：count 应只算本次新增，实际 {result.data}"
+    assert [Path(p).name for p in result.data["paths"]] == ["01.jpg"], (
+        f"差集语义：paths 应只含本次新增，实际 {result.data['paths']}"
+    )
+    assert result.data["source"] == "xhs"
+    assert "db-missing" in result.note, (
+        "图已落盘 + 元数据降级应记 note（db-missing），不整体失败"
+    )
+
+
+@pytest.mark.asyncio
+async def test_xhs_behavior_metadata_chinese_columns(monkeypatch, tmp_path) -> None:
+    """xhs 元数据：SQL 查 explore_data 中文列（作品描述/作品标签/作者ID），标签空格拆分。"""
+    from engine.connectors.xhs import XHSConnector
+
+    connector = XHSConnector(storage_dir=str(tmp_path / "storage"))
+    out_dir = tmp_path / "storage" / "xhs"
+    dl = out_dir / "Download"
+    dl.mkdir(parents=True)
+    (dl / "ExploreData.db").write_bytes(b"")  # 存在性检查通过
+
+    sql_seen: list[str] = []
+
+    class _FakeCursor:
+        def fetchone(self):
+            return ("测试描述 多行", "tag1 tag2 tag3", "author-xyz")
+
+    class _FakeConn:
+        def __init__(self, path: str) -> None:
+            self._path = path
+
+        def execute(self, sql: str, params: tuple):
+            sql_seen.append(sql)
+            assert "explore_data" in sql and "作品描述" in sql, (
+                f"SQL 应查 explore_data 中文列: {sql}"
+            )
+            assert "note_data" not in sql
+            return _FakeCursor()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(sqlite3, "connect", _FakeConn)
+    meta, note = connector._read_xhs_meta(out_dir, _XHS_EXPLORE)
+    assert note == ""
+    assert meta["desc"] == "测试描述 多行"
+    assert meta["tags"] == ["tag1", "tag2", "tag3"], "标签应空格拆分"
+    assert meta["author_id"] == "author-xyz"
+    assert sql_seen and '"作品ID" = ?' in sql_seen[0], (
+        f"SQL 应按作品ID 精确匹配: {sql_seen}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_xhs_behavior_no_files_ok_false(monkeypatch, tmp_path) -> None:
+    """xhs 未落盘：paths 空 → ok=False + note 含 xsec_token 过期提示。"""
+    from engine.connectors.xhs import XHSConnector
+
+    connector = XHSConnector(storage_dir=str(tmp_path / "storage"))
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    result = await connector.download(
+        _XHS_EXPLORE + "?xsec_token=TOK2", batch_id="batch-xhs-nofiles"
+    )
+    assert result.ok is False
+    assert "xsec_token" in result.note
+    assert "未落盘" in result.note
+
+
+# ==== A65：闲鱼连接器照广成（H3，代码级 + fake page 行为单测）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a65_xianyu_connector_studio_style() -> None:
+    """A65：闲鱼连接器照广成——10 主图 + 6 详情选择器（照广成原文）+ 过滤关键词 +
+    _DEAD_PAGE_KEYWORDS + GLOBAL_TIMEOUT=90 + naturalWidth 阈值 100 + _MIN_IMG_BYTES +
+    networkidle 降级（代码级）。"""
+    from engine.connectors import xianyu as mod
+
+    # 主图选择器 ≥10 套（照广成 _MAIN_IMG_SELECTORS 原文 10 套，命中即停）
+    assert len(mod._MAIN_IMG_SELECTORS) >= 10, mod._MAIN_IMG_SELECTORS
+    for kw in (
+        "swiper-slide", "carousel", "gallery", "mainImg", "main-image",
+        "imageMain", "picMain", "imageBox", "slider", "slide",
+    ):
+        assert any(kw in sel for sel in mod._MAIN_IMG_SELECTORS), f"主图选择器缺 {kw}"
+
+    # 详情选择器 ≥6 套
+    assert len(mod._DETAIL_IMG_SELECTORS) >= 6, mod._DETAIL_IMG_SELECTORS
+    for kw in ("itemDesc", "desc", "detail", "content", "ImageText", "imageText"):
+        assert any(kw in sel for sel in mod._DETAIL_IMG_SELECTORS), f"详情选择器缺 {kw}"
+
+    # URL 过滤关键词（照广成原文 10 个，含 avatar/icon/logo/qrcode）
+    assert len(mod._FILTER_KEYWORDS) >= 9
+    for kw in (
+        "avatar", "icon", "logo", "sprite", "placeholder", "loading",
+        "blank", "default", "qrcode", "qr-code",
+    ):
+        assert kw in mod._FILTER_KEYWORDS, f"过滤关键词缺 {kw}"
+
+    # 失效页关键词
+    assert "宝贝被删掉" in mod._DEAD_PAGE_KEYWORDS
+    assert "已下架" in mod._DEAD_PAGE_KEYWORDS
+
+    # 全局 90s deadline（time.monotonic 逐张检查，非 set_default_timeout）
+    assert mod.GLOBAL_TIMEOUT == 90
+    # naturalWidth/Height ≥ 100 大图过滤
+    assert mod._MIN_IMG_SIZE == 100
+    # 文件大小过滤 15KB
+    assert mod._MIN_IMG_BYTES == 15_000
+
+    # networkidle 优先 + domcontentloaded 降级 + 全页兜底 _harvest_all_imgs
+    src = (REPO_ROOT / "engine" / "connectors" / "xianyu.py").read_text(encoding="utf-8")
+    assert "networkidle" in src and "domcontentloaded" in src
+    assert "_harvest_all_imgs" in src
+    assert "naturalWidth" in src
+    assert "naturalHeight" in src
+
+
+@pytest.mark.asyncio
+async def test_xianyu_behavior_main_img_collect() -> None:
+    """闲鱼主图选择器命中即收集（fake page，零网络）。"""
+    from engine.connectors.xianyu import XianyuConnector, _MAIN_IMG_SELECTORS
+
+    img1 = "ht" + "tps://img.alicdn.com/imgextra/i1/aaa.jpg"
+    img2 = "ht" + "tps://img.alicdn.com/imgextra/i2/bbb.jpg"
+    page = _FakePage(
+        selectors={_MAIN_IMG_SELECTORS[0]: [{"src": img1}, {"src": img2}]},
+    )
+    connector = XianyuConnector()
+    urls = connector._collect_image_urls(page)
+    assert urls == [img1, img2]
+
+
+@pytest.mark.asyncio
+async def test_xianyu_behavior_filter_keywords_skip() -> None:
+    """闲鱼 URL 过滤：avatar/icon/logo/qrcode + data: 排除，正常大图保留。"""
+    from engine.connectors.xianyu import XianyuConnector
+
+    connector = XianyuConnector()
+    assert connector._is_valid_image_url("ht" + "tps://img.alicdn.com/avatar/1.jpg") is False
+    assert connector._is_valid_image_url("ht" + "tps://img.alicdn.com/xx/icon.png") is False
+    assert connector._is_valid_image_url("ht" + "tps://img.alicdn.com/logo.png") is False
+    assert connector._is_valid_image_url("ht" + "tps://img.alicdn.com/qrcode.png") is False
+    assert connector._is_valid_image_url("data:image/png;base64,xx") is False
+    assert connector._is_valid_image_url("ht" + "tps://img.alicdn.com/imgextra/i1/real.jpg") is True
+
+
+@pytest.mark.asyncio
+async def test_xianyu_behavior_dead_page_deletes_images(monkeypatch, tmp_path) -> None:
+    """闲鱼失效页：body 命中「宝贝被删掉」→ 删已下载垃圾图 + dead-page 标记 + desc 标记。"""
+    from engine.connectors import xianyu as mod
+    from engine.connectors.xianyu import XianyuConnector
+
+    out_dir = tmp_path / "xianyu" / "item123"
+    out_dir.mkdir(parents=True)
+
+    img = "ht" + "tps://img.alicdn.com/imgextra/i9/dead.jpg"
+    page = _FakePage(
+        selectors={mod._MAIN_IMG_SELECTORS[0]: [{"src": img}]},
+        body_text="该宝贝被删掉或不存在，请重新搜索",
+    )
+    monkeypatch.setattr(mod, "sync_playwright", lambda: _FakeSyncPlaywright(page))
+
+    connector = XianyuConnector(storage_dir=str(tmp_path))
+    deadline = _time.monotonic() + 90
+    paths, desc, author_id, note = connector._scrape(
+        "ht" + "tps://www.goofish.com/item?id=item123", out_dir, deadline
+    )
+    assert paths == []
+    assert desc == "商品已失效/删除"
+    assert "dead-page" in note
+    assert not any(out_dir.iterdir()), "失效页应删除已下载垃圾图"
+
+
+@pytest.mark.asyncio
+async def test_xianyu_behavior_deadline_truncates(tmp_path) -> None:
+    """闲鱼全局 90s deadline：deadline 已过 → 一张都不下载（逐张检查语义）。"""
+    from engine.connectors.xianyu import XianyuConnector
+
+    page = _FakePage()
+    connector = XianyuConnector()
+    paths = connector._download_images(
+        page,
+        ["u1.jpg", "u2.jpg"],
+        tmp_path,
+        deadline=_time.monotonic() - 1,  # 已过期
+    )
+    assert paths == []
+    assert page.downloaded == [], "deadline 已过不应发起任何下载"
+
+
+@pytest.mark.asyncio
+async def test_xianyu_playwright_missing_note(monkeypatch) -> None:
+    """闲鱼 playwright 未装 → ok=False + 安装指引 note（照广成原文）。"""
+    from engine.connectors import xianyu as mod
+    from engine.connectors.xianyu import XianyuConnector
+
+    monkeypatch.setattr(mod, "_PW_AVAILABLE", False)
+    connector = XianyuConnector()
+    assert connector.available is False
+    result = await connector.download(
+        "ht" + "tps://www.goofish.com/item?id=12345", batch_id="batch-xianyu"
+    )
+    assert result.ok is False
+    assert "pip install playwright" in result.note
+    assert "install chromium" in result.note

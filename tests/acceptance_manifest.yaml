@@ -325,14 +325,14 @@ assertions:
     desc: "定时默认时间设置生效：改 scrape.schedule_time → 设置键变化 + 定时页 scrape_download_chain cron 变化（update_time 实锤）"
   - id: A64
     version: v0.6
-    status: planned
-    plan: "批 3 后补：test_a64_xhs_connector_studio_style——xhs 照广成（脚本含 from source import XHS + explore_data 中文列 + 差集计数 + 未落盘 ok=False + xsec_token 提示 + vendor source/__init__ 完整度）"
-    desc: "xhs 连接器照广成（代码级）"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a64_xhs_connector_studio_style"
+    desc: "xhs 连接器照广成（H1/H2）：脚本 from source import XHS + explore_data 中文列 SQL + 差集计数（本次新增）+ 未落盘 ok=False（xsec_token 提示）+ vendor source/__init__ 完整度检查（代码级 + available/差集行为单测 test_xhs_behavior_metadata_chinese_columns / test_xhs_behavior_no_files_ok_false）"
   - id: A65
     version: v0.6
-    status: planned
-    plan: "批 3 后补：test_a65_xianyu_connector_studio_style——闲鱼照广成（11 主图+6 详情选择器 + naturalWidth≥100 + 9 类过滤关键词 + _DEAD_PAGE_KEYWORDS + 全局 90s deadline + networkidle 降级）"
-    desc: "闲鱼连接器照广成（代码级）"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a65_xianyu_connector_studio_style"
+    desc: "闲鱼连接器照广成（H3）：10 主图（照广成原文）+ 6 详情选择器 + naturalWidth≥100 + 10 过滤关键词 + _DEAD_PAGE_KEYWORDS + 全局 90s deadline + networkidle 降级（代码级；行为单测 test_xianyu_behavior_main_img_collect / filter_keywords_skip / dead_page_deletes_images / deadline_truncates / playwright_missing_note）"
   - id: A66
     version: v0.6
     status: planned
