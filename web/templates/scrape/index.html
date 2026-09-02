@@ -20,14 +20,22 @@
           <span id="scrape-url-count" class="badge bg-secondary-lt mt-2">识别到 0 个链接</span>
         </div>
         <div class="form-check mb-2">
-          <input class="form-check-input" type="checkbox" id="upload-netdisk" checked>
+          {# 批 8（详设 §15.2/§15.5-4）：复选框初始值 = 设置键 netdisk.upload_default（页面渲染读键，缺省勾选） #}
+          <input class="form-check-input" type="checkbox" id="upload-netdisk"
+                 {{ 'checked' if upload_default else '' }}>
           <label class="form-check-label" for="upload-netdisk">
             同步上传网盘 <span class="text-muted small">（扒完自动上传夸克「扒图素材」文件夹；未配置夸克授权时标记失败并提示）</span>
           </label>
         </div>
-        <button id="btn-start-scrape" class="btn btn-primary w-100" onclick="startScrapeTask()" disabled>
-          🚀 立即扒
-        </button>
+        <div class="d-grid gap-2">
+          <button id="btn-start-scrape" class="btn btn-primary" onclick="startScrapeTask()" disabled>
+            🚀 立即扒
+          </button>
+          {# 批 8（详设 §15.3 F4）：加入定时队列按钮回归扒图页（normalized_url 去重） #}
+          <button id="btn-queue-add" class="btn btn-outline-secondary" onclick="addToQueue()">
+            ⏰ 加入定时队列
+          </button>
+        </div>
         <div id="scrape-run-result" class="mt-2"></div>
         <div class="mt-3 small">
           <p class="text-muted mb-1">
@@ -37,21 +45,15 @@
             <i class="ti ti-alert-triangle me-1"></i>不支持平台会提示错误。
           </p>
           <p class="text-muted mb-0">
-            <i class="ti ti-clock me-1"></i>定时扒（加入定时队列 / 定时默认时间）→ <a href="/settings/scrape">设置 → 扒图设置</a>
+            <i class="ti ti-clock me-1"></i>加入定时队列 → 到点自动批量扒（时间见下方队列卡；改时间 → <a href="/settings/scrape">设置 → 扒图设置</a>）。
           </p>
         </div>
       </div>
     </div>
-    {% if queue_count %}
-    <div class="card mt-3">
-      <div class="card-body d-flex align-items-center justify-content-between">
-        <div class="text-muted small">
-          <i class="ti ti-clock me-1"></i>定时队列中 <span class="badge bg-orange-lt">{{ queue_count }}</span> 条待扒
-        </div>
-        <a href="/settings/scrape" class="btn btn-sm btn-outline-secondary">去设置</a>
-      </div>
+    {# 批 8（详设 §15.3 F4）：定时队列管理常驻区块 A 下方（从设置页移回扒图页） #}
+    <div class="mt-3">
+      {% include "scrape/_queue_card.html" %}
     </div>
-    {% endif %}
   </div>
 
   <!-- 区块 B：素材库（链接记录列表，一个链接一条） -->
@@ -147,7 +149,7 @@
         {% else %}
         <div class="text-center py-5 text-muted">
           <div class="h1 mb-2">📸</div>
-          <div>素材库为空——上方贴链接开始扒图，或到「设置 → 扒图设置」加入定时队列</div>
+          <div>素材库为空——上方贴链接立即扒，或点「加入定时队列」定时批量扒</div>
         </div>
         {% endif %}
 
@@ -231,6 +233,49 @@
     } catch (e) {
       alert('网络错误: ' + e.message);
       btn.disabled = false; btn.textContent = original;
+    }
+  }
+
+  // 批 8（详设 §15.3 F4）：定时队列管理——加入/清空（服务端 HX-Request 返回
+  // 队列卡片片段，替换 #scrape-queue-card；页面零 htmx 库依赖，JS 直接驱动）
+  async function postQueue(payload) {
+    const r = await fetch('/scrape/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'HX-Request': 'true' },
+      body: JSON.stringify(payload)
+    });
+    const html = await r.text();
+    const card = document.getElementById('scrape-queue-card');
+    if (card && r.ok) card.outerHTML = html;
+    return { ok: r.ok, html: html };
+  }
+
+  async function addToQueue() {
+    const lines = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) { alert('请先粘贴要定时扒的链接'); return; }
+    const btnQ = document.getElementById('btn-queue-add');
+    const original = btnQ ? btnQ.textContent : '';
+    if (btnQ) { btnQ.disabled = true; btnQ.textContent = '⏳ 加入中…'; }
+    try {
+      const res = await postQueue({ action: 'add', urls: lines });
+      if (!res.ok) {
+        // 服务端错误同样返回片段（err 提示在卡片内）
+        const card = document.getElementById('scrape-queue-card');
+        if (card) card.outerHTML = res.html;
+      }
+    } catch (e) {
+      alert('网络错误: ' + e.message);
+    } finally {
+      if (btnQ) { btnQ.disabled = false; btnQ.textContent = original; }
+    }
+  }
+
+  async function clearQueue() {
+    if (!confirm('确定清空定时队列？')) return;
+    const res = await postQueue({ action: 'clear' });
+    if (!res.ok) {
+      const card = document.getElementById('scrape-queue-card');
+      if (card) card.outerHTML = res.html;
     }
   }
 

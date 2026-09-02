@@ -302,7 +302,7 @@ assertions:
     version: v0.6
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a59_link_record_url_idempotent"
-    desc: "一链接一条 + url 幂等：同链接（含不同 xsec_token）重复提交不重复建记录（normalized_url 唯一）——①设置页定时队列按 normalized_url 去重追加 ②/api/biz/scrape/links 幂等返回 existing"
+    desc: "一链接一条 + url 幂等：同链接（含不同 xsec_token）重复提交不重复建记录（normalized_url 唯一）——①扒图页定时队列（批 8 起 /scrape/queue）按 normalized_url 去重追加 ②/api/biz/scrape/links 幂等返回 existing"
   - id: A60
     version: v0.6
     status: implemented
@@ -369,3 +369,13 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a72_history_upload_entry"
     desc: "历史补传入口（批 7）：素材库链接行「上传网盘」按钮 status=done 且未上传显示 / uploaded 隐藏（DOM/HTML 断言）+ POST /scrape/links/{id}/upload 置 pending 并 create_task(scrape_upload_chain, {link_ids:[id]})（mock 引擎客户端入参实锤）"
+  - id: A73
+    version: v0.6
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a73_queue_on_scrape_page"
+    desc: "定时队列在扒图页（批 8，详设 §15.3 F4 用户拍板，撤销设置页队列块）：/scrape 页含队列管理块（「加入定时队列」按钮 + 队列条数/列表逐条 + [清空] + 定时默认时间提示读设置键）；/settings/scrape 不再含队列块（无「加入定时队列」/scrape-queue-card/「定时队列」标记）；路由 /settings/scrape/queue → /scrape/queue（DOM/HTML 断言，照 A56 页面渲染模式）"
+  - id: A74
+    version: v0.6
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a74_netdisk_upload_default_setting"
+    desc: "设置键 netdisk.upload_default 生效（批 8，详设 §15.2/§15.5-4）：改 false → ①设置键 bool 类型变化（缺省 true）②扒图页「同步上传网盘」复选框初始值 false（页面渲染无 checked；改回 true 勾选）③引擎侧：engine-params 返回 netdisk.upload_default=false + _read_engine_params_from_biz 读取 + 调度模板参数化实锤（定时 input upload_netdisk=false；缺省 true）"

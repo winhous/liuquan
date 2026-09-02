@@ -1,0 +1,37 @@
+{# 上传默认开启卡片块（批 8，详设 §15.2/§15.5-4：设置页独立提交 + HTMX 局部刷新片段共用；
+    上下文：upload_default（bool，设置键 netdisk.upload_default，缺省 true）/ msg / err）
+    开关提交形态：隐藏 off + 复选框 on 同名（服务端 getlist 取末值）；提交按钮带
+    block=upload_default 标记区分本块（未勾选时无复选框值也能路由到本块）。 #}
+<div class="card mt-4" id="scrape-upload-default-card">
+  <div class="card-header">
+    <h3 class="card-title">上传默认开启</h3>
+  </div>
+  <div class="card-body">
+    <form hx-post="/settings/scrape" hx-target="#scrape-upload-default-card" hx-swap="outerHTML">
+      <div class="mb-3">
+        <div class="form-check form-switch">
+          <input type="hidden" name="upload_default" value="off">
+          <input class="form-check-input" type="checkbox" name="upload_default" value="on"
+                 role="switch" id="uploadDefaultEnabled"
+                 {{ 'checked' if upload_default else '' }}>
+          <label class="form-check-label" for="uploadDefaultEnabled">同步上传网盘默认开启</label>
+        </div>
+        <small class="text-muted">
+          <i class="ti ti-info-circle me-1"></i>
+          扒图页「同步上传网盘」复选框的初始勾选状态；定时扒默认上传也用此开关（引擎启动读取，改后需重启引擎生效）。
+        </small>
+      </div>
+      <button class="btn btn-primary" name="block" value="upload_default">保存上传默认开关</button>
+    </form>
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>

@@ -581,11 +581,16 @@ def create_app(
         status: str = "",
         page: str = "1",
     ):
-        """扒图页：区块 A 贴链接（立即扒）+ 区块 B 素材库（链接记录列表 + 筛选/分页）。
+        """扒图页：区块 A 贴链接（立即扒 + 定时队列管理）+ 区块 B 素材库。
 
         筛选：来源（xhs/xianyu/http）· 状态（全部/进行中/完成/失败，GET 参数）；
         「进行中」= pending + downloading（详设 §3.1 筛选口径）。
+        批 8（详设 §15.3）：定时队列管理从设置页移回本页——传入 queue（url 列表）+
+        schedule_time（定时默认时间提示）+ upload_default（同步上传复选框初始值，
+        设置键 netdisk.upload_default，缺省 true）。
         """
+        from datetime import time as _dtime
+
         from web import scrape_store
 
         try:
@@ -606,7 +611,13 @@ def create_app(
         total = await scrape_store.count_links(
             source=source_f, status=status_f, status_in=status_in
         )
-        queue = await scrape_store.get_link_queue(settings=_settings_store(request))
+        store = _settings_store(request)
+        queue = await scrape_store.get_link_queue(settings=store)
+        raw_time = await store.get("scrape.schedule_time", "07:00")
+        schedule_time = (
+            raw_time.strftime("%H:%M") if isinstance(raw_time, _dtime) else str(raw_time)
+        )
+        upload_default = bool(await store.get("netdisk.upload_default", True))
         return templates.TemplateResponse(
             request,
             "scrape/index.html",
@@ -619,7 +630,10 @@ def create_app(
                 page_size=page_size,
                 pages=(total + page_size - 1) // page_size,
                 filters={"source": source, "status": status},
+                queue=queue,
                 queue_count=len(queue),
+                schedule_time=schedule_time,
+                upload_default=upload_default,
                 pending_proposal_count=0,
             ),
         )
@@ -676,7 +690,12 @@ def create_app(
             urls = []
         if not urls:
             return JSONResponse({"ok": False, "error": "链接为空"}, status_code=400)
-        upload_netdisk = bool(data.get("upload_netdisk", True))
+        # 批 8（详设 §15.2/§15.6 批 8 技术定）：服务端缺省 upload_netdisk 读设置键
+        # netdisk.upload_default（缺省 true）——JS 显式提交勾选值时以显式值为准
+        upload_default = bool(
+            await _settings_store(request).get("netdisk.upload_default", True)
+        )
+        upload_netdisk = bool(data.get("upload_netdisk", upload_default))
         batch_id = uuid.uuid4().hex
         try:
             async with _engine_client(request) as client:
@@ -703,6 +722,110 @@ def create_app(
         return JSONResponse(
             {"ok": True, "task_id": resp.get("task_id"), "batch_id": batch_id}
         )
+
+    async def _scrape_queue_fragment(
+        request: Request,
+        *,
+        queue: list,
+        schedule_time: str,
+        msg: str = "",
+        err: str = "",
+    ):
+        """扒图页定时队列卡片片段（批 8，详设 §15.3：加入/清空后局部刷新队列块）。"""
+        return templates.TemplateResponse(
+            request,
+            "scrape/_queue_card.html",
+            _ctx(
+                request,
+                "seo-scrape",
+                queue=queue,
+                queue_count=len(queue),
+                schedule_time=schedule_time,
+                msg=msg,
+                err=err,
+            ),
+        )
+
+    @app.post("/scrape/queue")
+    async def scrape_queue(request: Request):
+        """扒图页「定时队列」管理（批 8，详设 §15.3：原 /settings/scrape/queue 迁来）。
+
+        action=add：urls（多行/列表）按 normalized_url 去重追加（同作品不同
+        xsec_token 只留一条）；action=clear：清空队列。队列存设置键
+        scrape.link_queue（json 数组），语义照批 2/批 4 不变（定时链
+        from_queue 读队列 → 处理 → 链完成清空）。
+
+        响应：HTMX 头（hx-request=true）→ 队列卡片片段 HTML（局部刷新）；
+        非 HTMX → JSON {ok, count, msg}（扒图页 JS fetch 用；错误 400）。
+        """
+        from web import scrape_store
+
+        if not request.cookies.get("role"):
+            return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+        store = _settings_store(request)
+        is_hx = bool(request.headers.get("hx-request"))
+
+        # 定时默认时间（片段提示用；读设置键 scrape.schedule_time，缺省 07:00）
+        from datetime import time as _dtime
+
+        raw_time = await store.get("scrape.schedule_time", "07:00")
+        schedule_time = (
+            raw_time.strftime("%H:%M")
+            if isinstance(raw_time, _dtime)
+            else str(raw_time)
+        )
+
+        async def _fragment(queue: list, msg: str = "", err: str = "") -> Any:
+            return await _scrape_queue_fragment(
+                request,
+                queue=queue,
+                schedule_time=schedule_time,
+                msg=msg,
+                err=err,
+            )
+
+        content_type = str(request.headers.get("content-type", "")).split(";")[0].strip().lower()
+        if content_type == "application/json":
+            data = await request.json()
+            action = str(data.get("action", "add"))
+            raw = data.get("urls", "")
+            if isinstance(raw, list):
+                urls = [str(u).strip() for u in raw if str(u).strip()]
+            else:
+                urls = [u.strip() for u in str(raw).replace(",", "\n").splitlines() if u.strip()]
+        else:
+            form = await request.form()
+            action = str(form.get("action", "add"))
+            urls = [u.strip() for u in str(form.get("urls", "")).splitlines() if u.strip()]
+
+        queue = await scrape_store.get_link_queue(settings=store)
+        if action == "clear":
+            queue = []
+            await scrape_store.set_link_queue([], settings=store)
+            msg = "定时队列已清空"
+            err = ""
+        else:
+            if not urls:
+                if is_hx:
+                    return await _fragment(queue, err="请先粘贴链接")
+                return JSONResponse(
+                    {"ok": False, "error": "请先粘贴链接"}, status_code=400
+                )
+            # 按 normalized_url 去重追加（同作品不同 xsec_token 只留一条）
+            seen = {scrape_store.normalize_link_url(u) for u in queue}
+            added = 0
+            for u in urls:
+                norm = scrape_store.normalize_link_url(u)
+                if norm not in seen:
+                    queue.append(u)
+                    seen.add(norm)
+                    added += 1
+            await scrape_store.set_link_queue(queue, settings=store)
+            msg = f"已加入 {added} 条（去重后共 {len(queue)} 条）"
+            err = ""
+        if is_hx:
+            return await _fragment(queue, msg=msg, err=err)
+        return JSONResponse({"ok": True, "count": len(queue), "msg": msg})
 
     @app.post("/scrape/links/{link_id}/upload")
     async def scrape_link_netdisk_upload(request: Request, link_id: int):
@@ -1833,7 +1956,10 @@ def create_app(
     # 局部刷新，详设-v0.6 §3.2——定时相关设置统一进设置菜单，扒图页不做队列入口）
     @app.get("/settings/scrape")
     async def settings_scrape(request: Request):
-        """扒图设置页：存储目录 / 定时默认时间 / 定时队列 / 夸克登录四块独立提交。
+        """扒图设置页：存储目录 / 定时默认时间 / 上传默认开启 / 夸克登录四块独立提交。
+
+        批 8（详设 §15.3）：定时队列管理块已移回扒图页（/scrape）——本页不再含
+        队列块与队列路由；新增「上传默认开启」开关块（设置键 netdisk.upload_default）。
 
         夸克块页面 GET 不触子进程（批 7 技术定：状态探测只在显式动作执行）——
         只做工具路径存在性判断（quark_available），真实登录状态经「检测登录状态」
@@ -1842,7 +1968,6 @@ def create_app(
         from datetime import time as _dtime
 
         from web import quark_tool
-        from web import scrape_store
 
         store = _settings_store(request)
         storage_dir = str(await store.get("scrape.storage_dir", "/opt/liuquan/scrape/"))
@@ -1850,7 +1975,7 @@ def create_app(
         schedule_time = (
             raw_time.strftime("%H:%M") if isinstance(raw_time, _dtime) else str(raw_time)
         )
-        queue = await scrape_store.get_link_queue(settings=store)
+        upload_default = bool(await store.get("netdisk.upload_default", True))
         return templates.TemplateResponse(
             request,
             "settings/scrape.html",
@@ -1859,8 +1984,7 @@ def create_app(
                 "settings-scrape",
                 storage_dir=storage_dir,
                 schedule_time=schedule_time,
-                queue=queue,
-                queue_count=len(queue),
+                upload_default=upload_default,
                 quark_available=quark_tool.tool_available(),
                 quark_status=None,
                 msg=request.query_params.get("msg", ""),
@@ -1888,22 +2012,21 @@ def create_app(
             ),
         )
 
-    async def _scrape_queue_fragment(
+    async def _scrape_upload_default_fragment(
         request: Request,
         *,
-        queue: list,
+        upload_default: bool,
         msg: str = "",
         err: str = "",
     ):
-        """定时队列卡片片段（HTMX 局部刷新：加入/清空后只刷队列块）。"""
+        """「上传默认开启」开关卡片片段（批 8：独立提交 + HTMX 局部刷新只刷本块）。"""
         return templates.TemplateResponse(
             request,
-            "settings/_scrape_queue_card.html",
+            "settings/_scrape_upload_default_card.html",
             _ctx(
                 request,
                 "settings-scrape",
-                queue=queue,
-                queue_count=len(queue),
+                upload_default=upload_default,
                 msg=msg,
                 err=err,
             ),
@@ -1911,17 +2034,35 @@ def create_app(
 
     @app.post("/settings/scrape")
     async def settings_scrape_save(request: Request):
-        """扒图设置保存：存储目录块 / 定时默认时间块各自独立提交（按表单字段区分）。
+        """扒图设置保存：存储目录 / 定时默认时间 / 上传默认开启 各块独立提交（按表单字段区分）。
 
         定时默认时间保存时同步引擎定时链 cron：list_schedules() 找到
         chain_id=scrape_download_chain 的行则 update_schedule_time（详设 §8，A63 实锤）；
         找不到行跳过不报错（种子批 4 才加），引擎未连接提示不阻塞设置保存。
+        批 8：+「上传默认开启」块（upload_default 字段 on/off → 设置键
+        netdisk.upload_default；独立提交不牵连其他块）。
         """
         from web import scrape_store
 
         store = _settings_store(request)
         is_hx = bool(request.headers.get("hx-request"))
         form = await request.form()
+
+        if str(form.get("block", "")) == "upload_default":
+            # ---- 「上传默认开启」块（批 8，独立提交）----
+            # 隐藏 off + 复选框 on 同名 → getlist 取末值（未勾选=off，勾选=on）
+            upload_default = [str(v) for v in form.getlist("upload_default")][-1] == "on"
+            await store.set(
+                "netdisk.upload_default",
+                upload_default,
+                "同步上传网盘默认开关（页面勾选初始值 + 定时 input）",
+            )
+            msg = f"上传默认开关已保存（{'开启' if upload_default else '关闭'}）"
+            if is_hx:
+                return await _scrape_upload_default_fragment(
+                    request, upload_default=upload_default, msg=msg, err=""
+                )
+            return _redirect("/settings/scrape", msg=msg)
 
         if "schedule_time" in form:
             # ---- 定时默认时间块（独立提交）----
@@ -1973,44 +2114,6 @@ def create_app(
         msg = "扒图设置已保存"
         if is_hx:
             return _hx_redirect("/settings/scrape", msg=msg)
-        return _redirect("/settings/scrape", msg=msg)
-
-    @app.post("/settings/scrape/queue")
-    async def settings_scrape_queue(request: Request):
-        """定时队列块（独立提交 + HTMX 局部刷新）：加入（normalized_url 去重追加）/
-        清空；队列存设置键 scrape.link_queue（json 数组）。"""
-        from web import scrape_store
-
-        store = _settings_store(request)
-        form = await request.form()
-        action = str(form.get("action", "add"))
-        queue = await scrape_store.get_link_queue(settings=store)
-        if action == "clear":
-            queue = []
-            await scrape_store.set_link_queue([], settings=store)
-            msg = "定时队列已清空"
-            err = ""
-        else:
-            raw = str(form.get("urls", ""))
-            urls = [l.strip() for l in raw.splitlines() if l.strip()]
-            if not urls:
-                return await _scrape_queue_fragment(
-                    request, queue=queue, err="请先粘贴链接"
-                )
-            # 按 normalized_url 去重追加（同作品不同 xsec_token 只留一条）
-            seen = {scrape_store.normalize_link_url(u) for u in queue}
-            added = 0
-            for u in urls:
-                norm = scrape_store.normalize_link_url(u)
-                if norm not in seen:
-                    queue.append(u)
-                    seen.add(norm)
-                    added += 1
-            await scrape_store.set_link_queue(queue, settings=store)
-            msg = f"已加入 {added} 条（去重后共 {len(queue)} 条）"
-            err = ""
-        if bool(request.headers.get("hx-request")):
-            return await _scrape_queue_fragment(request, queue=queue, msg=msg, err=err)
         return _redirect("/settings/scrape", msg=msg)
 
     # ---- 夸克网盘登录块（批 7，详设 §15.2：独立提交；页面 GET 不触子进程）----

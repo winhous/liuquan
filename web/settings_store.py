@@ -46,6 +46,9 @@ _TYPE_REGISTRY: dict[str, str] = {
     # v0.6 批 1（详设-v0.6 §4.4）
     "scrape.link_queue": "json",  # 扒图定时队列（JSON 数组）
     "scrape.schedule_time": "time",  # 扒图定时默认时间（默认 07:00）
+    # v0.6 批 8（详设 §15.2/§15.5-4）：同步上传网盘默认开关（默认 true——页面
+    # 「同步上传网盘」复选框初始值 + 引擎定时 input upload_netdisk 共用）
+    "netdisk.upload_default": "bool",
 }
 
 

@@ -223,6 +223,13 @@ def create_biz_router(
         else:
             scrape_schedule_time = str(_raw_schedule_time)
 
+        # v0.6 批 8（详设 §15.2/§15.5-4）：同步上传网盘默认开关（读 settings 表
+        # netdisk.upload_default，缺省 true——引擎启动读入后定时 input
+        # upload_netdisk 用；扒图页复选框初始值同键）
+        netdisk_upload_default = bool(
+            await store.get("netdisk.upload_default", True)
+        )
+
         return {
             "max_attempts": max_attempts,
             "timeout_s": timeout_s,
@@ -231,6 +238,7 @@ def create_biz_router(
             "vision_model": vision_model,
             "scrape.storage_dir": scrape_storage_dir,
             "scrape.schedule_time": scrape_schedule_time,
+            "netdisk.upload_default": netdisk_upload_default,
         }
 
     # ---- 读接口：crm 上下文（引擎侧 provider 白名单与 prompt 数据来源）----

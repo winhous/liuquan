@@ -27,7 +27,7 @@ except ImportError:
     print("红: pyyaml 未安装（pip install pyyaml）")
     sys.exit(1)
 
-# ---- 硬编码 A1-A72 全集（含版本归属，缺任一 id 即红）----
+# ---- 硬编码 A1-A74 全集（含版本归属，缺任一 id 即红）----
 EXPECTED_IDS: dict[str, str] = {
     # v0.1 引擎地基
     "A1": "v0.1", "A2": "v0.1", "A3": "v0.1", "A4": "v0.1",
@@ -57,6 +57,8 @@ EXPECTED_IDS: dict[str, str] = {
     "A70": "v0.6",  # 批 7（详设 §15.4）：夸克上传网盘 flow
     "A71": "v0.6",  # 批 7（详设 §15.4）：未授权/上传失败提示
     "A72": "v0.6",  # 批 7（详设 §15.4）：历史补传入口
+    "A73": "v0.6",  # 批 8（详设 §15.4）：定时队列在扒图页（设置页去队列块）
+    "A74": "v0.6",  # 批 8（详设 §15.4）：netdisk.upload_default 设置键生效
 }
 
 
@@ -108,7 +110,7 @@ def check_manifest(
         sorted_missing = sorted(missing, key=lambda x: int(x[1:]))
         red.append(
             f"manifest 缺少断言编号: {', '.join(sorted_missing)} "
-            f"（共 {len(missing)} 个，需覆盖 A1-A72 全集）"
+            f"（共 {len(missing)} 个，需覆盖 A1-A74 全集）"
         )
 
     # 逐条检查

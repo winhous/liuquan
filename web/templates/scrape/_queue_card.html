@@ -1,0 +1,44 @@
+{# 扒图页定时队列卡片（批 8，详设 §15.3：队列管理从设置页移回扒图页；
+    整页 include + HTMX 片段共用，根 id=scrape-queue-card）
+    上下文：queue（url 列表）/ queue_count / schedule_time（HH:MM）/ msg / err
+    [清空] 走 POST /scrape/queue action=clear（HTMX 局部刷新 + JS 兜底）。 #}
+<div class="card" id="scrape-queue-card">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <h3 class="card-title mb-0"><i class="ti ti-clock me-1"></i>定时队列</h3>
+    <span class="badge bg-orange-lt">{{ queue_count or 0 }} 条待扒</span>
+  </div>
+  <div class="card-body">
+    <p class="text-muted small mb-2">
+      <i class="ti ti-info-circle me-1"></i>
+      定时默认时间：<strong>{{ schedule_time or '07:00' }}</strong>
+      （<a href="/settings/scrape">设置 → 扒图设置</a> 可改），到点自动批量扒；
+      定时跑把队列全部链接建记录并下载，完成后自动清空。
+    </p>
+    {% if queue %}
+    <ul class="list-group list-group-flush">
+      {% for u in queue %}
+      <li class="list-group-item px-0 py-1">
+        <span class="text-truncate d-block small" title="{{ u }}">{{ u }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-muted small mb-2">队列为空——粘贴链接后点「加入定时队列」。</p>
+    {% endif %}
+    <div class="mt-2">
+      <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearQueue()">
+        清空队列
+      </button>
+    </div>
+    {% if msg %}
+    <div class="alert alert-success mt-3 mb-0 py-2" role="alert">
+      <i class="ti ti-check me-1"></i>{{ msg }}
+    </div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-danger mt-3 mb-0 py-2" role="alert">
+      <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+    </div>
+    {% endif %}
+  </div>
+</div>

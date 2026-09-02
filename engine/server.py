@@ -754,29 +754,62 @@ _REMINDER_KEYS = frozenset({"reminders"})
 # ---- v0.6 §5.4：调度器 input 模板（T7，定时触发落地）----
 # 按 chain_id 构建定时/立即运行的任务 input：
 # - scrape_download_chain：{urls: [], batch_id: "sched-<ts>", from_queue: True,
-#   upload_netdisk: True}
+#   upload_netdisk: <netdisk.upload_default 设置键，缺省 true>}
 #   （定时扒：urls 显式空列表——链步骤 input 表达式 task.input.urls 缺键会解析失败
 #    （runner _path_get 引用路径不存在即抛，集成验收真跑实锤任务 failed），
 #    置空列表让表达式解析通过；urls 实际从定时队列读，链成功完成清队列，详设 §5.4。
-#    upload_netdisk=True 批 7（详设 §15.2）：定时扒默认同步上传夸克网盘，
-#    链完成消费者逐条上传回填——未来扒的都要传，用户拍板）
+#    upload_netdisk 批 8（详设 §15.2/§15.6 批 8 技术定）：不再硬编码 true，改读
+#    引擎启动 engine-params 返回的 netdisk.upload_default（缺省 true，用户拍板
+#    「未来扒的都要传」）——_ENGINE_INPUT_DEFAULTS 快照装配，重启引擎生效）
 # - 其余链（crm_reminder_chain / seo_healthcheck_chain）：{"trigger_date": 今天}
 #   行为不变（v0.4/v0.5 测试锁住）
-_SCHEDULE_INPUT_TEMPLATES: dict[str, Callable[[str], dict[str, Any]]] = {
-    "scrape_download_chain": lambda ts: {
+_SCHEDULE_INPUT_TEMPLATES: dict[
+    str, Callable[[str, dict[str, Any]], dict[str, Any]]
+] = {
+    "scrape_download_chain": lambda ts, d: {
         "urls": [],
         "batch_id": f"sched-{ts}",
         "from_queue": True,
-        "upload_netdisk": True,
+        "upload_netdisk": _as_bool(d.get("netdisk.upload_default", True)),
     },
 }
 
+# 批 8：定时 input 模板缺省参数快照（netdisk.upload_default，缺省 true）——
+# 引擎启动 _build_app 读 engine-params 后经 _apply_engine_params 装配；
+# 测试可显式传 defaults 或临时改本快照（照 engine.* 参数语义：重启生效）。
+_ENGINE_INPUT_DEFAULTS: dict[str, Any] = {"netdisk.upload_default": True}
 
-def _schedule_input_for(chain_id: str, ts: str, today_str: str) -> dict[str, Any]:
-    """定时/立即运行的任务 input（按 chain_id 模板；默认 trigger_date=今天）。"""
+
+def _as_bool(value: object, default: bool = True) -> bool:
+    """容错布尔化（engine-params JSON 值为 bool；字符串形态 'false' 等兜底）。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "on")
+    return default
+
+
+def _apply_engine_params(params: dict[str, Any]) -> None:
+    """把引擎参数快照装配到模块级定时 input 缺省（仅 _build_app 生产启动调用）。"""
+    _ENGINE_INPUT_DEFAULTS["netdisk.upload_default"] = _as_bool(
+        params.get("netdisk.upload_default", True)
+    )
+
+
+def _schedule_input_for(
+    chain_id: str,
+    ts: str,
+    today_str: str,
+    defaults: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """定时/立即运行的任务 input（按 chain_id 模板；默认 trigger_date=今天）。
+
+    批 8：defaults = 引擎参数快照（netdisk.upload_default → 定时 input
+    upload_netdisk）；None → 用模块级 _ENGINE_INPUT_DEFAULTS（启动装配值）。
+    """
     template = _SCHEDULE_INPUT_TEMPLATES.get(chain_id)
     if template is not None:
-        return template(ts)
+        return template(ts, defaults if defaults is not None else _ENGINE_INPUT_DEFAULTS)
     return {"trigger_date": today_str}
 
 
@@ -1153,12 +1186,15 @@ async def _read_engine_params_from_biz(
     """启动时经 biz_client 读 web 侧引擎参数（详设 §7.3/§8）。
 
     成功返回 {default_max_attempts, default_timeout_s, backoff_cap, llm_model,
-    vision_model, scrape.storage_dir, scrape.schedule_time}；
+    vision_model, scrape.storage_dir, scrape.schedule_time,
+    netdisk.upload_default}；
     失败（BizApiError/网络）回退默认 + warning 不阻塞启动。
 
     v0.5 §7.1 扩展：+ llm_model / vision_model（模型名覆盖）。
     v0.6 §5.5 扩展：+ scrape.storage_dir（connector 落盘根）/ scrape.schedule_time
     （种子 cron，'HH:MM' 字符串）。
+    v0.6 批 8 扩展：+ netdisk.upload_default（定时 input upload_netdisk 缺省，
+    读设置键缺省 true——§15.2/§15.6 批 8 技术定）。
     """
     defaults: dict[str, Any] = {
         "default_max_attempts": 2,
@@ -1168,6 +1204,7 @@ async def _read_engine_params_from_biz(
         "vision_model": "qwen-vl-max",
         "scrape.storage_dir": "/opt/liuquan/scrape/",
         "scrape.schedule_time": "07:00",
+        "netdisk.upload_default": True,
     }
     if biz_client is None:
         return defaults
@@ -1186,6 +1223,9 @@ async def _read_engine_params_from_biz(
                 ),
                 "scrape.schedule_time": str(
                     data.get("scrape.schedule_time", "07:00")
+                ),
+                "netdisk.upload_default": _as_bool(
+                    data.get("netdisk.upload_default", True)
                 ),
             }
         print(
@@ -1377,6 +1417,9 @@ async def _build_app() -> tuple[Any, int]:
     engine_params = await _read_engine_params_from_biz(biz_client)
     storage_dir = engine_params.get("scrape.storage_dir")
     schedule_time = engine_params.get("scrape.schedule_time")
+    # v0.6 批 8（详设 §15.2/§15.6 批 8 技术定）：netdisk.upload_default →
+    # 模块级定时 input 缺省快照（重启引擎生效，照 engine.* 参数同语义）
+    _apply_engine_params(engine_params)
 
     # v0.5 §5 + v0.6 §5.5：装配 connectors 注册表（工序按 id 引用外部资源；
     # 落盘根 = settings 的 scrape.storage_dir）

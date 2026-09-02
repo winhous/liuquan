@@ -1,6 +1,6 @@
-"""v0.6 验收断言（详设-v0.6 §10 + §15.4；@version_acceptance）：A57-A69 + B5 收口四断言 + 批 1-6 辅助单测。
+"""v0.6 验收断言（详设-v0.6 §10 + §15.4；@version_acceptance）：A57-A74 + B5 收口四断言 + 批 1-8 辅助单测。
 
-覆盖（对应详设 §10 验收断言表 + §12 批 1-5 + §15 批 6）：
+覆盖（对应详设 §10 验收断言表 + §12 批 1-5 + §15 批 6-8）：
 - A61 图来源标记 + SKU×店铺留位（迁移 0011 结构断言）+ 批 6 迁移 0012 netdisk
   三列：scrape.link_record 表存在 +
   关键列（url/normalized_url/source/status/image_count/batch_id/error_note/
@@ -20,6 +20,11 @@
   定时队列 + 定时链 / 定时时间设置生效 /
   suggest 链诚实化（真接 LLM → 提案 pending）/ biz_client 注入 + image_inspect 写回 /
   失败与降级明确提示 / 一链接一文件夹 + meta.txt 内容齐全（作者缺失记「无」）
+- A70/A71/A72（批 7）：夸克上传 flow（勾选上传回填 uploaded / 未勾选零调用）/
+  未授权 -1408 → failed + error_note 登录提示 / 历史补传入口（按钮 DOM + POST 入参实锤）
+- A73/A74（批 8，详设 §15.3/§15.4）：定时队列管理在扒图页（/scrape 含队列块 +
+  /settings/scrape 无队列块）/ 设置键 netdisk.upload_default 生效（改 false →
+  设置键 + engine-params + 扒图页复选框初始值 + 引擎定时 input upload_netdisk=false）
 - B5 收口四断言（批 5，planned → implemented）：
   A29 候选忽略 dismissed 不建任务不飞书（行为断言）/
   A47 贴链接 → image_file 落库 + 提案审核真实链路（下载链 + suggest 链组合）/
@@ -613,8 +618,9 @@ def _web_app(biz_engine, engine_handler) -> FastAPI:
 @pytest.mark.version_acceptance
 @pytest.mark.asyncio
 async def test_a59_link_record_url_idempotent(biz_engine) -> None:
-    """A59：web 层幂等/去重——①POST /settings/scrape/queue 同链接（不同 xsec_token）
-    两次 → 队列（scrape.link_queue 键）只 1 条（normalized_url 去重）；
+    """A59：web 层幂等/去重——①POST /scrape/queue 同链接（不同 xsec_token）
+    两次 → 队列（scrape.link_queue 键）只 1 条（normalized_url 去重；批 8
+    §15.3 队列路由从设置页迁到扒图页）；
     ②POST /api/biz/scrape/links 同 normalized_url 两次 → 只 1 行 link_record
     （第二次返回 existing，created/existing 标记）。"""
     from web import scrape_store
@@ -623,15 +629,17 @@ async def test_a59_link_record_url_idempotent(biz_engine) -> None:
     u1 = _XHS_EXPLORE + "?xsec_token=TOK1&xsec_source=pc_feed"
     u2 = _XHS_EXPLORE + "?xsec_token=TOK2&xsec_source=pc_feed"
 
-    # ① 设置页「定时队列」加入去重（normalized_url 幂等追加）
+    # ① 扒图页「定时队列」加入去重（normalized_url 幂等追加；批 8 起走 /scrape/queue）
     app = _web_app(biz_engine, _noop_engine_handler)
     client = TestClient(app, follow_redirects=False)
     _login(client)
 
-    resp1 = client.post("/settings/scrape/queue", data={"action": "add", "urls": u1})
-    assert resp1.status_code == 303
-    resp2 = client.post("/settings/scrape/queue", data={"action": "add", "urls": u2})
-    assert resp2.status_code == 303
+    resp1 = client.post("/scrape/queue", data={"action": "add", "urls": u1})
+    assert resp1.status_code == 200
+    assert resp1.json().get("ok") is True
+    resp2 = client.post("/scrape/queue", data={"action": "add", "urls": u2})
+    assert resp2.status_code == 200
+    assert resp2.json().get("count") == 1, f"去重后应 1 条，实际 {resp2.json()}"
     store = SettingsStore(biz_engine)
     queue = await store.get("scrape.link_queue", [])
     assert isinstance(queue, list) and len(queue) == 1, (
@@ -875,8 +883,9 @@ async def test_a63_schedule_time_setting_effect(biz_engine) -> None:
 
 
 @pytest.mark.asyncio
-async def test_settings_scrape_queue_clear(biz_engine) -> None:
-    """设置页定时队列清空：action=clear → 队列 [] + 页面片段（HTMX）。"""
+async def test_scrape_queue_route_clear(biz_engine) -> None:
+    """扒图页定时队列清空（批 8：路由从 /settings/scrape/queue 迁到 /scrape/queue）：
+    action=clear → 队列 [] + HTMX 片段（含「定时队列已清空」提示）。"""
     from web import scrape_store
     from web.settings_store import SettingsStore
 
@@ -887,12 +896,13 @@ async def test_settings_scrape_queue_clear(biz_engine) -> None:
     client = TestClient(app, follow_redirects=False)
     _login(client)
     resp = client.post(
-        "/settings/scrape/queue",
+        "/scrape/queue",
         data={"action": "clear"},
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
     assert "定时队列已清空" in resp.text
+    assert 'id="scrape-queue-card"' in resp.text, "HTMX 片段应返回队列卡片"
     assert await store.get("scrape.link_queue", []) == []
 
 
@@ -3141,3 +3151,180 @@ async def test_web_scrape_quark_settings_block(biz_engine, monkeypatch) -> None:
             )
         ).all()
     assert not rows, f"quark 授权码/登录态不应落 settings 表：{rows}"
+
+
+# =====================================================================
+# 批 8（详设 §15.3/§15.4）：A73 定时队列在扒图页 / A74 netdisk.upload_default 生效
+# =====================================================================
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a73_queue_on_scrape_page(biz_engine) -> None:
+    """A73：定时队列管理在扒图页——①/scrape 含队列管理块（「加入定时队列」按钮 +
+    队列条数/列表 + [清空] + 定时默认时间提示）②/settings/scrape 不再含队列块
+    （无「加入定时队列」/ 队列卡片标记）——DOM/HTML 断言（照 A56 页面渲染模式）。
+
+    批 8（详设 §15.3 F4，用户拍板）：设置 → 扒图设置 的定时队列块撤销，
+    队列管理整块移回扒图页（路由 /settings/scrape/queue → /scrape/queue）。
+    """
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    # 预置：队列 2 条（含一个带 xsec_token 的） + 定时默认时间 07:30
+    q1 = _XHS_EXPLORE + "?xsec_token=TOK73A"
+    q2 = _XHS_SHORT
+    await scrape_store.set_link_queue([q1, q2], settings=store)
+    await store.set("scrape.schedule_time", "07:30", "扒图定时默认时间")
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+
+    # ---- ① /scrape 含定时队列管理块 ----
+    page = client.get("/scrape")
+    assert page.status_code == 200, f"/scrape -> {page.status_code}"
+    text = page.text
+    assert "贴链接" in text  # A56 既有断言不破坏
+    assert "加入定时队列" in text, "/scrape 应含「加入定时队列」按钮（回归扒图页）"
+    assert 'id="scrape-queue-card"' in text, "/scrape 应含队列管理卡片（scrape-queue-card）"
+    assert "清空队列" in text, "/scrape 队列块应含 [清空] 按钮"
+    assert "定时默认时间：" in text and "07:30" in text, (
+        "队列块应含定时默认时间提示（读设置键 scrape.schedule_time=07:30）：\n"
+        + text[text.find("定时队列"):text.find("定时队列") + 400]
+    )
+    # 队列列表逐条渲染（HTML 转义后应含 url 原文）
+    assert q1 in text and q2 in text, f"队列列表应含两条链接：{q1!r} / {q2!r}"
+
+    # ---- ② /settings/scrape 不再含队列块 ----
+    page2 = client.get("/settings/scrape")
+    assert page2.status_code == 200, f"/settings/scrape -> {page2.status_code}"
+    t2 = page2.text
+    assert "存储目录" in t2, "/settings/scrape 仍应渲染存储目录块（A56 既有断言）"
+    assert "加入定时队列" not in t2, (
+        "设置页不应再含「加入定时队列」（批 8 撤销设置页队列块）"
+    )
+    assert "scrape-queue-card" not in t2, (
+        "设置页不应再渲染队列卡片（scrape-queue-card）"
+    )
+    assert "定时队列" not in t2, "设置页不应再出现队列块标题「定时队列」"
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a74_netdisk_upload_default_setting(biz_engine) -> None:
+    """A74：设置键 netdisk.upload_default 生效——改 false →
+    ①设置键变化（settings_store bool 类型注册，缺省 true）
+    ②扒图页「同步上传网盘」复选框初始值 false（页面渲染无 checked；改回 true 勾选）
+    ③引擎侧：engine-params 返回变化（false）+ _read_engine_params_from_biz 读取 +
+    调度模板参数化实锤（_schedule_input_for 缺省 true；netdisk.upload_default=false
+    → 定时 input upload_netdisk=false）。（详设 §15.2/§15.5-4 + §15.6 批 8 技术定）
+    """
+    import re as _re
+
+    from engine.server import (
+        _ENGINE_INPUT_DEFAULTS,
+        _apply_engine_params,
+        _read_engine_params_from_biz,
+        _schedule_input_for,
+    )
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+
+    # ---- ① 设置键类型注册：缺省回退 true ----
+    assert await store.get("netdisk.upload_default", True) is True, (
+        "netdisk.upload_default 未设置应回退默认 true"
+    )
+
+    # ---- ② engine-params 缺省返回 true；改 false → 返回 false ----
+    biz_client_tc = TestClient(_biz_app(biz_engine), raise_server_exceptions=False)
+    headers = {"X-Biz-Token": _BIZ_TOKEN}
+    resp = biz_client_tc.get("/api/biz/settings/engine-params", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("netdisk.upload_default") is True, (
+        f"engine-params 缺省应返回 netdisk.upload_default=true，实际 {data.get('netdisk.upload_default')!r}"
+    )
+
+    await store.set("netdisk.upload_default", False, "同步上传网盘默认开关")
+    assert await store.get("netdisk.upload_default", True) is False, (
+        "改 false 后设置键应解析为 False"
+    )
+    resp2 = biz_client_tc.get("/api/biz/settings/engine-params", headers=headers)
+    assert resp2.json().get("netdisk.upload_default") is False, (
+        "改 false 后 engine-params 应返回 netdisk.upload_default=false"
+    )
+
+    # ---- ③ 扒图页复选框初始值（页面渲染读设置键）----
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+
+    page = client.get("/scrape")
+    assert page.status_code == 200
+    assert 'id="upload-netdisk"' in page.text, "扒图页应含同步上传网盘复选框"
+    assert _re.search(r'id="upload-netdisk"[^>]*checked', page.text) is None, (
+        "netdisk.upload_default=false 时复选框初始值应未勾选（无 checked）"
+    )
+    # 对照：改回 true → 勾选
+    await store.set("netdisk.upload_default", True, "同步上传网盘默认开关")
+    page2 = client.get("/scrape")
+    assert _re.search(r'id="upload-netdisk"[^>]*checked', page2.text) is not None, (
+        "netdisk.upload_default=true 时复选框初始值应勾选（含 checked）"
+    )
+
+    # ---- ④ 引擎侧：读取 + 调度模板参数化 ----
+    # ④a _read_engine_params_from_biz：engine-params 返回 false → 引擎参数 false
+    def _params_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/biz/settings/engine-params":
+            return httpx.Response(
+                200,
+                json={
+                    "max_attempts": 2,
+                    "timeout_s": 30.0,
+                    "backoff_cap": 30,
+                    "netdisk.upload_default": False,
+                },
+            )
+        return httpx.Response(404, json={"detail": "not found"})
+
+    from engine.actions.biz_client import BizApiClient
+
+    params_client = BizApiClient(
+        base_url=_FAKE_BIZ_URL,
+        token=_BIZ_TOKEN,
+        transport=httpx.MockTransport(_params_handler),
+    )
+    engine_params = await _read_engine_params_from_biz(params_client)
+    assert engine_params["netdisk.upload_default"] is False, (
+        f"引擎读 engine-params 应得 upload_default=false，实际 {engine_params['netdisk.upload_default']!r}"
+    )
+
+    # ④b 模板参数化：缺省 true（模块快照）；netdisk.upload_default=false → false
+    inp_default = _schedule_input_for("scrape_download_chain", "20260903070000", "2026-09-03")
+    assert inp_default["upload_netdisk"] is True, (
+        f"模块快照缺省 upload_netdisk 应为 true，实际 {inp_default['upload_netdisk']!r}"
+    )
+    inp_false = _schedule_input_for(
+        "scrape_download_chain", "20260903070000", "2026-09-03",
+        defaults={"netdisk.upload_default": False},
+    )
+    assert inp_false["upload_netdisk"] is False, (
+        f"netdisk.upload_default=false → 定时 input upload_netdisk 应为 false，实际 {inp_false['upload_netdisk']!r}"
+    )
+    assert inp_false["from_queue"] is True and inp_false["batch_id"] == "sched-20260903070000"
+
+    # ④c 生产装配实锤：_apply_engine_params 把引擎参数写进模块快照（_build_app 启动路径）
+    prev = _ENGINE_INPUT_DEFAULTS.get("netdisk.upload_default", True)
+    try:
+        _apply_engine_params({"netdisk.upload_default": False})
+        inp_after = _schedule_input_for(
+            "scrape_download_chain", "20260903070000", "2026-09-03"
+        )
+        assert inp_after["upload_netdisk"] is False, (
+            "_apply_engine_params(false) 后定时 input upload_netdisk 应为 false"
+        )
+    finally:
+        _ENGINE_INPUT_DEFAULTS["netdisk.upload_default"] = prev  # 恢复模块快照（同进程防污染）
