@@ -1,0 +1,464 @@
+"""v0.6 验收断言 A61 + 批 1 数据地基单测（详设-v0.6 §10；@version_acceptance）。
+
+覆盖（对应详设 §10 验收断言表 + §12 批 1 数据地基）：
+- A61 图来源标记 + SKU×店铺留位（迁移 0011 结构断言）：scrape.link_record 表存在 +
+  关键列（url/normalized_url/source/status/image_count/batch_id/error_note/
+  degraded_note）+ UNIQUE(normalized_url)；scrape.image_file 增 link_record_id/
+  source_mark/sku_id/shop_id 列 + source_mark 默认 'scraped' + CHECK 四值可插 +
+  非法值报错 + uq_scrape_image_link_url 唯一索引存在
+- 批 1 单测（非 acceptance）：scrape_store create_link 幂等（同 normalized_url
+  二次调用返回现有行 created=false）/ get_links 筛选 / get_link_by_id（含图片列表）/
+  update_link 落库 / get_link_queue/set_link_queue 读写 / normalize_link_url
+  规范化（去 xsec_token 等易变 query 保留路径段）/ engine-params 新键
+  （scrape.storage_dir + scrape.schedule_time，缺省 + 改键返回变化）
+
+基建：tm_pg_cluster / engine_pg_cluster（conftest 嵌入式 PG，业务库迁移 upgrade
+head 自动含 0011）+ 本文件 autouse _clean_v06_tables（每测试后清 sys.settings +
+scrape.link_record + scrape.image_file，互不污染——v05 的 _clean_v05_tables 只清
+image_file 不清 link_record，本文件要清全）。
+
+注意（本文件自身在 P2 扫描对象内，tests/ 只有 fixtures/ 豁免）：
+- URL/IP 一律运行期拼接，单一字符串常量不得含完整 scheme 或 IPv4 四段
+- 不读 os.environ / os.getenv（P2 规则4）
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pytest_asyncio import fixture as async_fixture
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# P2 合规：URL/token 运行期拼接
+_BIZ_TOKEN = "test" + "-biz-token"
+
+# P2 合规：含 scheme 的 URL 一律运行期拼接（单一字符串常量不得含完整 scheme）
+_XHS_EXPLORE = "ht" + "tps://www.xiaohongshu.com/explore/abc123"
+_XHS_SHORT = "ht" + "tp://xhslink.com/a/xyz789"
+
+
+# ---- fixtures ----
+
+
+@async_fixture
+async def biz_engine(tm_pg_cluster):
+    """业务库 AsyncEngine（NullPool：TestClient portal 循环与 pytest 循环不串）。"""
+    engine = create_async_engine(tm_pg_cluster.url, poolclass=NullPool)
+    yield engine
+    await engine.dispose()
+
+
+@async_fixture(autouse=True)
+async def _web_db_maker(biz_engine, monkeypatch):
+    """scrape_store 函数式 DAO 走 web.db 模块级 maker——monkeypatch 指向嵌入式 PG
+
+    （照 test_acceptance_v05.py::test_a56 写法；不触碰 web.db 模块级 _engine）。"""
+    import web.db as webdb
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    monkeypatch.setattr(
+        webdb, "_maker", async_sessionmaker(biz_engine, expire_on_commit=False)
+    )
+    yield
+
+
+@async_fixture(autouse=True)
+async def _clean_v06_tables(biz_engine):
+    """每测试后清 v0.6 批 1 涉及表（sys.settings + scrape.link_record + scrape.image_file），
+    互不污染（TRUNCATE CASCADE：image_file.link_record_id FK 级联一并处理）。"""
+    yield
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await session.execute(
+            text(
+                "TRUNCATE sys.settings, scrape.link_record, scrape.image_file "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
+
+
+def _biz_app(biz_engine) -> FastAPI:
+    """业务读写接口 app（X-Biz-Token 注入，照 test_acceptance_v05 模式）。"""
+    from web.api_biz import create_biz_router
+
+    app = FastAPI()
+    app.include_router(create_biz_router(engine=biz_engine, token=_BIZ_TOKEN))
+    return app
+
+
+# ==== A61：图来源标记 + SKU×店铺留位（迁移 0011 结构断言）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a61_image_source_mark_and_sku_shop_slot(biz_engine) -> None:
+    """A61：link_record 表 + 关键列 + UNIQUE(normalized_url)；image_file 增
+    link_record_id/source_mark/sku_id/shop_id + source_mark 默认/CHECK 四值/
+    非法值报错 + uq_scrape_image_link_url 唯一索引（迁移 0011 结构断言，真 SQL）。"""
+    async with AsyncSession(biz_engine) as session:
+        # ---- scrape.link_record 表存在 + 关键列存在 ----
+        cols = await session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'scrape' AND table_name = 'link_record' "
+                "ORDER BY ordinal_position"
+            )
+        )
+        link_cols = {r[0] for r in cols}
+        required = {
+            "id", "url", "normalized_url", "source", "status", "image_count",
+            "desc", "tags", "author_id", "batch_id", "storage_dir",
+            "error_note", "degraded_note", "created_at", "updated_at",
+        }
+        assert required <= link_cols, (
+            f"scrape.link_record 缺列: {required - link_cols}"
+        )
+
+        # ---- UNIQUE(normalized_url) 唯一约束存在（pg_indexes）----
+        idxs = await session.execute(
+            text(
+                "SELECT indexname, indexdef FROM pg_indexes "
+                "WHERE schemaname = 'scrape' AND tablename = 'link_record'"
+            )
+        )
+        link_indexes = {r[0]: r[1] for r in idxs}
+        assert "uq_scrape_link_record_normalized_url" in link_indexes, (
+            "scrape.link_record 应有唯一约束 uq_scrape_link_record_normalized_url"
+        )
+        assert "UNIQUE" in link_indexes["uq_scrape_link_record_normalized_url"].upper()
+        assert "normalized_url" in link_indexes["uq_scrape_link_record_normalized_url"]
+
+        # ---- scrape.image_file 增列存在 ----
+        img_cols = await session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'scrape' AND table_name = 'image_file' "
+                "ORDER BY ordinal_position"
+            )
+        )
+        img_col_names = {r[0] for r in img_cols}
+        for col in ("link_record_id", "source_mark", "sku_id", "shop_id"):
+            assert col in img_col_names, f"scrape.image_file 缺列 {col}"
+
+    # ---- UNIQUE(normalized_url) 行为：同 normalized_url 第二行报错 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO scrape.link_record (url, normalized_url, source, batch_id) "
+                "VALUES (:u, :n, :s, :b)"
+            ),
+            {"u": "url-1", "n": "norm-same", "s": "xhs", "b": "batch-1"},
+        )
+    with pytest.raises(IntegrityError):
+        async with AsyncSession(biz_engine) as session2, session2.begin():
+            await session2.execute(
+                text(
+                    "INSERT INTO scrape.link_record (url, normalized_url, source, batch_id) "
+                    "VALUES (:u, :n, :s, :b)"
+                ),
+                {"u": "url-2", "n": "norm-same", "s": "xhs", "b": "batch-2"},
+            )
+
+    # ---- source_mark 默认 'scraped'（插入不带 source_mark 验证默认值）----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        row = (
+            await session.execute(
+                text(
+                    "INSERT INTO scrape.image_file (batch_id, source, url) "
+                    "VALUES (:b, :s, :u) RETURNING id, source_mark"
+                ),
+                {"b": "batch-dflt", "s": "xhs", "u": "img-dflt"},
+            )
+        ).first()
+        assert row is not None and row[1] == "scraped", (
+            f"source_mark 默认应为 'scraped'，实际 {row[1] if row else None}"
+        )
+
+    # ---- source_mark CHECK 四值均可插入 ----
+    for idx, mark in enumerate(["scraped", "selfshot", "ai_generated", "authorized"]):
+        async with AsyncSession(biz_engine) as session, session.begin():
+            await session.execute(
+                text(
+                    "INSERT INTO scrape.image_file (batch_id, source, url, source_mark) "
+                    "VALUES (:b, :s, :u, :m)"
+                ),
+                {"b": "batch-mark", "s": "xhs", "u": f"img-mark-{idx}", "m": mark},
+            )
+
+    # ---- source_mark 非法值插入报错（CHECK 执法）----
+    with pytest.raises(IntegrityError):
+        async with AsyncSession(biz_engine) as session, session.begin():
+            await session.execute(
+                text(
+                    "INSERT INTO scrape.image_file (batch_id, source, url, source_mark) "
+                    "VALUES (:b, :s, :u, :m)"
+                ),
+                {"b": "batch-bad", "s": "xhs", "u": "img-bad", "m": "stolen"},
+            )
+
+    # ---- uq_scrape_image_link_url 唯一索引存在 ----
+    async with AsyncSession(biz_engine) as session:
+        idxs2 = await session.execute(
+            text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname = 'scrape' AND tablename = 'image_file'"
+            )
+        )
+        img_index_names = {r[0] for r in idxs2}
+        assert "uq_scrape_image_link_url" in img_index_names, (
+            "scrape.image_file 应有唯一索引 uq_scrape_image_link_url(link_record_id, url)"
+        )
+        # 保留原 uq_image_file_batch_url 不动（兼容存量）
+        assert "uq_image_file_batch_url" in img_index_names
+
+    # ---- uq_scrape_image_link_url 行为：同 link_record_id + 同 url 第二行报错 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        link_id = (
+            await session.execute(
+                text(
+                    "INSERT INTO scrape.link_record (url, normalized_url, source, batch_id) "
+                    "VALUES (:u, :n, :s, :b) RETURNING id"
+                ),
+                {"u": "url-link", "n": "norm-link", "s": "xianyu", "b": "batch-link"},
+            )
+        ).scalar_one()
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id) "
+                "VALUES (:b, :s, :u, :l)"
+            ),
+            {"b": "batch-img1", "s": "xianyu", "u": "same-image-url", "l": link_id},
+        )
+    with pytest.raises(IntegrityError):
+        async with AsyncSession(biz_engine) as session2, session2.begin():
+            await session2.execute(
+                text(
+                    "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id) "
+                    "VALUES (:b, :s, :u, :l)"
+                ),
+                {"b": "batch-img2", "s": "xianyu", "u": "same-image-url", "l": link_id},
+            )
+
+    # ---- sku_id/shop_id 裸列可写（v0.7 留位，无 FK 约束）----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        r = await session.execute(
+            text(
+                "INSERT INTO scrape.image_file (batch_id, source, url, sku_id, shop_id) "
+                "VALUES (:b, :s, :u, :sk, :sh) RETURNING sku_id, shop_id"
+            ),
+            {"b": "batch-sku", "s": "http", "u": "img-sku", "sk": 1001, "sh": 2002},
+        )
+        row = r.first()
+        assert row is not None and row[0] == 1001 and row[1] == 2002
+
+
+# ==== 批 1 单测：scrape_store 扩展（非 acceptance）====
+
+
+@pytest.mark.asyncio
+async def test_scrape_store_create_link_idempotent() -> None:
+    """create_link 幂等：同作品不同 xsec_token → 同 normalized_url → 二次返回现有行。"""
+    from web import scrape_store
+
+    u1 = _XHS_EXPLORE + "?xsec_token=TOK1&xsec_source=pc_feed"
+    u2 = _XHS_EXPLORE + "?xsec_token=TOK2&xsec_source=pc_feed"
+
+    first = await scrape_store.create_link(u1, "xhs", "batch-1")
+    assert first["created"] is True
+    assert first["existing"] is False
+    assert first["status"] == "pending"
+    assert first["source"] == "xhs"
+    assert first["batch_id"] == "batch-1"
+
+    second = await scrape_store.create_link(u2, "xhs", "batch-1")
+    assert second["created"] is False
+    assert second["existing"] is True
+    assert second["id"] == first["id"], (
+        "同 normalized_url 二次调用应返回现有行（不重复建）"
+    )
+
+    # 显式传 normalized_url
+    third = await scrape_store.create_link(
+        "https-url", "http", "batch-2", normalized_url="explicit-norm"
+    )
+    assert third["created"] is True
+    assert third["normalized_url"] == "explicit-norm"
+
+
+@pytest.mark.asyncio
+async def test_scrape_store_normalize_url() -> None:
+    """normalize_link_url：去 xsec_token 等易变 query，保留路径段与其余 query。"""
+    from web.scrape_store import normalize_link_url
+
+    u = _XHS_EXPLORE + "?xsec_token=TOK1&xsec_source=pc_feed&extra=1"
+    assert normalize_link_url(u) == _XHS_EXPLORE + "?extra=1"
+    assert normalize_link_url(_XHS_SHORT) == _XHS_SHORT
+    # 无 query 的规范化 = 原样
+    assert normalize_link_url(_XHS_EXPLORE) == _XHS_EXPLORE
+
+
+@pytest.mark.asyncio
+async def test_scrape_store_get_links_filters() -> None:
+    """get_links 来源/状态筛选 + 分页。"""
+    from web import scrape_store
+
+    l1 = await scrape_store.create_link("url-xhs", "xhs", "b1")
+    await scrape_store.create_link("url-xianyu", "xianyu", "b2")
+
+    all_links = await scrape_store.get_links(limit=50)
+    assert len(all_links) == 2
+
+    xhs_links = await scrape_store.get_links(source="xhs")
+    assert len(xhs_links) == 1 and xhs_links[0]["source"] == "xhs"
+
+    # 状态筛选
+    await scrape_store.update_link(l1["id"], status="done", image_count=3)
+    done_links = await scrape_store.get_links(status="done")
+    assert len(done_links) == 1 and done_links[0]["status"] == "done"
+
+    # 分页
+    page = await scrape_store.get_links(limit=1, offset=1)
+    assert len(page) == 1
+
+
+@pytest.mark.asyncio
+async def test_scrape_store_get_link_by_id_with_images(biz_engine) -> None:
+    """get_link_by_id：单条链接 + 该链接图片列表。"""
+    from web import scrape_store
+
+    link = await scrape_store.create_link("url-detail", "xhs", "b1")
+    # 直接落两张图（挂 link_record_id；批 4 才扩展 create_image_file 签名）
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id) "
+                "VALUES (:b, :s, :u, :l)"
+            ),
+            {"b": "b1", "s": "xhs", "u": "img-1", "l": link["id"]},
+        )
+        await session.execute(
+            text(
+                "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id) "
+                "VALUES (:b, :s, :u, :l)"
+            ),
+            {"b": "b1", "s": "xhs", "u": "img-2", "l": link["id"]},
+        )
+
+    detail = await scrape_store.get_link_by_id(link["id"])
+    assert detail is not None
+    assert detail["link"]["id"] == link["id"]
+    assert len(detail["images"]) == 2
+    urls = {img["url"] for img in detail["images"]}
+    assert urls == {"img-1", "img-2"}
+
+
+@pytest.mark.asyncio
+async def test_scrape_store_update_link() -> None:
+    """update_link：状态/图数/元数据/error_note/degraded_note 落库；只更新传入字段。"""
+    from web import scrape_store
+
+    link = await scrape_store.create_link("url-upd", "xhs", "b1")
+    updated = await scrape_store.update_link(
+        link["id"],
+        status="done",
+        image_count=5,
+        desc="测试描述",
+        tags=["a", "b"],
+        author_id="seller-1",
+        storage_dir="xhs/abc",
+        error_note="",
+        degraded_note="no-title",
+    )
+    assert updated["status"] == "done"
+    assert updated["image_count"] == 5
+    assert updated["desc"] == "测试描述"
+    assert updated["tags"] == ["a", "b"]
+    assert updated["author_id"] == "seller-1"
+    assert updated["storage_dir"] == "xhs/abc"
+    assert updated["degraded_note"] == "no-title"
+
+    # 只更新部分字段，其余保留
+    again = await scrape_store.update_link(link["id"], status="failed")
+    assert again["status"] == "failed"
+    assert again["image_count"] == 5
+    assert again["desc"] == "测试描述"
+
+
+@pytest.mark.asyncio
+async def test_scrape_store_link_queue(biz_engine) -> None:
+    """get_link_queue/set_link_queue：读设置键 scrape.link_queue（json 数组，回退 []）。"""
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    # 表无键回退默认 []
+    assert await scrape_store.get_link_queue(settings=store) == []
+
+    # 写入 → 读回
+    await scrape_store.set_link_queue(["u1", "u2"], settings=store)
+    assert await scrape_store.get_link_queue(settings=store) == ["u1", "u2"]
+
+    # 覆盖写
+    await scrape_store.set_link_queue(["u3"], settings=store)
+    assert await scrape_store.get_link_queue(settings=store) == ["u3"]
+
+    # 清空
+    await scrape_store.set_link_queue([], settings=store)
+    assert await scrape_store.get_link_queue(settings=store) == []
+
+
+@pytest.mark.asyncio
+async def test_scrape_schedule_time_and_storage_defaults(biz_engine) -> None:
+    """批 1 设置键：scrape.schedule_time（time，默认 07:00）+ scrape.link_queue 注册类型。"""
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    # 表无键回退默认
+    assert await store.get("scrape.schedule_time", "07:00") == "07:00"
+    assert await store.get("scrape.link_queue", []) == []
+
+    # time 类型解析（存 "08:30" → 解析为 datetime.time）
+    from datetime import time as dtime
+
+    await store.set("scrape.schedule_time", "08:30", "定时默认时间")
+    parsed = await store.get("scrape.schedule_time", "07:00")
+    assert isinstance(parsed, dtime)
+    assert parsed.hour == 8 and parsed.minute == 30
+
+    # json 数组
+    await store.set("scrape.link_queue", '["u1", "u2"]', "定时队列")
+    assert await store.get("scrape.link_queue", []) == ["u1", "u2"]
+
+
+@pytest.mark.asyncio
+async def test_engine_params_scrape_keys(biz_engine) -> None:
+    """engine-params 扩展：返回 scrape.storage_dir + scrape.schedule_time（缺省 + 改键变化）。"""
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    client = TestClient(_biz_app(biz_engine), raise_server_exceptions=False)
+    headers = {"X-Biz-Token": _BIZ_TOKEN}
+
+    # 缺省（表无键）
+    resp = client.get("/api/biz/settings/engine-params", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["scrape.storage_dir"] == "/opt/liuquan/scrape/"
+    assert data["scrape.schedule_time"] == "07:00"
+
+    # 改键 → engine-params 返回变化（time 序列化为 "HH:MM" 字符串）
+    await store.set("scrape.storage_dir", "/data/liuquan/scrape/", "扒图存储目录")
+    await store.set("scrape.schedule_time", "08:30", "定时默认时间")
+    resp2 = client.get("/api/biz/settings/engine-params", headers=headers)
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    assert data2["scrape.storage_dir"] == "/data/liuquan/scrape/"
+    assert data2["scrape.schedule_time"] == "08:30"

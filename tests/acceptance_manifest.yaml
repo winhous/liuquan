@@ -287,3 +287,9 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v05.py::test_a56_v05_pages_render"
     desc: "v0.5 页面渲染"
+  # ---- v0.6 扒图重做 A57-A68（分批开发，逐批登记）----
+  - id: A61
+    version: v0.6
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a61_image_source_mark_and_sku_shop_slot"
+    desc: "图来源标记 + SKU×店铺留位：image_file.source_mark 默认 scraped + CHECK 四值 + sku_id/shop_id 列存在（迁移 0011 结构断言）"
