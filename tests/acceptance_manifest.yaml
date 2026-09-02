@@ -147,9 +147,9 @@ assertions:
     desc: "确认候选创建任务（含 test_confirm_candidate_twice_rejected 反向）"
   - id: A29
     version: v0.3
-    status: planned
-    plan: "B5 随扒图重做阶段 1 补：dismissed 不建任务、不飞书的行为测试（web /crm/{id}/todos/dismiss → status=dismissed + 无 task + 无飞书调用）"
-    desc: "候选忽略 dismissed：不建任务、不飞书（行为断言；现有 test_candidate_invalid_status_rejected 仅测 DB CHECK 约束非行为，2026-09-03 主代理验收标 planned）"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a29_dismiss_candidate_no_task_no_feishu"
+    desc: "候选忽略 dismissed：不建任务、不飞书（行为断言；web /crm/{id}/todos/dismiss → status=dismissed + tm.task 无新增（domain=crm 数不变）+ send_task_card 零调用；对照 test_candidate_invalid_status_rejected 仅测 DB CHECK 约束非行为，B5 2026-09-03 补真测试）"
   - id: A30
     version: v0.3
     status: implemented
@@ -239,14 +239,14 @@ assertions:
     desc: "导航 SEO 子项扒图优先"
   - id: A47
     version: v0.5
-    status: planned
-    plan: "B5 随扒图重做阶段 1 补：image_file 落库 + 提案审核真实链路测试"
-    desc: "扒图 image_file 落库 + 提案审核真实链路"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a47_link_to_image_file_and_proposal_pending"
+    desc: "扒图 image_file 落库 + 提案审核真实链路（贴链接→下载链真跑→link_record+image_file 落库→勾图→suggest 链真跑（真 provider 读落库元数据 + fake LLM）→tm.task_proposal pending，evidence ref_id∈image_ids，B5 2026-09-03 补真测试）"
   - id: A48
     version: v0.5
-    status: planned
-    plan: "B5 随扒图重做阶段 1 补：tm.task domain=scrape 落点测试"
-    desc: "tm.task domain=scrape 落点"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a48_proposal_approve_task_domain_scrape"
+    desc: "tm.task domain=scrape 落点（选品提案（domain=scrape 照 scrape.suggest 产出形态）→ web 批准 → tm.task(domain=scrape, source_type=ai) 落库 → TM 清单渲染来源徽章「扒图」bg-orange，B5 2026-09-03 补真测试）"
   - id: A49
     version: v0.5
     status: implemented
@@ -259,9 +259,9 @@ assertions:
     desc: "配额透明在 keyword 指标中"
   - id: A51
     version: v0.5
-    status: planned
-    plan: "B5 随扒图重做阶段 1 补：seo-optimize config 规格可改行为变化测试"
-    desc: "seo-optimize config 规格可改行为变化"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a51_seo_optimize_spec_config_change"
+    desc: "seo-optimize config 规格可改行为变化（规格外置 config/spec.yaml：titles 3-5/tags≤13/≤20 字符；默认 config 行为=默认规格，临时注入改后 spec（tags 13→8 等）→ 归一化按新规格实锤，config 无 spec 回退默认，B5 2026-09-03 补真测试）"
   - id: A52
     version: v0.5
     status: implemented

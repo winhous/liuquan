@@ -2019,3 +2019,417 @@ async def test_batch_image_download_biz_client_missing_degrades() -> None:
     result = await bid_run.run(BatchDownloadInput(link_ids=[1], batch_id="b"), ctx)
     assert result.links == []
     assert "biz_client 未注入" in result.note
+
+
+# =====================================================================
+# 批 5：B5 收口四断言（详设-v0.6 §10 B5 表：A29/A47/A48/A51 planned → implemented）
+# =====================================================================
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a29_dismiss_candidate_no_task_no_feishu(
+    biz_engine, monkeypatch
+) -> None:
+    """A29（v0.3 B5 收口）：候选忽略 dismissed——不建任务、不飞书（行为断言）。
+
+    web /crm/{id}/todos/dismiss → todo_candidate status=dismissed + tm.task
+    无新增（domain=crm 数不变）+ 飞书 send_task_card 零调用（monkeypatch 桩，
+    决策 21：确认生成任务才推卡片，dismiss 不触发）。
+    对照：现有 test_candidate_invalid_status_rejected 只测 DB CHECK 约束非行为。
+    """
+    from models.crm import Customer, TodoCandidate
+
+    # ---- ① 构造客户 + pending 候选 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        c = Customer(
+            nickname="Dismiss测试", source_shop="成品", follow_up_status="waiting_reply"
+        )
+        session.add(c)
+        await session.flush()
+        cand = TodoCandidate(
+            customer_id=c.id,
+            content="忽略我",
+            reason="候选理由",
+            suggested_tags=["报价"],
+            evidence=[{"kind": "message", "ref_id": "m-1", "quote": "hi"}],
+            status="pending",
+        )
+        session.add(cand)
+        await session.flush()
+        customer_id = c.id
+        cand_id = cand.id
+
+    async with AsyncSession(biz_engine) as session:
+        before = (
+            await session.execute(
+                text("SELECT count(*) FROM tm.task WHERE domain='crm'")
+            )
+        ).scalar_one()
+
+    # ---- ② 飞书零调用桩 ----
+    sent: list[dict] = []
+
+    async def _fake_send(view: dict) -> bool:
+        sent.append(view)
+        return True
+
+    monkeypatch.setattr("web.app.send_task_card", _fake_send)
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False)
+    _login(client)
+
+    # ---- ③ POST /crm/{id}/todos/dismiss ----
+    resp = client.post(
+        f"/crm/{customer_id}/todos/dismiss",
+        data={"candidate_ids": [str(cand_id)]},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert f"/crm/{customer_id}" in resp.headers["location"]
+
+    # ---- ④ DB：candidate status=dismissed（含 dismissed_at，不回填任务）----
+    async with AsyncSession(biz_engine) as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT status, dismissed_at, confirmed_task_id "
+                    "FROM crm.todo_candidate WHERE id = :id"
+                ),
+                {"id": cand_id},
+            )
+        ).first()
+        assert row is not None, "候选应存在"
+        assert row[0] == "dismissed", f"候选应 dismissed，实际 {row[0]}"
+        assert row[1] is not None, "dismissed_at 应记录"
+        assert row[2] is None, "dismissed 候选不应回填任务 id"
+
+        # ---- ⑤ tm.task 无新增（domain=crm 数不变）----
+        after = (
+            await session.execute(
+                text("SELECT count(*) FROM tm.task WHERE domain='crm'")
+            )
+        ).scalar_one()
+        assert after == before, f"dismiss 不应创建任务（{before} -> {after}）"
+
+    # ---- ⑥ 飞书零调用 ----
+    assert sent == [], f"dismiss 不应触发飞书卡片，实际 {len(sent)} 次调用"
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a47_link_to_image_file_and_proposal_pending(
+    db_engine, biz_engine, tmp_path
+) -> None:
+    """A47（v0.5 B5 收口）：丢链接进扒图 → 下载链真跑 → scrape.image_file 落库
+    → 勾图 → suggest 链真跑 → 选品提案进审核页（tm.task_proposal status=pending）。
+
+    组合断言（照 A57 立即扒落库 + A66 suggest 链真跑落提案模式）：fake connector
+    落盘真 PNG + biz_client 走真写接口（ASGITransport 到真 web.api_biz）+ provider
+    用真 HTTP 实现（决策 26 读取接口化，链路从 DB 真读元数据）+ fake LLM 输出
+    SuggestionResult——零网络真链路。"""
+    from engine.providers import build_providers
+    from models.workers import SuggestionResult
+    from web import scrape_store
+
+    # ---- ① 贴链接 → 下载链真跑（link_record + image_file 挂链接落库）----
+    fake_conn = _FakeConnector(tmp_path)
+    biz_client = _biz_client_for(biz_engine)
+    runner, _ = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+    )
+    result = await runner.run(
+        "scrape_download_chain",
+        {"urls": [_XHS_EXPLORE], "batch_id": "batch-a47", "from_queue": False},
+    )
+    assert result.status == "done", f"下载链应 DONE：{result.error}"
+
+    links = await scrape_store.get_links(limit=50)
+    assert len(links) == 1, "应 1 条链接记录"
+    link = links[0]
+    assert link["status"] == "done", f"链接应 done，实际 {link['status']}"
+    assert link["image_count"] == 2
+    detail = await scrape_store.get_link_by_id(link["id"])
+    imgs = detail["images"]
+    assert len(imgs) == 2, "下载链应落 2 张图（image_file 挂链接）"
+    for img in imgs:
+        assert img["link_record_id"] == link["id"], "图片应挂 link_record"
+        assert img["source_mark"] == "scraped"
+    img_ids = [img["id"] for img in imgs]
+
+    # ---- ② 勾图 → suggest 链真跑（真 provider 读落库图片元数据 + fake LLM）----
+    def _suggestion_output(out_cls):
+        assert out_cls is SuggestionResult
+        return SuggestionResult(
+            proposals=[
+                {
+                    "title": "选品建议：测试商品",
+                    "detail": "卖点：花艺定制；目标市场：婚礼花艺；关键词：永生花 定制",
+                    "domain": "scrape",
+                    "action_id": "scrape.suggest",
+                    "suggested_role": "运营",
+                    "suggested_due_days": 3,
+                    "evidence": [{"kind": "image", "ref_id": str(img_ids[0])}],
+                }
+            ],
+            note="",
+        )
+
+    providers = build_providers(
+        base_url=_FAKE_BIZ_URL,
+        token=_BIZ_TOKEN,
+        transport=httpx.ASGITransport(app=_biz_app(biz_engine)),
+    )
+    runner2, agents = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        providers=providers,
+        agent_output=_suggestion_output,
+    )
+    result2 = await runner2.run("scrape_suggest_chain", {"image_ids": img_ids})
+    assert result2.status == "done", f"suggest 链应 DONE：{result2.error}"
+    assert agents and agents[0].calls == 1, "REASON 相位应真调 LLM（诚实化）"
+    assert "测试商品" in agents[0].prompts[0], "prompt 应含落库图片元数据（诚实化）"
+
+    # ---- ③ 提案进审核页（tm.task_proposal pending，evidence ref_id ∈ image_ids）----
+    from engine.actions import CONSUMERS
+    from engine.registry import load_registry
+    from engine.server import QueueConsumer
+
+    registry = load_registry(REPO_ROOT)
+    consumer = QueueConsumer(
+        engine=db_engine,
+        registry=registry,
+        runner=runner2,
+        consumers=CONSUMERS,
+        biz_client=biz_client,
+    )
+    await consumer._after_task(result2)
+
+    task_label = f"e-{result2.task_id:06d}"
+    async with AsyncSession(biz_engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT id, title, status, domain, evidence, source "
+                    "FROM tm.task_proposal WHERE source->>'engine_task_id' = :tid"
+                ),
+                {"tid": task_label},
+            )
+        ).all()
+    match = [
+        r
+        for r in rows
+        if r.domain == "scrape"
+        and isinstance(r.evidence, list)
+        and r.evidence
+        and r.evidence[0].get("ref_id") == str(img_ids[0])
+    ]
+    assert len(match) == 1, (
+        f"本任务应 1 条提案（evidence ref_id=本批图片）落库，实际 {len(match)}"
+        f"（同 engine_task_id 共 {len(rows)} 行）"
+    )
+    prop = match[0]
+    assert prop.status == "pending", "提案应进审核页（status=pending）"
+    assert prop.domain == "scrape"
+    assert prop.source.get("chain_id") == "scrape_suggest_chain"
+    assert prop.source.get("worker_id") == "product_suggestion"
+    assert prop.source.get("audit_ids"), "LLM 工序提案应带 audit_ids（追溯保证）"
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a48_proposal_approve_task_domain_scrape(biz_engine) -> None:
+    """A48（v0.5 B5 收口）：选品提案批准 → tm.task(domain=scrape) 落 TM 清单
+    （来源徽章「扒图」bg-orange）。
+
+    复用 v0.2 审核流模式（test_tm_proposal/test_web_tm）：构造 tm.task_proposal
+    （domain=scrape，照 scrape.suggest 产出形态）→ web 批准 → tm.task 落库
+    （domain=scrape，source_type=ai）→ TM 清单渲染「扒图」徽章（DOMAIN_META）。
+    """
+    import json as _json
+
+    from web.tm_store import proposal_display_id
+
+    # ---- ① 构造 tm.task_proposal（domain=scrape，照 scrape.suggest 产出形态）----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        pid = (
+            await session.execute(
+                text(
+                    "INSERT INTO tm.task_proposal "
+                    "(title, detail, domain, action_id, risk, suggested_role, "
+                    " suggested_due_days, evidence, source) "
+                    "VALUES (:title, :detail, :domain, :action_id, :risk, :role, "
+                    " :due, CAST(:evidence AS jsonb), CAST(:source AS jsonb)) "
+                    "RETURNING id"
+                ),
+                {
+                    "title": "选品建议：永生花花束",
+                    "detail": "卖点：花艺定制；目标市场：婚礼花艺",
+                    "domain": "scrape",
+                    "action_id": "scrape.suggest",
+                    "risk": "suggest",
+                    "role": "运营",
+                    "due": 3,
+                    "evidence": _json.dumps(
+                        [{"kind": "image", "ref_id": "101", "quote": "图片 101"}]
+                    ),
+                    "source": _json.dumps(
+                        {
+                            "chain_id": "scrape_suggest_chain",
+                            "engine_task_id": "e-a48",
+                            "worker_id": "product_suggestion",
+                            "audit_ids": [],
+                        }
+                    ),
+                },
+            )
+        ).scalar_one()
+
+    # ---- ② web 批准 → tm.task 落库（domain=scrape，source_type=ai）----
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False)
+    _login(client)
+    resp = client.post(
+        "/tasks/proposals/approve",
+        data={"proposal_id": str(pid)},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+
+    async with AsyncSession(biz_engine) as session:
+        tasks = (
+            await session.execute(
+                text(
+                    "SELECT id, title, domain, source_type, source "
+                    "FROM tm.task WHERE domain='scrape' "
+                    "AND source->>'proposal_id' = :pid"
+                ),
+                {"pid": proposal_display_id(pid)},
+            )
+        ).all()
+        prop = (
+            await session.execute(
+                text("SELECT status, task_id FROM tm.task_proposal WHERE id=:id"),
+                {"id": pid},
+            )
+        ).first()
+    assert len(tasks) == 1, f"应 1 条 domain=scrape 任务落库，实际 {len(tasks)}"
+    t = tasks[0]
+    assert t.domain == "scrape", "AI 任务应继承提案 domain"
+    assert t.source_type == "ai"
+    assert t.source.get("chain_id") == "scrape_suggest_chain", "来源追溯应保留"
+    assert prop is not None and prop[0] == "approved", "提案应 approved"
+    assert prop[1] is not None, "提案应回填 task_id"
+
+    # ---- ③ TM 清单渲染来源徽章「扒图」（DOMAIN_META scrape = bg-orange）----
+    page = client.get("/tasks")
+    assert page.status_code == 200
+    assert "选品建议：永生花花束" in page.text, "TM 清单应展示 scrape 域任务"
+    assert 'bg-orange">扒图' in page.text, "TM 清单应渲染来源徽章「扒图」（bg-orange）"
+
+
+@pytest.mark.version_acceptance
+def test_a51_seo_optimize_spec_config_change() -> None:
+    """A51（v0.5 B5 收口）：seo-optimize 规格（titles 3-5 / tags≤13 / ≤20 字符）
+    外置 config/spec.yaml 可改、改后归一化行为变化实锤（R10 规格外置）。
+
+    ①默认规格断言：读 config/spec.yaml（titles min 3/max 5、tags max 13、
+      tag max_length 20）；②默认 config（spec 外置值）→ 行为 = 默认规格
+      （fake LLM 输出超限 tags/标题 → 按默认规格截断/封顶）；③临时注入改后
+      spec（tags 13→8、长度 20→5、标题 5→3、材质 13→4）→ 工序归一化行为
+      按新规格实锤（不改真实 spec.yaml 提交值）；④config 无 spec 回退默认。
+    """
+    import yaml as _yaml
+
+    from engine.core.context import EngineContext
+    from engine.registry.workers.seo.seo_optimize.run import run
+    from models.workers import SeoOptimizeInput, SeoOptimizationReport, SeoProductText
+
+    spec_path = (
+        REPO_ROOT
+        / "engine"
+        / "registry"
+        / "workers"
+        / "seo"
+        / "seo_optimize"
+        / "config"
+        / "spec.yaml"
+    )
+    assert spec_path.is_file(), "seo_optimize 规格应外置在 config/spec.yaml（R10）"
+
+    # ---- ① 默认规格断言（读 config/spec.yaml：titles 3-5 / tags≤13 / ≤20 字符）----
+    spec = _yaml.safe_load(spec_path.read_text(encoding="utf-8"))["spec"]
+    assert spec["titles"]["min"] == 3 and spec["titles"]["max"] == 5
+    assert spec["tags"]["max"] == 13
+    assert spec["tags"]["max_length"] == 20
+
+    def _make_ctx(config: dict) -> EngineContext:
+        """fake LLM 输出超限样本（7 标题 / 16 标签（含 30 字符长标签）/ 20 材质 /
+        300 字符 alt / 20 关键词）——归一化必须按规格截断/封顶。"""
+        return EngineContext(
+            worker_id="seo_optimize",
+            domain="seo",
+            inputs=SeoOptimizeInput(
+                product_text=SeoProductText(
+                    title="Test", tags=["test"], description="D"
+                )
+            ),
+            config=config,
+            context_data={},
+            llm_output={
+                "titles": [
+                    {"title": f"标题{i}", "angle": "Main"} for i in range(7)
+                ],
+                "tags": ["x" * 30] + [f"tag{i}" for i in range(15)],
+                "listing_description": "desc",
+                "materials": [f"m{i}" for i in range(20)],
+                "alt_text": "A" * 300,
+                "seo_keywords": [f"kw{i}" for i in range(20)],
+            },
+        )
+
+    inputs = SeoOptimizeInput(
+        product_text=SeoProductText(title="Test", tags=["test"], description="D")
+    )
+
+    # ---- ② 默认 config（spec 外置值）→ 行为 = 默认规格 ----
+    default = run(inputs, _make_ctx({"spec": spec}))
+    assert isinstance(default, SeoOptimizationReport)
+    assert len(default.titles) == 5, "默认规格标题上限 5"
+    assert all(len(t["title"]) <= 140 for t in default.titles)
+    assert len(default.tags) == 13, f"默认规格标签上限 13，实际 {len(default.tags)}"
+    assert all(len(t) <= 20 for t in default.tags), "默认规格标签每条 ≤20 字符"
+    assert len(default.materials) == 13
+    assert len(default.seo_keywords) == 10
+
+    # ---- ③ 改 spec（临时注入，不改真实提交值）→ 行为按新规格实锤 ----
+    modified = {
+        "spec": {
+            **spec,
+            "tags": {"max": 8, "max_length": 5},
+            "titles": {"min": 3, "max": 3, "max_length": 140},
+            "materials": {"max": 4, "max_length": 50},
+        }
+    }
+    changed = run(inputs, _make_ctx(modified))
+    assert len(changed.tags) == 8, (
+        f"改 tags.max=8 后应只保留 8 个标签，实际 {len(changed.tags)}"
+    )
+    assert all(len(t) <= 5 for t in changed.tags), (
+        "改 tags.max_length=5 后标签每条应 ≤5 字符"
+    )
+    assert len(changed.titles) == 3, (
+        f"改 titles.max=3 后应只保留 3 个标题，实际 {len(changed.titles)}"
+    )
+    assert len(changed.materials) == 4, (
+        f"改 materials.max=4 后应只保留 4 个材质，实际 {len(changed.materials)}"
+    )
+
+    # ---- ④ config 无 spec 回退默认（旧调用 config={} 行为不变）----
+    fallback = run(inputs, _make_ctx({}))
+    assert len(fallback.tags) == 13
+    assert len(fallback.titles) == 5
