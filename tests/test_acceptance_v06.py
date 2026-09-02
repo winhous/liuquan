@@ -104,13 +104,20 @@ async def _web_db_maker(biz_engine, monkeypatch):
 
 @async_fixture(autouse=True)
 async def _clean_v06_tables(biz_engine):
-    """每测试后清 v0.6 批 1 涉及表（sys.settings + scrape.link_record + scrape.image_file），
-    互不污染（TRUNCATE CASCADE：image_file.link_record_id FK 级联一并处理）。"""
+    """每测试后清本模块涉及表（sys.settings + scrape.link_record/scrape.image_file +
+    crm 五表 + tm 四表），互不污染（TRUNCATE CASCADE：image_file.link_record_id FK
+    级联一并处理）。
+
+    批 5 起本模块测试写 crm/tm 表（A29 候选 / A47/A48 提案+任务）——不清理会在
+    pytest -m version_acceptance 选取子集时污染 test_web_crm（A36 删除级联断言
+    crm/tm 计数为 0 实锤抓到过，2026-09-03 批 5 修正）。"""
     yield
     async with AsyncSession(biz_engine) as session, session.begin():
         await session.execute(
             text(
-                "TRUNCATE sys.settings, scrape.link_record, scrape.image_file "
+                "TRUNCATE sys.settings, scrape.link_record, scrape.image_file, "
+                "crm.todo_candidate, crm.snapshot, crm.message, crm.message_image, "
+                "crm.customer, tm.task_event, tm.task_step, tm.task_proposal, tm.task "
                 "RESTART IDENTITY CASCADE"
             )
         )
