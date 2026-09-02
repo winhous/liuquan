@@ -290,13 +290,11 @@ assertions:
   # ---- v0.6 扒图重做 A57-A68（分批开发，逐批登记）----
   - id: A57
     version: v0.6
-    status: planned
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a57_scrape_link_to_link_record_and_images"
     desc: "立即扒端到端落素材库（一链接一条 + 图挂链接 + 状态/图数/元数据可见；download 链真跑 fake connector+fake biz_client，PIL 内联体检宽高/水印 + source_mark=scraped）"
   - id: A58
     version: v0.6
-    status: planned
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a58_two_chains_input_contracts"
     desc: "拆两链 + input 契约各自明确（download 链 input=ScrapeChainInput，suggest 链单步 input=SuggestionInput；引擎侧 POST /api/engine/tasks 不 422 + web /scrape/run 不 422）"
@@ -317,7 +315,6 @@ assertions:
     desc: "图来源标记 + SKU×店铺留位：image_file.source_mark 默认 scraped + CHECK 四值 + sku_id/shop_id 列存在（迁移 0011 结构断言）"
   - id: A62
     version: v0.6
-    status: planned
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a62_schedule_queue_chain_run"
     desc: "定时队列 + 定时链跑通（link_queue 键 → 种子存在 → from_queue 真跑 → 建记录 → 下载落库 → 消费者清队列；done 链接重跑跳过不重下）"
@@ -338,19 +335,16 @@ assertions:
     desc: "闲鱼连接器照广成（H3）：10 主图（照广成原文）+ 6 详情选择器 + naturalWidth≥100 + 10 过滤关键词 + _DEAD_PAGE_KEYWORDS + 全局 90s deadline + networkidle 降级（代码级；行为单测 test_xianyu_behavior_main_img_collect / filter_keywords_skip / dead_page_deletes_images / deadline_truncates / playwright_missing_note）"
   - id: A66
     version: v0.6
-    status: planned
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a66_product_suggestion_real_llm"
     desc: "product_suggestion 诚实化（真接 LLM）：REASON 真调 LLM + 输出过 SuggestionResult 校验 + prompt 含元数据 + 消费者落 tm.task_proposal pending（evidence ref_id 白名单）"
   - id: A67
     version: v0.6
-    status: planned
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a67_biz_client_injected_inspect_written"
     desc: "链路修通组合（EngineContext.biz_client 注入 + image_inspect 经 biz_client 读 local_path + 体检宽高/水印 PATCH 写回落库实锤）"
   - id: A68
     version: v0.6
-    status: planned
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a68_failure_and_degraded_notes"
     desc: "失败/降级明确提示（connector 失败 → failed + error_note；元数据降级 → degraded_note；页面/读接口可见）"
