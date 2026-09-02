@@ -1975,12 +1975,20 @@ async def test_download_done_consumer_from_queue_true_clears() -> None:
 
 
 def test_schedule_input_template_by_chain() -> None:
-    """调度器 input 模板（T7）：scrape_download_chain → {batch_id: sched-<ts>, from_queue: true}；
-    其余链 → {trigger_date: today} 不变（crm_reminder_chain/seo_healthcheck_chain 行为锁住）。"""
+    """调度器 input 模板（T7）：scrape_download_chain → {urls: [], batch_id: sched-<ts>, from_queue: true}；
+    其余链 → {trigger_date: today} 不变（crm_reminder_chain/seo_healthcheck_chain 行为锁住）。
+
+    2026-09-03 集成验收真跑修复：定时 input 必须含 urls 键（显式空列表）——链步骤 input
+    表达式 task.input.urls 缺键时 runner _path_get 引用路径不存在即抛（实测任务 failed
+    「引用路径 'urls' 不存在」），置空列表让表达式解析通过；urls 实际从定时队列读。"""
     from engine.server import _schedule_input_for
 
     inp = _schedule_input_for("scrape_download_chain", "20260903070000", "2026-09-03")
-    assert inp == {"batch_id": "sched-20260903070000", "from_queue": True}
+    assert inp == {
+        "urls": [],
+        "batch_id": "sched-20260903070000",
+        "from_queue": True,
+    }, f"定时 input 必须含 urls 键（链步骤表达式依赖），实际 {inp!r}"
 
     for chain_id in ("crm_reminder_chain", "seo_healthcheck_chain", "other_chain"):
         assert _schedule_input_for(chain_id, "ts", "2026-09-03") == {"trigger_date": "2026-09-03"}

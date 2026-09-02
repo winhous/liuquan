@@ -748,12 +748,15 @@ _REMINDER_KEYS = frozenset({"reminders"})
 
 # ---- v0.6 §5.4：调度器 input 模板（T7，定时触发落地）----
 # 按 chain_id 构建定时/立即运行的任务 input：
-# - scrape_download_chain：{batch_id: "sched-<ts>", from_queue: True}
-#   （定时扒：urls 从定时队列读，链成功完成清队列，详设 §5.4）
+# - scrape_download_chain：{urls: [], batch_id: "sched-<ts>", from_queue: True}
+#   （定时扒：urls 显式空列表——链步骤 input 表达式 task.input.urls 缺键会解析失败
+#    （runner _path_get 引用路径不存在即抛，集成验收真跑实锤任务 failed），
+#    置空列表让表达式解析通过；urls 实际从定时队列读，链成功完成清队列，详设 §5.4）
 # - 其余链（crm_reminder_chain / seo_healthcheck_chain）：{"trigger_date": 今天}
 #   行为不变（v0.4/v0.5 测试锁住）
 _SCHEDULE_INPUT_TEMPLATES: dict[str, Callable[[str], dict[str, Any]]] = {
     "scrape_download_chain": lambda ts: {
+        "urls": [],
         "batch_id": f"sched-{ts}",
         "from_queue": True,
     },
