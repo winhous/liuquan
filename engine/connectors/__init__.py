@@ -90,7 +90,8 @@ def _read_env(key: str, required: bool = False) -> str | None:
 
 
 # ---- 加载骨架模块（注册五个连接器）----
-# 本批只做骨架与可用性检查，外部真实调用实现留批 2/批 4
+# xhs/xianyu 已照广成搬回真实调用（详设-v0.6 §6 H1-H3，批 3）；ehunt_api/ehunt_keyword
+# 为 v0.5 SEO 连接器（可用性检查 + 真实 HTTP 调用）；http_image 通用图片连接器
 
 from engine.connectors import ehunt_api  # noqa: E402
 from engine.connectors import ehunt_keyword  # noqa: E402
