@@ -32,46 +32,90 @@ def run(inputs: SeoOptimizeInput, ctx: EngineContext) -> SeoOptimizationReport:
             note="LLM 输出缺失（REASON 相位未执行）",
         )
 
-    # 归一化处理（照广成逻辑，纯 Python 硬约束）
-    report = _normalize_report(llm_output, inputs)
+    # 归一化处理（照广成逻辑，纯 Python 硬约束；规格从 config/ 读，R10）
+    report = _normalize_report(llm_output, inputs, ctx)
 
     return report
 
 
-def _normalize_report(llm_output: dict[str, Any], inputs: SeoOptimizeInput) -> SeoOptimizationReport:
-    """归一化 LLM 输出（照广成 _normalize_tags/_normalize_titles 逻辑）。"""
+def _spec_for(ctx: EngineContext) -> dict[str, Any]:
+    """工序规格（R10 规格外置）：读 config/spec.yaml 合并结果 ctx.config["spec"]。
 
-    # 标题归一化：3-5 个，每个 ≤140 字符
+    缺省回退硬默认（与 SeoOptimizationReport 契约注释对齐）；config 缺失/
+    非映射 → 空规格（全默认），保证无 spec 的旧调用（config={}）行为不变。
+    """
+    raw = (ctx.config or {}).get("spec") if ctx.config else None
+    return raw if isinstance(raw, dict) else {}
+
+
+def _section(spec: dict[str, Any], key: str) -> dict[str, Any]:
+    return spec.get(key) if isinstance(spec.get(key), dict) else {}
+
+
+def _normalize_report(
+    llm_output: dict[str, Any], inputs: SeoOptimizeInput, ctx: EngineContext
+) -> SeoOptimizationReport:
+    """归一化 LLM 输出（照广成 _normalize_tags/_normalize_titles 逻辑）。
+
+    各上限/长度规格 = config/spec.yaml 可改（改规格不改代码，A51 行为实锤）；
+    数字字面量只作缺省回退（spec 缺键时），不入业务规格外置。
+    """
+
+    spec = _spec_for(ctx)
+    titles_cfg = _section(spec, "titles")
+    tags_cfg = _section(spec, "tags")
+    materials_cfg = _section(spec, "materials")
+    alt_cfg = _section(spec, "alt_text")
+    seo_cfg = _section(spec, "seo_keywords")
+
+    titles_max = int(titles_cfg.get("max", 5))
+    titles_max_length = int(titles_cfg.get("max_length", 140))
+    tags_max = int(tags_cfg.get("max", 13))
+    tag_max_length = int(tags_cfg.get("max_length", 20))
+    materials_max = int(materials_cfg.get("max", 13))
+    materials_max_length = int(materials_cfg.get("max_length", 50))
+    alt_max_length = int(alt_cfg.get("max_length", 250))
+    seo_keywords_max = int(seo_cfg.get("max", 10))
+    seo_keywords_max_length = int(seo_cfg.get("max_length", 50))
+
+    # 标题归一化：上限与单条长度规格可改（缺省 max 5 / 每条 ≤140 字符）
     titles_raw = llm_output.get("titles", [])
     titles = []
-    for t in titles_raw[:5]:
+    for t in titles_raw[:titles_max]:
         if isinstance(t, dict):
-            title_text = t.get("title", "")[:140]
+            title_text = t.get("title", "")[:titles_max_length]
             angle = t.get("angle", "")
             titles.append({"title": title_text, "angle": angle})
         elif isinstance(t, str):
-            titles.append({"title": t[:140], "angle": ""})
+            titles.append({"title": t[:titles_max_length], "angle": ""})
 
-    # 标签归一化：恰好 13 个，每个 ≤20 字符，去除 #，大小写不敏感去重
+    # 标签归一化：上限/每条长度规格可改（缺省 13 个 / 每个 ≤20 字符），
+    # 去 #，大小写不敏感去重
     tags_raw = llm_output.get("tags", [])
-    tags_normalized = _normalize_tags(tags_raw)
+    tags_normalized = _normalize_tags(
+        tags_raw, max_tag_length=tag_max_length, max_tags=tags_max
+    )
 
     # 描述归一化：重写优化
     listing_description = str(llm_output.get("listing_description", ""))
 
-    # 材质归一化：≤13 个
+    # 材质归一化：上限/每条长度规格可改（缺省 ≤13 个）
     materials_raw = llm_output.get("materials", [])
-    materials = [str(m)[:50] for m in materials_raw[:13]]
+    materials = [
+        str(m)[:materials_max_length] for m in materials_raw[:materials_max]
+    ]
 
-    # Alt 文本归一化：≤250 字符
-    alt_text = str(llm_output.get("alt_text", ""))[:250]
+    # Alt 文本归一化：长度规格可改（缺省 ≤250 字符）
+    alt_text = str(llm_output.get("alt_text", ""))[:alt_max_length]
 
     # 建议类目
     suggested_category = str(llm_output.get("suggested_category", ""))
 
-    # SEO 关键词：6-10 个
+    # SEO 关键词：上限/每条长度规格可改（缺省 6-10 个）
     seo_keywords_raw = llm_output.get("seo_keywords", [])
-    seo_keywords = [str(k)[:50] for k in seo_keywords_raw[:10]]
+    seo_keywords = [
+        str(k)[:seo_keywords_max_length] for k in seo_keywords_raw[:seo_keywords_max]
+    ]
 
     # 搜索意图
     search_intent = str(llm_output.get("search_intent", ""))

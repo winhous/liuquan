@@ -1,0 +1,23 @@
+# seo_optimize 输出规格（R10 规格外置：业务规格进工序 config/，改规格不改代码）
+# 默认值对齐 v0.5 详设 §6.1 与 SeoOptimizationReport 契约注释：
+#   titles 3-5 个（每个 ≤max_length 字符） / tags ≤13 个（每个 ≤20 字符） /
+#   materials ≤13 个 / alt_text ≤max_length 字符 / seo_keywords 6-10 个
+# run.py 归一化读本文件（ctx.config["spec"]，runner._load_config_dir 合并），
+# 测试 A51 以临时注入 config 断言改规格 → 归一化行为变化实锤（不改本文件提交值）。
+spec:
+  titles:
+    min: 3
+    max: 5
+    max_length: 140
+  tags:
+    max: 13
+    max_length: 20
+  materials:
+    max: 13
+    max_length: 50
+  alt_text:
+    max_length: 250
+  seo_keywords:
+    min: 6
+    max: 10
+    max_length: 50
