@@ -83,14 +83,18 @@ def test_crm_worker_referencing_demo_provider_rejected() -> None:
 
 
 def test_unenabled_domain_rejected_in_v01() -> None:
-    """六行矩阵全定义；v0.1 启用 demo/crm、v0.3 增启用 tm（tm_intent 工序）：
-    erp/seo/scrape 未启用，运行时拒（§5.2 原文 + 详设-v0.3 §5.1）。"""
-    for domain in (Domain.ERP, Domain.SEO, Domain.SCRAPE):
+    """六行矩阵全定义；v0.1 启用 demo/crm、v0.3 增启用 tm（tm_intent 工序）、
+    v0.6 批 4 增启用 scrape（下载链/选品链要在引擎 runner 真跑，详设-v0.6 §5/§10）：
+    erp/seo 未启用，运行时拒（§5.2 原文 + 详设-v0.3 §5.1）。"""
+    for domain in (Domain.ERP, Domain.SEO):
         res = check_policy(domain, Risk.READ, ())
         assert not res.ok
         assert "未启用" in res.reason
     # tm 域 v0.3 已启用（tm_intent / tm_task_context，决策 28）
     res = check_policy(Domain.TM, Risk.SUGGEST, ())
+    assert res.ok
+    # scrape 域 v0.6 批 4 已启用（扒图两链真跑；上限 write）
+    res = check_policy(Domain.SCRAPE, Risk.WRITE, ())
     assert res.ok
 
 

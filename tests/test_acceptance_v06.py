@@ -48,6 +48,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from test_runner import (  # noqa: F401  # 跨模块 fixture：引擎库嵌入式 PG + 清表（随模块收集）
+    FakeAgent,
+    _clean_engine_tables,
+    db_engine,
+    make_agent_factory,
+)
 from test_web_tm import _login  # noqa: F401  # 跨模块 helper（只住 tests/）
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1223,3 +1229,793 @@ async def test_xianyu_playwright_missing_note(monkeypatch) -> None:
     assert result.ok is False
     assert "pip install playwright" in result.note
     assert "install chromium" in result.note
+
+
+# =====================================================================
+# 批 4：链路修通（详设 §5/§7/§10/§12 批 4）——A57/A58/A62/A66/A67/A68
+# 真 worker 全链路模式（照 test_workers.py：嵌入式 PG 业务库+引擎库 +
+# 真注册表 + TaskRunner + FakeAgent/fake connector/fake biz_client，零网络）。
+#
+# 基建约定：
+# - biz_engine：业务库 AsyncEngine（tm_pg_cluster 嵌入式 PG，autouse 清表）
+# - db_engine：引擎库 AsyncEngine（engine_pg_cluster，test_runner 跨模块 autouse 清表）
+# - biz_client 真写接口路径：BizApiClient + ASGITransport 到真 web.api_biz app
+#   （决策 26 引擎零业务库连接串——测试里引擎也走写接口，落库为真）
+# - fake connector 只住 tests/（R12）；fake provider 只住 tests/
+# - P2：URL/IP 一律运行期拼接；不读 os.environ
+# =====================================================================
+
+
+class _FakeBizResponse:
+    """fake httpx.Response（ASGI 路径不需要——真 ASGITransport；本类供纯记录桩用）。"""
+
+    def __init__(self, status_code: int = 200, json_body: dict | None = None) -> None:
+        self.status_code = status_code
+        self._json = json_body or {}
+
+    def json(self) -> dict:
+        return self._json
+
+
+class _FakeConnector:
+    """fake 扒图 connector（只住 tests/，零网络）：按 url 分派 失败/降级/正常。
+
+    - 正常：返回假落盘路径（tmp 真 PNG，PIL 体检可读宽高）+ 元数据
+    - fail_urls：ok=False + note 含「xsec_token 过期」（A68 失败路径）
+    - degrade_urls：ok=True + note='db-missing'（A68 元数据降级路径）
+    """
+
+    def __init__(
+        self,
+        storage: Path,
+        *,
+        fail_urls: set[str] | None = None,
+        degrade_urls: set[str] | None = None,
+        images_per_link: int = 2,
+    ) -> None:
+        self._storage = Path(storage)
+        self._fail_urls = fail_urls or set()
+        self._degrade_urls = degrade_urls or set()
+        self._images_per_link = images_per_link
+        self.available = True
+        self.download_calls: list[str] = []
+
+    def _make_images(self, url: str, seq: int) -> list[str]:
+        """落盘假真图（PIL 生成 80×60 纯灰 PNG：宽高可读、无水印）。"""
+        from PIL import Image
+
+        out_dir = self._storage / "xhs" / f"note{seq}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        paths = []
+        for i in range(self._images_per_link):
+            p = out_dir / f"{i + 1:02d}.png"
+            Image.new("RGB", (80, 60), (200, 200, 200)).save(p, "PNG")
+            paths.append(str(p))
+        return paths
+
+    async def download(self, url: str, *, batch_id: str = "", **kwargs: object) -> Any:
+        self.download_calls.append(url)
+        if url in self._fail_urls:
+            return ConnectorResult(
+                ok=False,
+                note="xsec_token 过期，请重新取最新分享链接（未落盘任何图片）",
+                data={"url": url, "batch_id": batch_id},
+            )
+        seq = len(self.download_calls)
+        if url in self._degrade_urls:
+            paths = self._make_images(url, seq)
+            return ConnectorResult(
+                ok=True,
+                note="db-missing",
+                data={
+                    "paths": paths,
+                    "count": len(paths),
+                    "desc": "",
+                    "tags": [],
+                    "author_id": "",
+                    "day_dir": "",
+                    "source": "xhs",
+                    "url": url,
+                },
+            )
+        paths = self._make_images(url, seq)
+        return ConnectorResult(
+            ok=True,
+            note="",
+            data={
+                "paths": paths,
+                "count": len(paths),
+                "desc": "测试商品描述",
+                "tags": ["tag1", "tag2"],
+                "author_id": "seller-1",
+                "day_dir": "",
+                "source": "xhs",
+                "url": url,
+            },
+        )
+
+
+def _biz_client_for(biz_engine) -> "BizApiClient":
+    """真写接口客户端（ASGITransport 到真 web.api_biz app，嵌入式 PG）。"""
+    from engine.actions.biz_client import BizApiClient
+
+    return BizApiClient(
+        base_url=_FAKE_BIZ_URL,
+        token=_BIZ_TOKEN,
+        transport=httpx.ASGITransport(app=_biz_app(biz_engine)),
+    )
+
+
+def _build_runner(
+    db_engine,
+    *,
+    biz_client,
+    connectors: dict | None = None,
+    providers: dict | None = None,
+    agent_output=None,
+) -> tuple["TaskRunner", list]:
+    """真注册表 + 真模型注册表 + FakeAgent + 注入 biz_client/connectors/providers。"""
+    from engine.core.llm import load_models
+    from engine.core.runner import TaskRunner
+    from engine.registry import load_registry
+    from test_runner import FakeAgent, make_agent_factory
+
+    registry = load_registry(REPO_ROOT)
+    model_registry = load_models(REPO_ROOT / "models.yaml")
+    factory, agents = make_agent_factory(FakeAgent, output=agent_output)
+    runner = TaskRunner(
+        db_engine,
+        registry,
+        agent_factory=factory,
+        model_registry=model_registry,
+        repo_root=REPO_ROOT,
+        writable_check=lambda: True,
+        backoff=0.0,
+        providers=providers or {},
+        connectors=connectors or {},
+        biz_client=biz_client,
+    )
+    return runner, agents
+
+
+from typing import Any
+
+from engine.connectors import ConnectorResult
+
+
+# ==== A57：立即扒端到端（贴链接 → download 链真跑 → link_record done + 图挂链接落库）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a57_scrape_link_to_link_record_and_images(
+    db_engine, biz_engine, tmp_path
+) -> None:
+    """A57：立即扒端到端——ScrapeChainInput{urls, batch_id, from_queue:false} →
+    scrape_download_chain 真跑（fake connector 假路径文件 + biz_client 走真写接口落库）
+    → link_record status=done + image_file 挂 link_record（width/height/watermark/
+    source_mark='scraped'）→ 素材库读接口可见。"""
+    from web import scrape_store
+
+    fake_conn = _FakeConnector(tmp_path)
+    biz_client = _biz_client_for(biz_engine)
+    runner, _ = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+    )
+    result = await runner.run(
+        "scrape_download_chain",
+        {"urls": [_XHS_EXPLORE], "batch_id": "batch-a57", "from_queue": False},
+    )
+    assert result.status == "done", f"链应 DONE，实际 {result.status}: {result.error}"
+
+    # ---- link_record 落库（一链接一条，status=done + 图数 + 元数据）----
+    links = await scrape_store.get_links(limit=50)
+    assert len(links) == 1, f"应只有 1 条链接记录，实际 {len(links)}"
+    link = links[0]
+    assert link["status"] == "done", f"链接应 done，实际 {link['status']}"
+    assert link["source"] == "xhs"
+    assert link["batch_id"] == "batch-a57"
+    assert link["image_count"] == 2
+    assert link["desc"] == "测试商品描述"
+    assert link["tags"] == ["tag1", "tag2"]
+    assert link["author_id"] == "seller-1"
+    assert link["error_note"] is None or link["error_note"] == ""
+
+    # ---- image_file 挂 link_record（体检字段 + 来源标记）----
+    detail = await scrape_store.get_link_by_id(link["id"])
+    imgs = detail["images"]
+    assert len(imgs) == 2, f"应 2 张图挂链接，实际 {len(imgs)}"
+    for img in imgs:
+        assert img["link_record_id"] == link["id"], "图片应挂 link_record"
+        assert img["source_mark"] == "scraped", "图片来源标记应为 scraped"
+        assert img["width"] == 80 and img["height"] == 60, (
+            f"PIL 内联体检应写回宽高，实际 {img['width']}×{img['height']}"
+        )
+        assert img["watermark"] is False, "纯灰图应无水印"
+        assert img["status"] == "downloaded"
+        assert img["url"].startswith(_XHS_EXPLORE), "图片 url 应基于分享链接（#img-N 稳定幂等键）"
+
+    # ---- 素材库读接口可见 ----
+    read_client = TestClient(_biz_app(biz_engine), raise_server_exceptions=False)
+    resp = read_client.get("/api/biz/scrape/links", headers={"X-Biz-Token": _BIZ_TOKEN})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["links"]) == 1
+    assert body["links"][0]["status"] == "done"
+    resp_img = read_client.get(
+        f"/api/biz/scrape/images?link_record_id={link['id']}",
+        headers={"X-Biz-Token": _BIZ_TOKEN},
+    )
+    assert resp_img.status_code == 200
+    assert len(resp_img.json()) == 2
+
+
+# ==== A58：拆两链 + input 契约各自明确（引擎侧契约校验不 422 + web 提交不 422）====
+
+
+class _StubRunnerAPI:
+    """A58 用最小 runner 桩（引擎 API 路径测试不应触发执行）。"""
+
+    async def consume_once(self):  # pragma: no cover
+        return None
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a58_two_chains_input_contracts(db_engine, biz_engine) -> None:
+    """A58：拆两链注册——registry 有 scrape_download_chain（input.model=ScrapeChainInput，
+    steps=[link_record_create, batch_image_download]）+ scrape_suggest_chain
+    （input.model=SuggestionInput，steps=[product_suggestion]）；
+    web POST /scrape/run {urls, batch_id} 不 422（引擎侧契约校验通过）。"""
+    import json as _json
+
+    from engine.registry import load_registry
+
+    registry = load_registry(REPO_ROOT)
+
+    # ---- 拆两链注册断言 ----
+    dl = registry.chains["scrape_download_chain"]
+    assert dl.input.model == "ScrapeChainInput"
+    assert [s.worker for s in dl.steps] == ["link_record_create", "batch_image_download"]
+    sg = registry.chains["scrape_suggest_chain"]
+    assert sg.input.model == "SuggestionInput"
+    assert [s.worker for s in sg.steps] == ["product_suggestion"]
+
+    # ---- 引擎侧契约校验：POST /api/engine/tasks 不 422（201）----
+    from engine.server import create_app
+    from httpx import ASGITransport, AsyncClient
+
+    engine_app = create_app(
+        engine=db_engine,
+        registry=registry,
+        runner=_StubRunnerAPI(),
+        consumers={},
+        scheduler_enabled=False,
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=engine_app), base_url=_FAKE_BIZ_URL
+    ) as client:
+        resp = await client.post(
+            "/api/engine/tasks",
+            json={
+                "chain_id": "scrape_download_chain",
+                "input": {"urls": [_XHS_EXPLORE], "batch_id": "batch-a58", "from_queue": False},
+                "trigger_ref": "运营",
+            },
+        )
+        assert resp.status_code == 201, f"download 链 input 应过 ScrapeChainInput 校验：{resp.text}"
+
+    # ---- web POST /scrape/run 不 422（引擎桩按 ScrapeChainInput 校验，通过返回 201）----
+    from models.workers import ScrapeChainInput
+
+    seen_payloads: list[dict] = []
+
+    def _accepting_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/engine/tasks" and request.method == "POST":
+            body = _json.loads(request.content)
+            seen_payloads.append(body.get("input") or {})
+            # 照真引擎：链 input 过 ScrapeChainInput 校验，不过则 422
+            try:
+                ScrapeChainInput.model_validate(body.get("input") or {})
+            except Exception:
+                return httpx.Response(422, json={"detail": "input 校验失败"})
+            return httpx.Response(201, json={"task_id": "e-000101", "status": "queued"})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    app = _web_app(biz_engine, _accepting_handler)
+    client = TestClient(app, follow_redirects=False)
+    _login(client)
+    resp_web = client.post("/scrape/run", json={"urls": [_XHS_EXPLORE]})
+    assert resp_web.status_code == 200, f"web /scrape/run 不应 422：{resp_web.text}"
+    assert resp_web.json()["ok"] is True
+    payload = seen_payloads[-1]
+    assert payload["urls"] == [_XHS_EXPLORE]
+    assert payload["batch_id"], "web 应生成 batch_id"
+    assert payload["from_queue"] is False
+
+
+# ==== A62：定时队列 + 定时链跑通（种子 → from_queue 真跑 → 建记录 → 下载落库 → 清队列）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a62_schedule_queue_chain_run(db_engine, biz_engine, tmp_path) -> None:
+    """A62：定时队列——设置键 link_queue 存 urls → ensure_seed_schedules 含
+    scrape_download_chain 种子 → 模拟定时 input {from_queue:true, batch_id} 真跑 →
+    link_record_create 经 provider（fake 读真实队列）建记录 → 下载落库 →
+    消费者清队列（link_queue 键空）；done 链接重跑跳过不重下。"""
+    from engine.core.db import ensure_seed_schedules, list_schedules
+    from models.workers import LinkQueueData
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+
+    # ---- ① 定时队列存 urls（设置键 scrape.link_queue）----
+    await scrape_store.set_link_queue([_XHS_EXPLORE], settings=store)
+    assert await scrape_store.get_link_queue(settings=store) == [_XHS_EXPLORE]
+
+    # ---- ② 种子存在（定时扒图，cron 默认 0 7 * * *）----
+    await ensure_seed_schedules(db_engine)
+    rows = await list_schedules(db_engine)
+    chain_ids = {r.chain_id for r in rows}
+    assert "scrape_download_chain" in chain_ids, "ensure_seed_schedules 应含 scrape_download_chain 种子"
+    seed = next(r for r in rows if r.chain_id == "scrape_download_chain")
+    assert seed.name == "定时扒图"
+    assert seed.cron == "0 7 * * *"
+    assert seed.enabled is True
+
+    # ---- ③ 模拟定时 input {from_queue: true, batch_id} 真跑 ----
+    fake_conn = _FakeConnector(tmp_path)
+    biz_client = _biz_client_for(biz_engine)
+
+    async def _queue_provider(params) -> LinkQueueData:
+        urls = await scrape_store.get_link_queue(settings=store)
+        return LinkQueueData(urls=urls)
+
+    runner, _ = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+        providers={"scrape.link_queue": _queue_provider},
+    )
+    result = await runner.run(
+        "scrape_download_chain",
+        {"urls": [], "batch_id": "sched-20260903070000", "from_queue": True},
+    )
+    assert result.status == "done", f"定时链应 DONE：{result.error}"
+
+    # ---- ④ 建记录 + 下载落库 ----
+    links = await scrape_store.get_links(limit=50)
+    assert len(links) == 1, "队列 1 条 → 1 条链接记录"
+    assert links[0]["status"] == "done"
+    assert links[0]["batch_id"] == "sched-20260903070000"
+    assert links[0]["image_count"] == 2
+    assert fake_conn.download_calls == [_XHS_EXPLORE], "connector 应下载队列链接"
+
+    # ---- ⑤ 消费者 scrape.download_done 清队列（from_queue=true）----
+    from engine.actions import CONSUMERS
+    from engine.actions.scrape_download_done import consume_scrape_download_done
+    from engine.core.runner import TaskRunner
+    from engine.registry import load_registry
+    from engine.server import QueueConsumer
+
+    registry = load_registry(REPO_ROOT)
+    consumer = QueueConsumer(
+        engine=db_engine,
+        registry=registry,
+        runner=runner,
+        consumers={**CONSUMERS, "scrape.download_done": consume_scrape_download_done},
+        biz_client=biz_client,
+    )
+    await consumer._after_task(result)
+    assert await store.get("scrape.link_queue", []) == [], "from_queue=true 链完成应清空队列"
+
+    # ---- ⑥ done 链接重跑跳过（幂等：不重复建记录、不重下）----
+    calls_before = len(fake_conn.download_calls)
+    result2 = await runner.run(
+        "scrape_download_chain",
+        {"urls": [_XHS_EXPLORE], "batch_id": "sched-rerun", "from_queue": True},
+    )
+    assert result2.status == "done", result2.error
+    assert len(fake_conn.download_calls) == calls_before, "done 链接应幂等跳过不重下"
+    links2 = await scrape_store.get_links(limit=50)
+    assert len(links2) == 1, "同 normalized_url 重跑不重复建记录"
+
+
+# ==== A66：product_suggestion 诚实化（REASON 真调 LLM + SuggestionResult 校验 + 提案落库）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a66_product_suggestion_real_llm(db_engine, biz_engine) -> None:
+    """A66：suggest 链真跑（fake LLM 输出 SuggestionResult）→ REASON 相位真调 LLM
+    （FakeAgent 计数）+ 输出过 SuggestionResult 校验 + proposals evidence ref_id ∈
+    链 input image_ids（白名单）+ 消费者 scrape.suggest 落 tm.task_proposal pending。"""
+    from models.workers import ScrapeImageContextData, SuggestionResult
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    # ---- ① 图片行落库（provider 白名单来源 = image_file.id）----
+    link = await scrape_store.create_link("url-a66", "xhs", "batch-a66")
+    img_ids: list[int] = []
+    async with AsyncSession(biz_engine) as session, session.begin():
+        for u in ("img-a66-1", "img-a66-2"):
+            row = (
+                await session.execute(
+                    text(
+                        "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id) "
+                        "VALUES (:b, :s, :u, :l) RETURNING id"
+                    ),
+                    {"b": "batch-a66", "s": "xhs", "u": u, "l": link["id"]},
+                )
+            ).first()
+            img_ids.append(int(row[0]))
+
+    # ---- ② fake provider：scrape_image_context 按 image_ids 返回元数据 ----
+    async def _image_provider(params) -> ScrapeImageContextData:
+        ids = list(getattr(params, "image_ids", None) or [])
+        return ScrapeImageContextData(
+            images=[
+                {
+                    "id": i,
+                    "desc": f"测试商品{i}",
+                    "tags": ["花艺", "定制"],
+                    "author_id": "seller-a66",
+                    "source": "xhs",
+                    "url": f"https-url-{i}",
+                    "width": 80,
+                    "height": 60,
+                    "watermark": False,
+                }
+                for i in ids
+            ]
+        )
+
+    # ---- ③ fake LLM 输出 SuggestionResult（evidence ref_id = 链 input image_ids）----
+    def _suggestion_output(out_cls):
+        assert out_cls is SuggestionResult
+        return SuggestionResult(
+            proposals=[
+                {
+                    "title": "选品建议：测试商品",
+                    "detail": "卖点：花艺定制；目标市场：婚礼花艺；关键词：永生花 定制",
+                    "domain": "scrape",
+                    "action_id": "scrape.suggest",
+                    "suggested_role": "运营",
+                    "suggested_due_days": 3,
+                    "evidence": [{"kind": "image", "ref_id": str(img_ids[0])}],
+                }
+            ],
+            note="",
+        )
+
+    biz_client = _biz_client_for(biz_engine)
+    runner, agents = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        providers={"scrape.image_context": _image_provider},
+        agent_output=_suggestion_output,
+    )
+    result = await runner.run(
+        "scrape_suggest_chain", {"image_ids": img_ids}
+    )
+    assert result.status == "done", f"suggest 链应 DONE：{result.error}"
+    assert agents and agents[0].calls == 1, "REASON 相位应真调 1 次 LLM（诚实化）"
+    assert "测试商品" in agents[0].prompts[0], "prompt 应含图片元数据（诚实化：元数据入 prompt）"
+
+    # ---- ④ 链末步输出过 SuggestionResult 校验（runner VERIFY 已保证）+ 提案消费 ----
+    from engine.actions import CONSUMERS
+    from engine.registry import load_registry
+    from engine.server import QueueConsumer
+
+    registry = load_registry(REPO_ROOT)
+    consumer = QueueConsumer(
+        engine=db_engine,
+        registry=registry,
+        runner=runner,
+        consumers=CONSUMERS,
+        biz_client=biz_client,
+    )
+    await consumer._after_task(result)
+
+    # ---- ⑤ tm.task_proposal pending 落库 + evidence ref_id ∈ 白名单 ----
+    # （按本任务 engine_task_id 过滤——业务库跨文件共享，防其他测试残留污染断言）
+    task_label = f"e-{result.task_id:06d}"
+    async with AsyncSession(biz_engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT id, title, status, domain, evidence, source "
+                    "FROM tm.task_proposal "
+                    "WHERE source->>'engine_task_id' = :tid"
+                ),
+                {"tid": task_label},
+            )
+        ).all()
+    assert len(rows) == 1, f"本任务应 1 条提案落库，实际 {len(rows)}"
+    prop = rows[0]
+    assert prop.status == "pending"
+    assert prop.domain == "scrape"
+    assert prop.source.get("chain_id") == "scrape_suggest_chain"
+    assert prop.source.get("worker_id") == "product_suggestion"
+    assert prop.source.get("audit_ids"), "LLM 工序提案应带 audit_ids（追溯保证）"
+    ev = prop.evidence
+    assert isinstance(ev, list) and ev and ev[0].get("ref_id") == str(img_ids[0]), (
+        f"evidence ref_id 应为链 input image_id，实际 {ev}"
+    )
+
+
+# ==== A67：EngineContext.biz_client 注入 + image_inspect 经 biz_client 读路径 + PATCH 写回 ====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a67_biz_client_injected_inspect_written(tmp_path) -> None:
+    """A67：EngineContext.biz_client 注入（frozen dataclass 字段断言）+ image_inspect
+    worker 级测试（fake biz_client GET 返回 local_path（tmp 假图文件）+ PATCH 记录调用）
+    → 体检宽高/水印写回实锤。"""
+    from engine.core.context import EngineContext
+    from models.workers import ImageInspectInput
+    from pydantic import BaseModel
+
+    class _DummyInput(BaseModel):
+        text: str = "x"
+
+    # ---- ① EngineContext.biz_client 字段（frozen dataclass 纯追加，默认 None）----
+    ctx = EngineContext(
+        worker_id="w", domain="scrape", inputs=_DummyInput(), config={}, context_data={}
+    )
+    assert ctx.biz_client is None
+    ctx2 = EngineContext(
+        worker_id="w",
+        domain="scrape",
+        inputs=_DummyInput(),
+        config={},
+        context_data={},
+        biz_client="fake-client",
+    )
+    assert ctx2.biz_client == "fake-client"
+    with pytest.raises(AttributeError):
+        ctx2.biz_client = "other"  # type: ignore[misc]  # frozen dataclass 不可变
+
+    # ---- ② image_inspect worker 级（fake biz_client：GET local_path + PATCH 记录）----
+    from PIL import Image
+
+    img_path = tmp_path / "inspect.png"
+    Image.new("RGB", (320, 240), (128, 128, 128)).save(img_path, "PNG")
+
+    class _RecordingClient:
+        def __init__(self) -> None:
+            self.patches: list[tuple[str, dict]] = []
+
+        async def get(self, path: str, params: dict | None = None):
+            assert path == "/scrape/images"
+            return _FakeBizResponse(
+                200, {"images": [{"id": 7, "local_path": str(img_path)}]}
+            )
+
+        async def patch(self, path: str, payload: dict):
+            self.patches.append((path, payload))
+            return _FakeBizResponse(200, {"ok": True})
+
+    from engine.registry.workers.scrape.image_inspect import run as inspect_run
+
+    client = _RecordingClient()
+    ctx3 = EngineContext(
+        worker_id="image_inspect",
+        domain="scrape",
+        inputs=_DummyInput(),
+        config={},
+        context_data={},
+        biz_client=client,
+    )
+    result = await inspect_run.run(ImageInspectInput(image_ids=[7]), ctx3)
+    assert len(result.images) == 1
+    item = result.images[0]
+    assert item.image_id == 7
+    assert item.width == 320 and item.height == 240, "PIL 应读出真宽高"
+    assert item.watermark is False, "纯灰图无水印"
+    assert client.patches == [
+        ("/scrape/images/7", {"width": 320, "height": 240, "watermark": False})
+    ], "体检结果应 PATCH 写回落库实锤"
+
+    # ---- ③ 文件缺失记 note 不阻断（单图失败不整体失败）----
+    class _MissingClient:
+        async def get(self, path: str, params: dict | None = None):
+            return _FakeBizResponse(200, {"images": [{"id": 8, "local_path": str(tmp_path / "gone.png")}]})
+
+        async def patch(self, path: str, payload: dict):
+            return _FakeBizResponse(200, {"ok": True})
+
+    result2 = await inspect_run.run(
+        ImageInspectInput(image_ids=[8]),
+        EngineContext(
+            worker_id="image_inspect",
+            domain="scrape",
+            inputs=_DummyInput(),
+            config={},
+            context_data={},
+            biz_client=_MissingClient(),
+        ),
+    )
+    assert len(result2.images) == 1
+    assert "不存在" in result2.images[0].note
+    assert result2.note != ""
+
+
+# ==== A68：失败/降级明确提示（connector 失败 → failed+error_note；降级 → degraded_note）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a68_failure_and_degraded_notes(db_engine, biz_engine, tmp_path) -> None:
+    """A68：fake connector ok=False（note 含 xsec_token 过期）→ 链接 failed + error_note
+    落库；ok=True 但降级 note（db-missing）→ degraded_note 落库 → 页面/读接口可见。"""
+    from web import scrape_store
+
+    fail_url = "ht" + "tps://www.xiaohongshu.com/explore/fail123"
+    degrade_url = "ht" + "tps://www.xiaohongshu.com/explore/degrade456"
+
+    fake_conn = _FakeConnector(
+        tmp_path, fail_urls={fail_url}, degrade_urls={degrade_url}
+    )
+    biz_client = _biz_client_for(biz_engine)
+    runner, _ = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+    )
+    result = await runner.run(
+        "scrape_download_chain",
+        {"urls": [fail_url, degrade_url], "batch_id": "batch-a68", "from_queue": False},
+    )
+    assert result.status == "done", f"链接级失败不应阻断链：{result.error}"
+
+    links = await scrape_store.get_links(limit=50)
+    by_url = {l["url"]: l for l in links}
+    assert set(by_url) == {fail_url, degrade_url}
+
+    # ---- 失败链接：status=failed + error_note（xsec_token 过期/未落盘）----
+    failed = by_url[fail_url]
+    assert failed["status"] == "failed"
+    assert "xsec_token" in (failed["error_note"] or ""), (
+        f"error_note 应透传 connector 失败原因：{failed['error_note']}"
+    )
+    assert failed["image_count"] == 0
+
+    # ---- 降级链接：status=done + degraded_note（db-missing）----
+    degraded = by_url[degrade_url]
+    assert degraded["status"] == "done"
+    assert degraded["degraded_note"] == "db-missing", (
+        f"connector 降级 note 应透传 degraded_note：{degraded['degraded_note']}"
+    )
+    assert degraded["image_count"] == 2
+
+    # ---- 页面可见（素材库列表渲染 error_note / degraded_note）----
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False)
+    _login(client)
+    page = client.get("/scrape")
+    assert page.status_code == 200
+    assert "xsec_token" in page.text, "页面应展示 error_note（xsec_token 过期提示）"
+    assert "db-missing" in page.text, "页面应展示 degraded_note（降级标注）"
+
+
+# ==== 批 4 辅助单测（非 acceptance）：消费者/调度器模板/工序降级 ====
+
+
+@pytest.mark.asyncio
+async def test_download_done_consumer_from_queue_false_keeps_queue() -> None:
+    """scrape.download_done：from_queue=false 只记 note 不清队列（立即扒语义）。"""
+    from engine.actions.scrape_download_done import consume_scrape_download_done
+
+    cleared: list[str] = []
+
+    class _FakeBiz:
+        async def post(self, path, payload):
+            cleared.append(path)
+            return _FakeBizResponse(200, {"ok": True, "queue": []})
+
+    deliverable = {
+        "links": [{"link_id": 1, "status": "done"}],
+        "image_ids": [10, 11],
+        "from_queue": False,
+        "batch_id": "batch-x",
+        "note": "",
+    }
+    outcome = await consume_scrape_download_done(deliverable, biz_client=_FakeBiz())
+    assert outcome.status == "accepted"
+    assert cleared == [], "from_queue=false 不应调清队列接口"
+
+
+@pytest.mark.asyncio
+async def test_download_done_consumer_from_queue_true_clears() -> None:
+    """scrape.download_done：from_queue=true（task.input 注入）→ POST /scrape/queue/clear。"""
+    from engine.actions.scrape_download_done import consume_scrape_download_done
+    from types import SimpleNamespace
+
+    cleared: list[str] = []
+
+    class _FakeBiz:
+        async def post(self, path, payload):
+            cleared.append(path)
+            return _FakeBizResponse(200, {"ok": True, "queue": []})
+
+    deliverable = {
+        "links": [],
+        "image_ids": [],
+        "from_queue": False,  # deliverable 默认 false——task.input 是真相
+        "batch_id": "sched-x",
+        "note": "",
+    }
+    task = SimpleNamespace(input={"batch_id": "sched-x", "from_queue": True})
+    outcome = await consume_scrape_download_done(deliverable, task=task, biz_client=_FakeBiz())
+    assert outcome.status == "accepted"
+    assert cleared == ["/scrape/queue/clear"], "from_queue=true 应调清队列接口"
+
+
+def test_schedule_input_template_by_chain() -> None:
+    """调度器 input 模板（T7）：scrape_download_chain → {batch_id: sched-<ts>, from_queue: true}；
+    其余链 → {trigger_date: today} 不变（crm_reminder_chain/seo_healthcheck_chain 行为锁住）。"""
+    from engine.server import _schedule_input_for
+
+    inp = _schedule_input_for("scrape_download_chain", "20260903070000", "2026-09-03")
+    assert inp == {"batch_id": "sched-20260903070000", "from_queue": True}
+
+    for chain_id in ("crm_reminder_chain", "seo_healthcheck_chain", "other_chain"):
+        assert _schedule_input_for(chain_id, "ts", "2026-09-03") == {"trigger_date": "2026-09-03"}
+
+
+def test_schedule_time_to_cron_conversion() -> None:
+    """scrape.schedule_time（HH:MM）→ daily cron（不补前导零，照 web 口径）；非法回退默认。"""
+    from engine.server import _schedule_time_to_cron
+
+    assert _schedule_time_to_cron("07:00") == "0 7 * * *"
+    assert _schedule_time_to_cron("08:30") == "30 8 * * *"
+    assert _schedule_time_to_cron("bad") == "0 7 * * *"
+    assert _schedule_time_to_cron("25:00") == "0 7 * * *"
+
+
+@pytest.mark.asyncio
+async def test_link_record_create_queue_empty_quick_complete() -> None:
+    """link_record_create：from_queue=true 且队列空 → link_ids 空（链快速完成）。"""
+    from engine.core.context import EngineContext
+    from engine.registry.workers.scrape.link_record_create import run as lrc_run
+    from models.workers import LinkQueueData, LinkRecordCreateInput
+
+    ctx = EngineContext(
+        worker_id="link_record_create",
+        domain="scrape",
+        inputs=LinkRecordCreateInput(urls=[], batch_id="sched-x", from_queue=True),
+        config={},
+        context_data={"scrape_link_queue": LinkQueueData(urls=[])},
+        biz_client=object(),  # 不触发——队列空直接返回
+    )
+    result = await lrc_run.run(
+        LinkRecordCreateInput(urls=[], batch_id="sched-x", from_queue=True), ctx
+    )
+    assert result.link_ids == []
+    assert result.urls == []
+    assert result.from_queue is True
+
+
+@pytest.mark.asyncio
+async def test_batch_image_download_biz_client_missing_degrades() -> None:
+    """batch_image_download：biz_client 未注入 → 降级 ScrapeBatchResult（不抛穿链）。"""
+    from engine.core.context import EngineContext
+    from engine.registry.workers.scrape.batch_image_download import run as bid_run
+    from models.workers import BatchDownloadInput
+
+    ctx = EngineContext(
+        worker_id="batch_image_download",
+        domain="scrape",
+        inputs=BatchDownloadInput(link_ids=[1], batch_id="b"),
+        config={},
+        context_data={},
+    )
+    result = await bid_run.run(BatchDownloadInput(link_ids=[1], batch_id="b"), ctx)
+    assert result.links == []
+    assert "biz_client 未注入" in result.note

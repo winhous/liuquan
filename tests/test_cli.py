@@ -86,18 +86,22 @@ class TestRegistryCheck:
         assert "0 违规" in out
         # 清单随声明：v0.5 批 5 后工序 19（+crm_image_scan/download/caption/save）、
         # 链 12（+crm_image_chain）、provider 7（+crm_message_images）、
-        # 事件 1、Action 9（+crm.image）
-        for label in ("工序 19", "链 12", "Context provider 7", "事件 1", "Action 9"):
+        # 事件 1、Action 9（+crm.image）；
+        # v0.6 批 4（+link_record_create/batch_image_download 工序、+scrape_download_chain
+        # 链、+scrape.link_context/scrape.link_queue provider、+scrape.download_done Action）
+        for label in ("工序 21", "链 13", "Context provider 9", "事件 1", "Action 10"):
             assert label in out, f"清单应包含 {label}"
         assert "demo_echo" in out and "crm_translate" in out and "demo_propose" in out
         assert "chat_translate" in out and "tm_intent" in out
         assert "keyword_research" in out and "seo_optimize" in out and "listing_healthcheck" in out
         assert "image_download" in out and "image_inspect" in out and "product_suggestion" in out
+        assert "link_record_create" in out and "batch_image_download" in out
         assert "crm_chat_chain" in out and "tm_intent_chain" in out
         assert "seo_keyword_chain" in out and "seo_optimize_chain" in out and "seo_healthcheck_chain" in out
-        assert "scrape_suggest_chain" in out
+        assert "scrape_suggest_chain" in out and "scrape_download_chain" in out
         assert "tm_demo_chain" in out and "tm.proposal" in out
         assert "crm.candidate" in out and "scrape.suggest" in out
+        assert "scrape.download_done" in out
 
     def test_missing_models_yaml_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

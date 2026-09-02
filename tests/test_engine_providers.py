@@ -19,6 +19,8 @@ from engine.providers import (
     CrmMessageImagesHTTP,
     CrmOverdueContextHTTP,
     ScrapeImageContextHTTP,
+    ScrapeLinkContextHTTP,
+    ScrapeLinkQueueHTTP,
     SeoMetricHistoryHTTP,
     TmTaskContextHTTP,
     build_providers,
@@ -115,13 +117,20 @@ async def test_provider_missing_config_raises(monkeypatch: pytest.MonkeyPatch) -
 
 def test_build_providers_assembles() -> None:
     providers = build_providers(base_url="http" + "://test-" + "biz", token="test-token")
-    assert set(providers) == {"crm.chat_context", "crm.overdue_context", "crm.message_images", "tm.task_context", "seo.metric_history", "scrape.image_context"}
+    assert set(providers) == {
+        "crm.chat_context", "crm.overdue_context", "crm.message_images",
+        "tm.task_context", "seo.metric_history", "scrape.image_context",
+        # v0.6 批 4：扒图链接记录 + 定时队列白名单（详设 §7）
+        "scrape.link_context", "scrape.link_queue",
+    }
     assert isinstance(providers["crm.chat_context"], CrmChatContextHTTP)
     assert isinstance(providers["crm.overdue_context"], CrmOverdueContextHTTP)
     assert isinstance(providers["crm.message_images"], CrmMessageImagesHTTP)
     assert isinstance(providers["tm.task_context"], TmTaskContextHTTP)
     assert isinstance(providers["seo.metric_history"], SeoMetricHistoryHTTP)
     assert isinstance(providers["scrape.image_context"], ScrapeImageContextHTTP)
+    assert isinstance(providers["scrape.link_context"], ScrapeLinkContextHTTP)
+    assert isinstance(providers["scrape.link_queue"], ScrapeLinkQueueHTTP)
 
 
 @pytest.mark.asyncio

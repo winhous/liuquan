@@ -257,13 +257,14 @@ async def test_schedule_name_boundary_100_ok(db_engine) -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_seed_empty_table_inserts(db_engine) -> None:
-    """空表 → 插入 crm_reminder_chain + seo_healthcheck_chain 种子。"""
+    """空表 → 插入 crm_reminder_chain + seo_healthcheck_chain + scrape_download_chain 种子。"""
     await ensure_seed_schedules(db_engine)
     rows = await list_schedules(db_engine)
-    assert len(rows) == 2
+    assert len(rows) == 3
     chain_ids = {r.chain_id for r in rows}
     assert "crm_reminder_chain" in chain_ids
     assert "seo_healthcheck_chain" in chain_ids
+    assert "scrape_download_chain" in chain_ids  # v0.6 批 4：定时扒图种子
     crm_seed = next(r for r in rows if r.chain_id == "crm_reminder_chain")
     assert crm_seed.name == "CRM 未跟进提醒"
     assert crm_seed.cron == "0 7 * * *"
@@ -272,6 +273,23 @@ async def test_ensure_seed_empty_table_inserts(db_engine) -> None:
     assert hc_seed.name == "listing 体检"
     assert hc_seed.cron == "0 8 * * *"
     assert hc_seed.enabled is True
+    scrape_seed = next(r for r in rows if r.chain_id == "scrape_download_chain")
+    assert scrape_seed.name == "定时扒图"
+    assert scrape_seed.cron == "0 7 * * *"
+    assert scrape_seed.enabled is True
+
+
+@pytest.mark.asyncio
+async def test_ensure_seed_cron_override(db_engine) -> None:
+    """v0.6 §5.4：cron_overrides 覆盖 scrape_download_chain 种子 cron（引擎启动读设置）。"""
+    await ensure_seed_schedules(
+        db_engine, cron_overrides={"scrape_download_chain": "30 8 * * *"}
+    )
+    rows = await list_schedules(db_engine)
+    scrape_seed = next(r for r in rows if r.chain_id == "scrape_download_chain")
+    assert scrape_seed.cron == "30 8 * * *"
+    crm_seed = next(r for r in rows if r.chain_id == "crm_reminder_chain")
+    assert crm_seed.cron == "0 7 * * *"  # 既有种子不被覆盖
 
 
 @pytest.mark.asyncio
@@ -283,11 +301,12 @@ async def test_ensure_seed_nonempty_adds_missing(db_engine) -> None:
     await ensure_seed_schedules(db_engine)
     rows = await list_schedules(db_engine)
     chain_ids = {r.chain_id for r in rows}
-    # other_chain 保留，crm_reminder_chain + seo_healthcheck_chain 补插
+    # other_chain 保留，crm_reminder_chain + seo_healthcheck_chain + scrape_download_chain 补插
     assert "other_chain" in chain_ids
     assert "crm_reminder_chain" in chain_ids
     assert "seo_healthcheck_chain" in chain_ids
-    assert len(rows) == 3
+    assert "scrape_download_chain" in chain_ids
+    assert len(rows) == 4
 
 
 @pytest.mark.asyncio
@@ -296,24 +315,26 @@ async def test_ensure_seed_idempotent(db_engine) -> None:
     await ensure_seed_schedules(db_engine)
     await ensure_seed_schedules(db_engine)
     rows = await list_schedules(db_engine)
-    assert len(rows) == 2
+    assert len(rows) == 3
     chain_ids = {r.chain_id for r in rows}
     assert "crm_reminder_chain" in chain_ids
     assert "seo_healthcheck_chain" in chain_ids
+    assert "scrape_download_chain" in chain_ids
 
 
 @pytest.mark.asyncio
 async def test_ensure_seed_partial_existing(db_engine) -> None:
-    """已有 crm_reminder_chain 但缺 seo_healthcheck_chain → 只补 seo。"""
+    """已有 crm_reminder_chain 但缺其余 → 只补缺的。"""
     await create_schedule(
         db_engine, chain_id="crm_reminder_chain", name="已有提醒链", cron="0 7 * * *"
     )
     await ensure_seed_schedules(db_engine)
     rows = await list_schedules(db_engine)
-    assert len(rows) == 2
+    assert len(rows) == 3
     chain_ids = {r.chain_id for r in rows}
     assert "crm_reminder_chain" in chain_ids
     assert "seo_healthcheck_chain" in chain_ids
+    assert "scrape_download_chain" in chain_ids
 
 
 # ---- next_run_time：纯代码计算 ----

@@ -239,6 +239,8 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "image_download",
         "image_inspect",
         "product_suggestion",
+        "link_record_create",  # v0.6 批 4：拆两链新工序
+        "batch_image_download",  # v0.6 批 4：拆两链新工序
         "crm_image_scan",
         "crm_image_download",
         "crm_image_caption",
@@ -256,6 +258,7 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "seo_optimize_chain",
         "seo_healthcheck_chain",
         "scrape_suggest_chain",
+        "scrape_download_chain",  # v0.6 批 4：拆两链新链
         "crm_image_chain",
     }
     assert set(registry.context_providers) == {
@@ -266,13 +269,16 @@ def test_real_registry_loads_zero_violations(monkeypatch: pytest.MonkeyPatch) ->
         "tm_task_context",
         "seo_metric_history",
         "scrape_image_context",
+        "scrape_link_context",  # v0.6 批 4
+        "scrape_link_queue",  # v0.6 批 4
     }
     assert set(registry.events) == {"demo.echo_done"}
-    # v0.4：tm.schedule Action；v0.5 批 3：seo.report / seo.optimize / seo.healthcheck；批 4：scrape.suggest；批 5：crm.image
+    # v0.4：tm.schedule Action；v0.5 批 3：seo.report / seo.optimize / seo.healthcheck；
+    # 批 4：scrape.suggest；批 5：crm.image；v0.6 批 4：+ scrape.download_done
     assert set(registry.actions) == {
         "demo_echo_record", "tm.proposal", "crm.candidate", "tm.schedule",
         "seo.report", "seo.optimize", "seo.healthcheck",
-        "scrape.suggest", "crm.image",
+        "scrape.suggest", "scrape.download_done", "crm.image",
     }
 
     # 工序声明字段（id/domain/risk/model 别名/retry/输入输出 Model 引用）
