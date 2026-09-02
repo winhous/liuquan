@@ -288,8 +288,63 @@ assertions:
     test: "tests/test_acceptance_v05.py::test_a56_v05_pages_render"
     desc: "v0.5 页面渲染"
   # ---- v0.6 扒图重做 A57-A68（分批开发，逐批登记）----
+  - id: A57
+    version: v0.6
+    status: planned
+    plan: "批 4 链路修通后补：test_a57_scrape_link_to_link_record_and_images——立即扒端到端（贴链接→download 链真跑 fake connector+fake biz_client→link_record done+image_file 挂链接落库（宽高/水印/source_mark=scraped）→素材库读接口可见）"
+    desc: "立即扒端到端落素材库（一链接一条 + 图挂链接 + 状态/图数/元数据可见）"
+  - id: A58
+    version: v0.6
+    status: planned
+    plan: "批 4 后补：test_a58_two_chains_input_contracts——拆两链注册 + download 链 input=ScrapeChainInput{urls,batch_id,from_queue} / suggest 链 input=SuggestionInput{image_ids}；web 提交不 422"
+    desc: "拆两链 + input 契约各自明确"
+  - id: A59
+    version: v0.6
+    status: planned
+    plan: "批 2 后补：test_a59_link_record_url_idempotent——同链接（不同 xsec_token）重复提交不重复建记录（normalized_url 唯一）"
+    desc: "一链接一条 + url 幂等"
+  - id: A60
+    version: v0.6
+    status: planned
+    plan: "批 2 后补：test_a60_link_export_zip——图包导出 zip 含图片 + metadata.json（字段齐全）"
+    desc: "图包导出（zip + metadata.json）"
   - id: A61
     version: v0.6
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a61_image_source_mark_and_sku_shop_slot"
     desc: "图来源标记 + SKU×店铺留位：image_file.source_mark 默认 scraped + CHECK 四值 + sku_id/shop_id 列存在（迁移 0011 结构断言）"
+  - id: A62
+    version: v0.6
+    status: planned
+    plan: "批 2/4 后补：test_a62_schedule_queue_chain_run——加入定时队列（link_queue 键）→ scrape_download_chain 种子存在 → 立即运行（sched input from_queue）→ 建 link_record → 下载落库 → 队列清空"
+    desc: "定时队列 + 定时链跑通"
+  - id: A63
+    version: v0.6
+    status: planned
+    plan: "批 2 后补：test_a63_schedule_time_setting_effect——改 scrape.schedule_time → 设置键变化 + 定时页 scrape_download_chain cron 变化（update_time 实锤）"
+    desc: "定时默认时间设置生效"
+  - id: A64
+    version: v0.6
+    status: planned
+    plan: "批 3 后补：test_a64_xhs_connector_studio_style——xhs 照广成（脚本含 from source import XHS + explore_data 中文列 + 差集计数 + 未落盘 ok=False + xsec_token 提示 + vendor source/__init__ 完整度）"
+    desc: "xhs 连接器照广成（代码级）"
+  - id: A65
+    version: v0.6
+    status: planned
+    plan: "批 3 后补：test_a65_xianyu_connector_studio_style——闲鱼照广成（11 主图+6 详情选择器 + naturalWidth≥100 + 9 类过滤关键词 + _DEAD_PAGE_KEYWORDS + 全局 90s deadline + networkidle 降级）"
+    desc: "闲鱼连接器照广成（代码级）"
+  - id: A66
+    version: v0.6
+    status: planned
+    plan: "批 4 后补：test_a66_product_suggestion_real_llm——suggest 链真跑（fake LLM）→ REASON 相位真调 LLM + SuggestionResult 校验 + proposals evidence ref_id 在链 input 白名单内 + 提案 tm.task_proposal pending"
+    desc: "product_suggestion 诚实化（真接 LLM）"
+  - id: A67
+    version: v0.6
+    status: planned
+    plan: "批 4 后补：test_a67_biz_client_injected_inspect_written——EngineContext.biz_client 注入 + image_inspect 经 biz_client 读 local_path + 体检宽高/水印 PATCH 落库实锤"
+    desc: "链路修通组合（biz_client 注入 + image_inspect 修通）"
+  - id: A68
+    version: v0.6
+    status: planned
+    plan: "批 4 后补：test_a68_failure_and_degraded_notes——连接器失败 → link_record failed + error_note（xsec_token 过期/未落盘）；元数据降级 → degraded_note（db-missing/no-title）→ 页面可见"
+    desc: "失败/降级明确提示"

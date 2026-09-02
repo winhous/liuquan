@@ -32,12 +32,12 @@ def _build_full_manifest(
     overrides: dict[int, dict],
     fake_filename: str = "_b1_fake_acceptance.py",
 ) -> tuple[str, str]:
-    """构造完整 A1-A56 manifest YAML，返回 (yaml_text, fake_filename)。
+    """构造完整 A1-A68 manifest YAML，返回 (yaml_text, fake_filename)。
 
     overrides: {编号数字: 额外字段 dict}，用于覆盖默认值。
     """
     entries = []
-    for i in range(1, 57):
+    for i in range(1, 69):
         aid = f"A{i}"
         if i in overrides:
             ov = overrides[i]
@@ -45,9 +45,11 @@ def _build_full_manifest(
             for k, v in ov.items():
                 fields.append(f"    {k}: {repr(v) if isinstance(v, str) else v}")
             entries.append("\n".join(fields))
-        elif i in (47, 48, 51):
+        elif i in (47, 48, 51) or i >= 57:
             entries.append(
-                f'  - id: {aid}\n    version: v0.5\n    status: planned\n'
+                f'  - id: {aid}\n'
+                f'    version: {"v0.6" if i >= 57 else "v0.5"}\n'
+                f'    status: planned\n'
                 f'    plan: "后续补"\n    desc: "planned gap"'
             )
         elif i == 11:

@@ -27,7 +27,7 @@ except ImportError:
     print("红: pyyaml 未安装（pip install pyyaml）")
     sys.exit(1)
 
-# ---- 硬编码 A1-A56 全集（含版本归属，缺任一 id 即红）----
+# ---- 硬编码 A1-A68 全集（含版本归属，缺任一 id 即红）----
 EXPECTED_IDS: dict[str, str] = {
     # v0.1 引擎地基
     "A1": "v0.1", "A2": "v0.1", "A3": "v0.1", "A4": "v0.1",
@@ -49,6 +49,10 @@ EXPECTED_IDS: dict[str, str] = {
     "A46": "v0.5", "A47": "v0.5", "A48": "v0.5", "A49": "v0.5",
     "A50": "v0.5", "A51": "v0.5", "A52": "v0.5", "A53": "v0.5",
     "A54": "v0.5", "A55": "v0.5", "A56": "v0.5",
+    # v0.6 扒图重做（素材库）
+    "A57": "v0.6", "A58": "v0.6", "A59": "v0.6", "A60": "v0.6",
+    "A61": "v0.6", "A62": "v0.6", "A63": "v0.6", "A64": "v0.6",
+    "A65": "v0.6", "A66": "v0.6", "A67": "v0.6", "A68": "v0.6",
 }
 
 
@@ -100,7 +104,7 @@ def check_manifest(
         sorted_missing = sorted(missing, key=lambda x: int(x[1:]))
         red.append(
             f"manifest 缺少断言编号: {', '.join(sorted_missing)} "
-            f"（共 {len(missing)} 个，需覆盖 A1-A56 全集）"
+            f"（共 {len(missing)} 个，需覆盖 A1-A68 全集）"
         )
 
     # 逐条检查
