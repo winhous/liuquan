@@ -1,17 +1,22 @@
-# batch_image_download 工序声明（详设-v0.6 §5.2，新工序）
+# batch_image_download 工序声明（详设-v0.6 §5.2 + §15.1 批 6 归集改造）
 # 纯代码工序（reason: none，无 LLM 调用，零 token 成本）：
-# 逐链接：经 biz_client GET 链接信息（url/source）→ 按来源/域名路由 connector
-# → 下载成功逐图 PIL 内联体检（宽高 + 水印启发式）→ POST /api/biz/scrape/images
-# （link_record_id + url 幂等 409 忽略，source_mark='scraped'）→ PATCH 链接记录
-# （status done/failed + image_count + 元数据 + storage_dir + error_note + degraded_note）
-# → 输出 ScrapeBatchResult{links[], image_ids[], from_queue, batch_id, note}
+# 逐链接：经 biz_client GET 链接信息（url/source）→ 建链接文件夹
+# （{storage_dir}/{source}/{folder_key}/，folder_key = xhs note id / xianyu item id
+# / http 8 位 hash，取不到回退 link_{id}；ctx.storage_dir 装配注入）→
+# connector 下载 → 归集（产物移动到链接文件夹按序重命名 01.xxx… + 中转目录清理）
+# → 写 meta.txt（§15.1 人读友好清单）→ 逐图 PIL 内联体检（宽高 + 水印启发式）
+# → POST /api/biz/scrape/images（link_record_id + url 幂等 409 忽略，
+# local_path 相对 storage_dir，source_mark='scraped'）→ PATCH 链接记录
+# （status done/failed + image_count + 元数据 + storage_dir（相对路径）
+# + error_note + degraded_note）→ 输出 ScrapeBatchResult{links[], image_ids[],
+# from_queue, batch_id, note}
 # 元数据降级标注：connector note 非空（db-missing/no-title/…）→ degraded_note
 
 id: batch_image_download
 domain: scrape
-version: 1
+version: 2
 risk: write
-description: 批量下载+体检落素材库：逐链接 connector 下载 → PIL 内联体检 → 图片挂链接落库（零 token）
+description: 批量下载+归集落素材库：逐链接 connector 下载 → 一链接一文件夹（编号图片+meta.txt）→ PIL 内联体检 → 图片挂链接落库（零 token）
 input:
   model: BatchDownloadInput
 output:

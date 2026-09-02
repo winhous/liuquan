@@ -1437,6 +1437,7 @@ def _build_runner(
     connectors: dict | None = None,
     providers: dict | None = None,
     agent_output=None,
+    storage_dir: str | None = None,  # 批 6：EngineContext.storage_dir（归集建链接文件夹）
 ) -> tuple["TaskRunner", list]:
     """真注册表 + 真模型注册表 + FakeAgent + 注入 biz_client/connectors/providers。"""
     from engine.core.llm import load_models
@@ -1458,6 +1459,7 @@ def _build_runner(
         providers=providers or {},
         connectors=connectors or {},
         biz_client=biz_client,
+        storage_dir=storage_dir,
     )
     return runner, agents
 
@@ -1487,6 +1489,7 @@ async def test_a57_scrape_link_to_link_record_and_images(
         db_engine,
         biz_client=biz_client,
         connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+        storage_dir=str(tmp_path),  # 批 6：EngineContext.storage_dir（归集建链接文件夹）
     )
     result = await runner.run(
         "scrape_download_chain",
@@ -1507,7 +1510,18 @@ async def test_a57_scrape_link_to_link_record_and_images(
     assert link["author_id"] == "seller-1"
     assert link["error_note"] is None or link["error_note"] == ""
 
-    # ---- image_file 挂 link_record（体检字段 + 来源标记）----
+    # ---- 批 6 一链接一文件夹（详设 §15.1）：storage_dir 指向链接文件夹 + 文件在场 ----
+    assert link["storage_dir"] == "xhs/abc123", (
+        f"storage_dir 应指向链接文件夹（xhs/<note id>），实际 {link['storage_dir']!r}"
+    )
+    link_folder = tmp_path / "xhs" / "abc123"
+    assert link_folder.is_dir(), f"链接文件夹应存在：{link_folder}"
+    files = sorted(p.name for p in link_folder.iterdir() if p.is_file())
+    assert files == ["01.png", "02.png", "meta.txt"], (
+        f"链接文件夹应含按序编号图片 + meta.txt，实际 {files}"
+    )
+
+    # ---- image_file 挂 link_record（体检字段 + 来源标记 + local_path 相对路径）----
     detail = await scrape_store.get_link_by_id(link["id"])
     imgs = detail["images"]
     assert len(imgs) == 2, f"应 2 张图挂链接，实际 {len(imgs)}"
@@ -1520,6 +1534,13 @@ async def test_a57_scrape_link_to_link_record_and_images(
         assert img["watermark"] is False, "纯灰图应无水印"
         assert img["status"] == "downloaded"
         assert img["url"].startswith(_XHS_EXPLORE), "图片 url 应基于分享链接（#img-N 稳定幂等键）"
+        # 批 6 路径形态：local_path = 链接文件夹内相对路径（相对 storage_dir）
+        assert img["local_path"].startswith("xhs/abc123/"), (
+            f"local_path 应指向链接文件夹内相对路径，实际 {img['local_path']!r}"
+        )
+        assert Path(str(tmp_path), str(img["local_path"])).is_file(), (
+            f"local_path 磁盘文件应存在：{img['local_path']}"
+        )
 
     # ---- 素材库读接口可见 ----
     read_client = TestClient(_biz_app(biz_engine), raise_server_exceptions=False)
@@ -1664,6 +1685,7 @@ async def test_a62_schedule_queue_chain_run(db_engine, biz_engine, tmp_path) -> 
         biz_client=biz_client,
         connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
         providers={"scrape.link_queue": _queue_provider},
+        storage_dir=str(tmp_path),  # 批 6：EngineContext.storage_dir（归集建链接文件夹）
     )
     result = await runner.run(
         "scrape_download_chain",
@@ -1951,6 +1973,7 @@ async def test_a68_failure_and_degraded_notes(db_engine, biz_engine, tmp_path) -
         db_engine,
         biz_client=biz_client,
         connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+        storage_dir=str(tmp_path),  # 批 6：EngineContext.storage_dir（归集建链接文件夹）
     )
     result = await runner.run(
         "scrape_download_chain",
@@ -2232,6 +2255,7 @@ async def test_a47_link_to_image_file_and_proposal_pending(
         db_engine,
         biz_client=biz_client,
         connectors={"xhs": fake_conn, "xianyu": fake_conn, "http_image": fake_conn},
+        storage_dir=str(tmp_path),  # 批 6：EngineContext.storage_dir（归集建链接文件夹）
     )
     result = await runner.run(
         "scrape_download_chain",

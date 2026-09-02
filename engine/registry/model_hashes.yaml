@@ -3,7 +3,7 @@
 # （同一 Model 被多个工序引用时，记录为其中最大 version，各工序须一致）
 models:
   BatchDownloadInput:
-    version: 1
+    version: 2
     hash: 2e59f76bc59530c53eb81b2e11d32f16f085a53fdd849e06d4d1978f623949af
   ChatTranscriptInput:
     version: 1
@@ -102,7 +102,7 @@ models:
     version: 1
     hash: 3ae24d2bdca322e7a4459c014c2a0204f470242ee8e6255ef1d2641de85eb3fb
   ScrapeBatchResult:
-    version: 1
+    version: 2
     hash: e03e29ec8bd8b24a3973081102df669123fac769adc41e02706b7d0ae78f1f3b
   SeoOptimizationReport:
     version: 1
