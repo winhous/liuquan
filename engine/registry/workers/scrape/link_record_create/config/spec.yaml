@@ -1,0 +1,2 @@
+# link_record_create 工序配置（详设-v0.6 §5.2；业务值外置 R10）
+# 本工序无业务规格数字，占位保留 config_dir 契约（照 image_download 模式）

@@ -33,8 +33,14 @@ async def create_image_file(
     height: int | None = None,
     watermark: bool = False,
     status: str = "pending",
+    link_record_id: int | None = None,  # v0.6：图片挂链接（详设 §4.2）
+    source_mark: str = "scraped",  # v0.6：图片来源标记（默认扒图产物）
 ) -> dict[str, Any]:
-    """Create image_file record. Returns the created row."""
+    """Create image_file record. Returns the created row.
+
+    v0.6 批 4：+link_record_id（挂链接）/ source_mark（来源标记，默认 scraped），
+    uq_scrape_image_link_url(link_record_id, url) 图片幂等键在 API 层负责 409。
+    """
     import json as _json
     async with get_db_session() as session:
         result = await session.execute(
@@ -42,12 +48,15 @@ async def create_image_file(
                 """
                 INSERT INTO scrape.image_file
                     (batch_id, source, url, local_path, day_dir, "desc", tags,
-                     author_id, width, height, watermark, status)
+                     author_id, width, height, watermark, status,
+                     link_record_id, source_mark)
                 VALUES
                     (:batch_id, :source, :url, :local_path, :day_dir, :desc,
-                     CAST(:tags AS jsonb), :author_id, :width, :height, :watermark, :status)
+                     CAST(:tags AS jsonb), :author_id, :width, :height, :watermark, :status,
+                     :link_record_id, :source_mark)
                 RETURNING id, batch_id, source, url, local_path, day_dir, "desc",
-                          tags, author_id, width, height, watermark, status, created_at
+                          tags, author_id, width, height, watermark, status,
+                          link_record_id, source_mark, created_at
                 """
             ),
             {
@@ -63,6 +72,8 @@ async def create_image_file(
                 "height": height,
                 "watermark": watermark,
                 "status": status,
+                "link_record_id": link_record_id,
+                "source_mark": source_mark,
             },
         )
         await session.commit()
@@ -70,10 +81,18 @@ async def create_image_file(
         return dict(row) if row else {}
 
 
+_IMAGE_COLUMNS = (
+    "id, batch_id, source, url, local_path, day_dir, \"desc\", "
+    "tags, author_id, width, height, watermark, status, "
+    "link_record_id, source_mark, sku_id, shop_id, created_at"
+)
+
+
 async def get_images(
     batch_id: str | None = None,
     source: str | None = None,
     status: str | None = None,
+    link_record_id: int | None = None,  # v0.6：按链接筛选（provider/image_inspect 用）
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
@@ -90,6 +109,9 @@ async def get_images(
     if status:
         conditions.append("status = :status")
         params["status"] = status
+    if link_record_id is not None:
+        conditions.append("link_record_id = :link_record_id")
+        params["link_record_id"] = link_record_id
 
     where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -97,8 +119,7 @@ async def get_images(
         result = await session.execute(
             text(
                 f"""
-                SELECT id, batch_id, source, url, local_path, day_dir, "desc",
-                       tags, author_id, width, height, watermark, status, created_at
+                SELECT {_IMAGE_COLUMNS}
                 FROM scrape.image_file
                 {where}
                 ORDER BY created_at DESC
@@ -115,9 +136,8 @@ async def get_image_by_id(image_id: str) -> dict[str, Any] | None:
     async with get_db_session() as session:
         result = await session.execute(
             text(
-                """
-                SELECT id, batch_id, source, url, local_path, day_dir, "desc",
-                       tags, author_id, width, height, watermark, status, created_at
+                f"""
+                SELECT {_IMAGE_COLUMNS}
                 FROM scrape.image_file
                 WHERE id = :id
                 """
@@ -261,8 +281,7 @@ async def get_images_by_ids(image_ids: list[str]) -> list[dict[str, Any]]:
         result = await session.execute(
             text(
                 f"""
-                SELECT id, batch_id, source, url, local_path, day_dir, "desc",
-                       tags, author_id, width, height, watermark, status, created_at
+                SELECT {_IMAGE_COLUMNS}
                 FROM scrape.image_file
                 WHERE id IN ({placeholders})
                 ORDER BY created_at DESC

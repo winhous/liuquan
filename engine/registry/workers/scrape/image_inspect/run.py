@@ -1,118 +1,128 @@
-"""image_inspect 工序 ACT（详设-v0.5 §6.1）。
+"""image_inspect 工序 ACT（详设-v0.6 §5.2，改造修通 T4；独立工序供「重新体检」）。
 
 纯代码工序（reason: none，无 LLM 调用，零 token 成本）：
-PIL 读宽高 + 水印启发式判定。
+PIL 读宽高 + 水印启发式判定 → 体检结果 PATCH 写回图片记录。
 
-水印启发式（简化版，config/settings.yaml 规则）：
-- 尺寸阈值：min_width / min_height（默认 800×600）
-- 水印判定：右下角 15% 区域亮度变化检测（简化：文件名含 watermark/tag）
+v0.6 批 4 修通（详设 §5.2）：
+- 改经 ctx.biz_client：GET /api/biz/scrape/images?ids=… 读 local_path
+  （不再 hasattr(ctx, "biz_client") 恒 None 的旧路径——v0.5 体检工序实际不可用）
+- 逐图 PATCH /api/biz/scrape/images/{id}（width/height/watermark 写回落库实锤）
+- 文件缺失/路径不可读记 note 不阻断（单图失败不整体失败）
+- 下载链不引用（体检已内联 batch_image_download，2026-09-03 详设修正），
+  本工序供「重新体检」独立场景 + A67 验收（worker 级测试）
 
-输入：ImageInspectInput{image_ids[]}
-输出：InspectionResult{images[]}
+水印启发式（照批 3 详设：右下角 15% 区域亮度方差 > 40 = 可能有水印）。
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from engine.core.context import EngineContext
 from models.workers import ImageInspectInput, InspectionItem, InspectionResult
 
 logger = logging.getLogger(__name__)
 
-# 水印启发式阈值（config/settings.yaml 可配，这里用默认值）
-_MIN_WIDTH = 800
-_MIN_HEIGHT = 600
+# 水印启发式阈值（config/settings.yaml 可配，这里用默认值；config/ 占位）
+_WATERMARK_CORNER_RATIO = 0.15
+_WATERMARK_STD_THRESHOLD = 40
 
 
 def _check_watermark(img_path: Path) -> bool:
-    """水印启发式判定（简化版）。"""
+    """水印启发式判定（右下角 15% 区域亮度方差检测）。"""
     try:
         from PIL import Image
 
         img = Image.open(str(img_path))
         w, h = img.size
-
-        # 右下角 15% 区域亮度变化检测
-        right_margin = int(w * 0.85)
-        bottom_margin = int(h * 0.85)
+        right_margin = int(w * (1 - _WATERMARK_CORNER_RATIO))
+        bottom_margin = int(h * (1 - _WATERMARK_CORNER_RATIO))
         crop = img.crop((right_margin, bottom_margin, w, h))
-
-        # 转灰度计算标准差（高变化 = 可能有水印文字）
         gray = crop.convert("L")
         pixels = list(gray.getdata())
         if not pixels:
             return False
         mean = sum(pixels) / len(pixels)
         variance = sum((p - mean) ** 2 for p in pixels) / len(pixels)
-        std_dev = variance**0.5
-
-        # 标准差 > 40 = 可能有水印（经验值）
-        return std_dev > 40
-
-    except Exception:
+        return variance**0.5 > _WATERMARK_STD_THRESHOLD
+    except Exception:  # noqa: BLE001
         return False
 
 
 def _get_dimensions(img_path: Path) -> tuple[int | None, int | None]:
-    """读取图片宽高。"""
+    """读取图片宽高（文件损坏/非图片 → (None, None)）。"""
     try:
         from PIL import Image
 
         img = Image.open(str(img_path))
-        return img.size
-    except Exception:
+        return img.size  # type: ignore[return-value]
+    except Exception:  # noqa: BLE001
         return None, None
 
 
-def run(inputs: ImageInspectInput, ctx: EngineContext) -> InspectionResult:
-    """PIL 读宽高 + 水印启发式。"""
-    # 获取 biz_client 读 image_file 元数据
-    biz_client = ctx.biz_client if hasattr(ctx, "biz_client") else None
+async def run(inputs: ImageInspectInput, ctx: EngineContext) -> InspectionResult:
+    """经 biz_client 读 local_path → PIL 体检 → 逐图 PATCH 写回（宽高/水印）。"""
+    biz_client = ctx.biz_client
+    if biz_client is None:
+        return InspectionResult(
+            images=[], note="biz_client 未注入（无法读图片路径/写回体检结果）"
+        )
 
-    items = []
-    note_parts = []
+    # 批量读图片记录（白名单来源 = 本工序 input image_ids）
+    try:
+        resp = await biz_client.get(
+            "/scrape/images", params={"ids": ",".join(str(i) for i in inputs.image_ids)}
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("image_inspect: GET /scrape/images 失败：%s", exc)
+        return InspectionResult(images=[], note=f"读图片记录失败：{exc}")
+    if resp.status_code != 200:
+        logger.warning("image_inspect: GET /scrape/images HTTP %s", resp.status_code)
+        return InspectionResult(images=[], note=f"读图片记录 HTTP {resp.status_code}")
 
-    for image_id in inputs.image_ids:
-        # 通过 biz_client 读 image_file 记录
-        local_path = None
-        if biz_client:
-            try:
-                import httpx
+    raw_images = resp.json()
+    images = raw_images if isinstance(raw_images, list) else raw_images.get("images", [])
 
-                resp = httpx.get(
-                    f"{biz_client._base_url}/api/biz/scrape/images/{image_id}",
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    local_path = data.get("local_path")
-            except Exception:
-                pass
-
+    items: list[InspectionItem] = []
+    note_parts: list[str] = []
+    for img in images:
+        image_id = img.get("id")
+        local_path = img.get("local_path")
+        if image_id is None:
+            continue
         if not local_path:
             items.append(
-                InspectionItem(
-                    image_id=image_id,
-                    note="无法获取图片路径",
-                )
+                InspectionItem(image_id=image_id, note="记录无 local_path（未落盘）")
             )
+            note_parts.append("部分图片无 local_path")
             continue
-
-        path = Path(local_path)
+        path = Path(str(local_path))
         if not path.exists():
             items.append(
-                InspectionItem(
-                    image_id=image_id,
-                    note=f"文件不存在: {local_path}",
-                )
+                InspectionItem(image_id=image_id, note=f"文件不存在: {local_path}")
             )
+            note_parts.append("部分图片文件缺失")
             continue
 
         width, height = _get_dimensions(path)
-        watermark = _check_watermark(path)
+        watermark = _check_watermark(path) if width and height else False
+
+        # 体检结果写回（决策 26：PATCH 经写接口客户端落库实锤）
+        try:
+            patch_resp = await biz_client.patch(
+                f"/scrape/images/{image_id}",
+                {"width": width, "height": height, "watermark": watermark},
+            )
+            if patch_resp.status_code != 200:
+                logger.warning(
+                    "image_inspect: PATCH /scrape/images/%s HTTP %s",
+                    image_id, patch_resp.status_code,
+                )
+                note_parts.append("部分体检结果写回失败")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("image_inspect: PATCH /scrape/images 失败：%s", exc)
+            note_parts.append("部分体检结果写回失败")
 
         items.append(
             InspectionItem(
@@ -122,9 +132,6 @@ def run(inputs: ImageInspectInput, ctx: EngineContext) -> InspectionResult:
                 watermark=watermark,
             )
         )
-
-    if any("无法" in i.note or "不存在" in i.note for i in items):
-        note_parts.append("部分图片检查失败")
 
     return InspectionResult(
         images=items,

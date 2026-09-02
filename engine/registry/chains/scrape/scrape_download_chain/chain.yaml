@@ -1,0 +1,23 @@
+# scrape_download_chain 链声明（详设-v0.6 §5.1，拆两链 T1/T2/T6）
+# 贴链接立即扒 / 定时扒共用：
+# - 立即扒：input {urls: [...], batch_id, from_queue: false}
+# - 定时扒：input {urls: [], batch_id: "sched-<ts>", from_queue: true}
+#   （urls 从定时队列读，§5.4 调度器 input 模板）
+# 链完成 → 消费者 scrape.download_done（ScrapeBatchResult，from_queue=true 清定时队列）
+
+id: scrape_download_chain
+domain: scrape
+description: 扒图下载链：建链接记录（幂等）→ 批量下载+体检 → 图片挂链接落素材库
+input:
+  model: ScrapeChainInput
+steps:
+  - worker: link_record_create
+    input:
+      urls: task.input.urls
+      batch_id: task.input.batch_id
+      from_queue: task.input.from_queue
+  - worker: batch_image_download
+    input:
+      link_ids: steps[0].output.link_ids
+      batch_id: task.input.batch_id
+      from_queue: task.input.from_queue

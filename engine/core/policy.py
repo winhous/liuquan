@@ -64,7 +64,11 @@ DOMAIN_PERMISSIONS: dict[Domain, DomainPermission] = {
 # v0.1 实际启用 demo/crm 两行（详设 §5.2 原文）；v0.3 增启用 tm——
 # tm_intent 工序（流转自然语言入口，决策 28）与 tm_task_context provider 属 tm 域，
 # 需要 tm 域放行（详设-v0.3 §5.1；tm 域风险上限 suggest，无真实业务写）。
-ENABLED_DOMAINS: frozenset[Domain] = frozenset({Domain.DEMO, Domain.CRM, Domain.TM})
+# v0.6 批 4 增启用 scrape——下载链/选品链要在引擎 runner 真跑（链路修通，
+# 详设-v0.6 §5/§10 A57-A68；scrape 域上限 write 已含链接/图片写接口）。
+ENABLED_DOMAINS: frozenset[Domain] = frozenset(
+    {Domain.DEMO, Domain.CRM, Domain.TM, Domain.SCRAPE}
+)
 
 # 风险序：read < suggest < write（transaction 恒拒，不进序表）
 _RISK_LEVEL: dict[Risk, int] = {

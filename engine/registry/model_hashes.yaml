@@ -2,6 +2,9 @@
 # hash = Model 字段名+类型结构摘要；version = 引用工序 version
 # （同一 Model 被多个工序引用时，记录为其中最大 version，各工序须一致）
 models:
+  BatchDownloadInput:
+    version: 1
+    hash: 2e59f76bc59530c53eb81b2e11d32f16f085a53fdd849e06d4d1978f623949af
   ChatTranscriptInput:
     version: 1
     hash: b7340a728e0d4c0458616f5d66baddadf433eebd8b60794c76b8119f1cac264a
@@ -80,6 +83,12 @@ models:
   KeywordResearchInput:
     version: 1
     hash: 4fb6ea0b78f5812cef033d7ba5caf3e563b25fd54a937a7fd7c69795b4ba40df
+  LinkCreateResult:
+    version: 1
+    hash: b0a60649bdbb15031ddc2a8ebb30c992dce47ee526caf0817e4f7990303b10b9
+  LinkRecordCreateInput:
+    version: 1
+    hash: 41dae48694c8118465a4f09ab226f3196a17d8a99fe0185c30d363f71cdf9860
   ReminderChainInput:
     version: 1
     hash: b84db865d65c528aa6f06855c9de2977298c9375bd067637512d73145c04d9c8
@@ -92,6 +101,9 @@ models:
   ReplyDraftResult:
     version: 1
     hash: 3ae24d2bdca322e7a4459c014c2a0204f470242ee8e6255ef1d2641de85eb3fb
+  ScrapeBatchResult:
+    version: 1
+    hash: e03e29ec8bd8b24a3973081102df669123fac769adc41e02706b7d0ae78f1f3b
   SeoOptimizationReport:
     version: 1
     hash: 5694e2f07c794eeaf1735b514446adc783f601eaf5a1705fc17c3cc121339d24
@@ -102,10 +114,10 @@ models:
     version: 1
     hash: a4aedb0d719f434025aa72aba6e39252179c5dee6e32fe62b538065fbd8eebe7
   SuggestionInput:
-    version: 1
+    version: 2
     hash: 4f49a464cbd60562047f8fb5bcaeef4f184599d24a1822b8c1dbfe74456287c2
   SuggestionResult:
-    version: 1
+    version: 2
     hash: d65b9df42331d26ed4cc0a2c9147e8aa6169f217ddefc8d373f346fe37fcc7fb
   TaskProposal:
     version: 1

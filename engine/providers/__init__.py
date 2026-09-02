@@ -168,6 +168,8 @@ class ScrapeImageContextHTTP:
 
     product_suggestion 工序用：基于图片元数据（desc/tags/author/source/宽高/水印）
     AI 生成选品建议（model=default 文本模型，非 vision）。
+    v0.6 批 4：返回 {images: [...]} 契约对齐 ScrapeImageContextData
+    （v0.5 returns 误用 SuggestionResult 导致 images 被契约丢弃）。
     """
 
     def __init__(
@@ -212,6 +214,77 @@ class ScrapeImageContextHTTP:
 
         images = resp.json() if isinstance(resp.json(), list) else resp.json().get("items", [])
         return {"images": images}
+
+
+class ScrapeLinkContextHTTP:
+    """scrape.link_context 实现：GET /api/biz/scrape/links -> 链接记录白名单。
+
+    v0.6 详设 §7：链接记录读接口（白名单来源 = links[].id）。
+    按 link_ids 查询（批量 GET /api/biz/scrape/links，ids 过滤在 web 层实现）。
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        token: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = (base_url or _env_value(_BIZ_URL_ENV) or "").rstrip("/")
+        self._token = token or _env_value(_BIZ_TOKEN_ENV) or ""
+        self._transport = transport
+
+    async def __call__(self, params) -> dict:
+        if not self._base_url or not self._token:
+            raise BizReadError("biz 读接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
+        link_ids = getattr(params, "link_ids", None) or []
+        if not link_ids:
+            return {"links": []}
+        url = f"{self._base_url}/api/biz/scrape/links"
+        async with httpx.AsyncClient(
+            trust_env=False, timeout=10.0, transport=self._transport
+        ) as client:
+            resp = await client.get(
+                url,
+                headers={"X-Biz-Token": self._token},
+                params={"ids": ",".join(str(i) for i in link_ids)},
+            )
+        if resp.status_code != 200:
+            raise BizReadError(f"biz 读接口 HTTP {resp.status_code}: {resp.text[:200]}")
+        body = resp.json()
+        links = body.get("links") if isinstance(body, dict) else body
+        return {"links": links}
+
+
+class ScrapeLinkQueueHTTP:
+    """scrape.link_queue 实现：GET /api/biz/settings/link-queue -> 定时队列。
+
+    v0.6 详设 §7：link_record_create from_queue 分支读队列用（白名单来源）。
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        token: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = (base_url or _env_value(_BIZ_URL_ENV) or "").rstrip("/")
+        self._token = token or _env_value(_BIZ_TOKEN_ENV) or ""
+        self._transport = transport
+
+    async def __call__(self, params) -> dict:
+        if not self._base_url or not self._token:
+            raise BizReadError("biz 读接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
+        url = f"{self._base_url}/api/biz/settings/link-queue"
+        async with httpx.AsyncClient(
+            trust_env=False, timeout=10.0, transport=self._transport
+        ) as client:
+            resp = await client.get(url, headers={"X-Biz-Token": self._token})
+        if resp.status_code != 200:
+            raise BizReadError(f"biz 读接口 HTTP {resp.status_code}: {resp.text[:200]}")
+        body = resp.json()
+        return {"urls": body.get("urls") or []}
 
 
 class CrmMessageImagesHTTP:
@@ -271,6 +344,9 @@ def build_providers(
         "tm.task_context": TmTaskContextHTTP(base_url=base_url, token=token, transport=transport),
         "seo.metric_history": SeoMetricHistoryHTTP(base_url=base_url, token=token, transport=transport),
         "scrape.image_context": ScrapeImageContextHTTP(base_url=base_url, token=token, transport=transport),
+        # v0.6 批 4（详设 §7）：扒图链接记录 + 定时队列白名单
+        "scrape.link_context": ScrapeLinkContextHTTP(base_url=base_url, token=token, transport=transport),
+        "scrape.link_queue": ScrapeLinkQueueHTTP(base_url=base_url, token=token, transport=transport),
     }
 
 
@@ -286,6 +362,8 @@ __all__ = [
     "CrmMessageImagesHTTP",
     "CrmOverdueContextHTTP",
     "ScrapeImageContextHTTP",
+    "ScrapeLinkContextHTTP",
+    "ScrapeLinkQueueHTTP",
     "TmTaskContextHTTP",
     "SeoMetricHistoryHTTP",
     "build_providers",

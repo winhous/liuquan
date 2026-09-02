@@ -259,9 +259,9 @@ def _snapshot_images(download_dir: Path) -> set[str]:
     }
 
 
-def _factory(ctx: Any) -> XHSConnector:
-    """工厂函数：注册到 CONNECTORS 注册表。"""
-    return XHSConnector()
+def _factory(ctx: Any, *, storage_dir: str | None = None) -> XHSConnector:
+    """工厂函数：注册到 CONNECTORS 注册表（v0.6 §5.5：storage_dir 可注入落盘根）。"""
+    return XHSConnector(storage_dir=storage_dir)
 
 
 # 模块加载时注册

@@ -1,11 +1,38 @@
-# scrape 域 Context provider 登记（详设-v0.5 §6.3）
+# scrape 域 Context provider 登记（详设-v0.6 §7）
+# 白名单来源 = web /api/biz/scrape/* 读接口（决策 26 读取接口化）
 
-# v0.5 批 4：图片元数据（product_suggestion 工序用）
+# v0.5 批 4 + v0.6 批 4：图片元数据（product_suggestion 工序用）
+# 参数扩展支持 image_ids（按 id 白名单查询）；returns 修正为 ScrapeImageContextData
+# （v0.5 误用 SuggestionResult——provider 返回 images 被契约丢弃，链路断点 3 同源）
 - id: scrape_image_context
   domain: scrape
-  description: 扒图图片元数据（GET /api/biz/scrape/images 白名单来源）
+  description: 扒图图片元数据（GET /api/biz/scrape/images?ids=… 白名单来源）
   params:
     model: SuggestionInput
   returns:
-    model: SuggestionResult
+    model: ScrapeImageContextData
   provider: scrape.image_context
+
+# v0.6 批 4：链接记录白名单（GET /api/biz/scrape/links，详设 §7）
+# 素材库读接口 / 链接信息供给（batch_image_download 的链接读取走 ctx.biz_client，
+# 见详设 §5.3：代码工序的中间产物读非 AI 可见数据走统一客户端，provider 留给
+# AI 可见数据；本 provider 按详设 §7 登记实现，供白名单来源读接口一致）
+- id: scrape_link_context
+  domain: scrape
+  description: 扒图链接记录白名单（GET /api/biz/scrape/links 白名单来源）
+  params:
+    model: ScrapeLinkContextParams
+  returns:
+    model: ScrapeLinkContextData
+  provider: scrape.link_context
+
+# v0.6 批 4：定时队列白名单（GET /api/biz/settings/link-queue，详设 §7）
+# link_record_create 工序 from_queue 分支经 provider 读队列（context 声明）
+- id: scrape_link_queue
+  domain: scrape
+  description: 扒图定时队列（GET /api/biz/settings/link-queue 白名单来源）
+  params:
+    model: LinkQueueParams
+  returns:
+    model: LinkQueueData
+  provider: scrape.link_queue

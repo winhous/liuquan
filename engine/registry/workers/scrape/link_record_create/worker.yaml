@@ -1,0 +1,26 @@
+# link_record_create 工序声明（详设-v0.6 §5.2，新工序）
+# 纯代码工序（reason: none，无 LLM 调用，零 token 成本）：
+# 建链接记录（normalized_url 幂等）→ 输出 link_ids 供下一步 batch_image_download
+# - 立即扒：逐个经 biz_client POST /api/biz/scrape/links（已存在返回现有，created/existing 标记）
+# - 定时（from_queue=true，urls 空）：经 provider scrape.link_queue 读定时队列 → 同上
+# - 队列为空 → link_ids 空（链快速完成）
+
+id: link_record_create
+domain: scrape
+version: 1
+risk: write
+description: 扒图建链接记录：normalized_url 幂等建 pending 记录（定时读队列，零 token）
+input:
+  model: LinkRecordCreateInput
+output:
+  model: LinkCreateResult
+model: default
+reason: none
+retry:
+  max_attempts: 2
+  timeout_s: 30
+context:
+  - id: scrape_link_queue
+    params: {}
+prompt: prompt.md
+config_dir: config/

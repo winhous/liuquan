@@ -22,6 +22,7 @@ __all__ = [
     "CONNECTORS",
     "get_connector",
     "register_connector",
+    "build_connectors",
 ]
 
 # ---- 连接器结果（降级结构：ok=False + note 不抛穿链）----
@@ -70,6 +71,22 @@ def get_connector(connector_id: str, ctx: Any) -> Any | None:
     if factory is None:
         return None
     return factory(ctx)
+
+
+def build_connectors(storage_dir: str | None = None) -> dict[str, Any]:
+    """装配连接器实例注册表（server 启动用；工序经 ctx.connectors 按 id 引用）。
+
+    v0.6 §5.5：storage_dir 从引擎启动读 engine-params 的 scrape.storage_dir 传入
+    （connector 落盘根目录）；工厂签名照 _factory(ctx, storage_dir=None)。
+    """
+    out: dict[str, Any] = {}
+    for connector_id, factory in CONNECTORS.items():
+        try:
+            out[connector_id] = factory(None, storage_dir=storage_dir)
+        except TypeError:
+            # 兼容未接 storage_dir 参数的工厂（防御：缺参时按原签名调用）
+            out[connector_id] = factory(None)
+    return out
 
 
 # ---- 环境变量读取辅助（照 models_config.py 的 env: 模式）----

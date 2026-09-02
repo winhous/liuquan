@@ -734,12 +734,20 @@ async def mark_schedule_run(
         )
 
 
-async def ensure_seed_schedules(engine: AsyncEngine) -> None:
+async def ensure_seed_schedules(
+    engine: AsyncEngine,
+    *,
+    cron_overrides: dict[str, str] | None = None,
+) -> None:
     """幂等种子：per-chain_id 幂等（chain_id 不存在才插；批 3 修订）。
 
     v0.4 行为不变：表空时插 crm_reminder_chain。
     v0.5 批 3：改为 per-chain 幂等（chain_id 不存在才插，老库非空也能补新链）。
-    新增种子：seo_healthcheck_chain（name「listing 体检」，cron 0 8 * * *，enabled true）。
+     新增种子：seo_healthcheck_chain（name「listing 体检」，cron 0 8 * * *，enabled true）。
+    v0.6 批 4（详设 §5.4/§8）：新增种子 scrape_download_chain（name「定时扒图」，
+     cron 读设置键 scrape.schedule_time，默认 0 7 * * *，enabled true）；
+     cron_overrides 由引擎启动读 engine-params 传入（'scrape_download_chain' → cron），
+     既有种子（crm/seo）行为不变。
     """
     # 获取已存在的 chain_id 列表
     async with _sessions(engine)() as session:
@@ -748,9 +756,13 @@ async def ensure_seed_schedules(engine: AsyncEngine) -> None:
         ).scalars().all()
     existing = set(existing_rows)
 
+    overrides = cron_overrides or {}
+    scrape_cron = overrides.get("scrape_download_chain", "0 7 * * *")
+
     seeds = [
         ("crm_reminder_chain", "CRM 未跟进提醒", "0 7 * * *", True),
         ("seo_healthcheck_chain", "listing 体检", "0 8 * * *", True),
+        ("scrape_download_chain", "定时扒图", scrape_cron, True),
     ]
     for chain_id, name, cron, enabled in seeds:
         if chain_id not in existing:

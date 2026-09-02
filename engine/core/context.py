@@ -49,3 +49,8 @@ class EngineContext:
     step_id: int | None = None
     chain_id: str | None = None  # 当前链 id（TaskProposal.source 追溯；None = 未关联）
     connectors: dict[str, Any] | None = None  # v0.5 §5：外部资源连接器（工序按 id 引用）
+    # v0.6 批 4（详设-v0.6 §5.3 T4 方案 A）：业务写接口客户端——代码工序的中间产物
+    # 读写统一经写接口客户端（决策 26：引擎零业务库连接串，只经接口写；代码工序的
+    # 中间产物读非 AI 可见数据，白名单封闭机制（provider）留给 AI 可见数据）。
+    # CLI/测试不注入（None，工序内降级 note，照现有 hasattr/缺 key 模式）。
+    biz_client: Any | None = None

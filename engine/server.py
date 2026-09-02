@@ -173,6 +173,35 @@ def _extract_candidate(output: dict[str, Any] | None) -> dict[str, Any] | None:
     return output
 
 
+def _extract_suggestion(output: dict[str, Any] | None) -> dict[str, Any] | None:
+    """从链末步 output 提取 SuggestionResult（详设-v0.6 §5.3：选品消费者）。
+
+    判据：dict 含 "proposals" 列表 -> 选品产出（scrape.suggest 消费者处理）；
+    缺键/类型错返回 None（宁失败不假成功）。v0.6 批 4 修通：suggest 链此前
+    未接转交分发（断点 6）。
+    """
+    if not isinstance(output, dict):
+        return None
+    if not isinstance(output.get("proposals"), list):
+        return None
+    return output
+
+
+def _extract_batch_result(output: dict[str, Any] | None) -> dict[str, Any] | None:
+    """从链末步 output 提取 ScrapeBatchResult（详设-v0.6 §5.3：下载链消费者）。
+
+    判据：dict 同时含 "links" 与 "image_ids" 列表 -> 下载链产出
+    （scrape.download_done 消费者处理：from_queue=true 清定时队列）。
+    """
+    if not isinstance(output, dict):
+        return None
+    if not isinstance(output.get("links"), list):
+        return None
+    if not isinstance(output.get("image_ids"), list):
+        return None
+    return output
+
+
 def _extract_proposal(output: dict[str, Any] | None) -> TaskProposal | None:
     """从链末步 output 提取 TaskProposal（详设-v0.2 §7：末步 output JSONB）。
 
@@ -499,9 +528,13 @@ class QueueConsumer:
         step_output = step.output if step is not None else None
         # v0.3：链末步产出两种——TaskProposal / TodoCandidateResult
         # v0.4：新增第三种——ReminderResult（详设 §10.3）
+        # v0.6 批 4：新增两种——SuggestionResult（scrape.suggest，断点 6 修通）/
+        #   ScrapeBatchResult（scrape.download_done，详设-v0.6 §5.3）
         proposal = _extract_proposal(step_output)
         candidate = None
         reminders = None
+        suggestion = None
+        batch_result = None
         consumer_key = None
         if proposal is not None:
             consumer_key = proposal.action_id
@@ -513,6 +546,14 @@ class QueueConsumer:
                 reminders = _extract_reminders(step_output)
                 if reminders is not None:
                     consumer_key = "tm.schedule"
+                else:
+                    suggestion = _extract_suggestion(step_output)
+                    if suggestion is not None:
+                        consumer_key = "scrape.suggest"
+                    else:
+                        batch_result = _extract_batch_result(step_output)
+                        if batch_result is not None:
+                            consumer_key = "scrape.download_done"
         if consumer_key is None:
             return  # 非 suggest 链，无转交
         consumer = self._consumers.get(consumer_key) if consumer_key else None
@@ -536,11 +577,21 @@ class QueueConsumer:
             # v0.4 §10.3：reminder 消费者 source 注入（chain_id/engine_task_id/
             # worker_id/audit_ids + 从 reminders[0] 补 customer_id/reminder_date）
             kwargs["source"] = await self._reminder_source(result.task_id, task, reminders)
+        elif suggestion is not None:
+            # v0.6 §5.3：选品消费者 source 注入（SourceTrace 追溯：chain_id/
+            # engine_task_id/worker_id/audit_ids——LLM 输出 proposals 无 source，
+            # 禁幻觉三件套的 audit_ids 可查依赖它）
+            kwargs["source"] = await self._scrape_source(result.task_id, task)
+        elif batch_result is not None:
+            # v0.6 §5.3：下载链消费者注入 task（读 task.input.from_queue/batch_id）
+            kwargs["task"] = task
         try:
             payload = (
                 proposal if proposal is not None
                 else candidate if candidate is not None
-                else reminders
+                else reminders if reminders is not None
+                else suggestion if suggestion is not None
+                else batch_result
             )
             outcome = await consumer(payload, **kwargs)
         except Exception as exc:
@@ -588,6 +639,31 @@ class QueueConsumer:
             audit_ids = [str(r) for r in rows.scalars()]
         return {
             "customer_id": (task.input or {}).get("customer_id"),
+            "chain_id": chain_id,
+            "engine_task_id": _fmt_task(task_id),
+            "worker_id": worker_id,
+            "audit_ids": audit_ids,
+        }
+
+    async def _scrape_source(self, task_id: int, task: Any) -> dict:
+        """v0.6 §5.3：scrape.suggest 消费者 source 注入（SourceTrace 追溯）。
+
+        chain_id/engine_task_id/worker_id/audit_ids——product_suggestion 是
+        LLM 工序（reason: llm），audit_ids = 本任务 REASON 审计记录（禁幻觉
+        三件套的 audit_ids 可查依赖它；转交器按非 reason:none 工序强制校验）。
+        """
+        chain_id = getattr(task, "chain_id", None) or ""
+        worker_id = ""
+        if chain_id:
+            chain = self._registry.chains.get(chain_id)
+            if chain is not None and chain.steps:
+                worker_id = chain.steps[-1].worker
+        async with AsyncSession(self._engine) as session:
+            rows = await session.execute(
+                select(_db.EngineAudit.id).where(_db.EngineAudit.task_id == task_id)
+            )
+            audit_ids = [str(r) for r in rows.scalars()]
+        return {
             "chain_id": chain_id,
             "engine_task_id": _fmt_task(task_id),
             "worker_id": worker_id,
@@ -670,6 +746,42 @@ def _audit_item(row: Any) -> AuditSummaryItem:
 # ReminderResult 判据键（末步 output 含 "reminders" -> 走 tm.schedule 消费者）
 _REMINDER_KEYS = frozenset({"reminders"})
 
+# ---- v0.6 §5.4：调度器 input 模板（T7，定时触发落地）----
+# 按 chain_id 构建定时/立即运行的任务 input：
+# - scrape_download_chain：{batch_id: "sched-<ts>", from_queue: True}
+#   （定时扒：urls 从定时队列读，链成功完成清队列，详设 §5.4）
+# - 其余链（crm_reminder_chain / seo_healthcheck_chain）：{"trigger_date": 今天}
+#   行为不变（v0.4/v0.5 测试锁住）
+_SCHEDULE_INPUT_TEMPLATES: dict[str, Callable[[str], dict[str, Any]]] = {
+    "scrape_download_chain": lambda ts: {
+        "batch_id": f"sched-{ts}",
+        "from_queue": True,
+    },
+}
+
+
+def _schedule_input_for(chain_id: str, ts: str, today_str: str) -> dict[str, Any]:
+    """定时/立即运行的任务 input（按 chain_id 模板；默认 trigger_date=今天）。"""
+    template = _SCHEDULE_INPUT_TEMPLATES.get(chain_id)
+    if template is not None:
+        return template(ts)
+    return {"trigger_date": today_str}
+
+
+def _schedule_time_to_cron(hhmm: str) -> str:
+    """'HH:MM' → daily cron（'M H * * *'，不补前导零；照 web _scrape_time_cron 口径）。
+
+    engine-params 返回的 scrape.schedule_time（如 '08:30'）→ '30 8 * * *'
+    （种子 cron 来源，详设-v0.6 §5.4/§8；非法值回退默认 '0 7 * * *'）。
+    """
+    try:
+        h, m = (int(x) for x in str(hhmm).strip().split(":"))
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            return "0 7 * * *"
+        return f"{m} {h} * * *"
+    except (ValueError, TypeError):
+        return "0 7 * * *"
+
 
 def _extract_reminders(output: dict[str, Any] | None) -> dict[str, Any] | None:
     """从链末步 output 提取 ReminderResult（详设 §10.3；task 第三种终态产出）。
@@ -704,11 +816,13 @@ class Scheduler:
         *,
         interval: float = 30.0,
         now_fn: Callable[[], datetime] | None = None,
+        cron_overrides: dict[str, str] | None = None,  # v0.6 §5.4：种子 cron 覆盖（引擎启动读设置）
     ) -> None:
         self._engine = engine
         self._registry = registry
         self._interval = max(1.0, float(interval))
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+        self._cron_overrides = dict(cron_overrides or {})
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -731,9 +845,12 @@ class Scheduler:
 
     async def tick(self) -> None:
         """单次 tick 执行体（详设 §9.3，可供测试直接调用）。"""
-        await _db.ensure_seed_schedules(self._engine)
+        await _db.ensure_seed_schedules(
+            self._engine, cron_overrides=self._cron_overrides
+        )
         now = self._now_fn()
         today_str = now.strftime("%Y-%m-%d")
+        ts = now.strftime("%Y%m%d%H%M%S")
         rows = await _db.list_schedules(self._engine)
         for row in rows:
             if not row.enabled:
@@ -764,7 +881,9 @@ class Scheduler:
                     chain_id=row.chain_id,
                     trigger_type="schedule",
                     trigger_ref=str(row.id),
-                    input_={"trigger_date": today_str},
+                    # v0.6 §5.4（T7）：input 按 chain_id 模板（scrape_download_chain →
+                    # {batch_id: "sched-<ts>", from_queue: true}；其余链 trigger_date 不变）
+                    input_=_schedule_input_for(row.chain_id, ts, today_str),
                 )
                 print(
                     f"scheduler: 触发 {row.chain_id} (schedule={row.id}) "
@@ -995,19 +1114,23 @@ def _register_routes(app: FastAPI, engine: AsyncEngine, registry: Registry) -> N
     async def run_schedule(schedule_id: int) -> ScheduleRunResponse:
         """POST /api/engine/schedules/{id}/run：立即运行（决策 37-7）。
 
-        create_task 入队（trigger_type=manual_schedule, trigger_ref=schedule_id,
-        input={'trigger_date': 今天 YYYY-MM-DD}）；不动 last_run_at/next_run_at。
+        create_task 入队（trigger_type=manual_schedule, trigger_ref=schedule_id；
+        input 按 chain_id 模板——v0.6 §5.4：scrape_download_chain →
+        {batch_id: "sched-<ts>", from_queue: true}，其余链 trigger_date 今天）；
+        不动 last_run_at/next_run_at。
         """
         row = await _db.get_schedule(engine, schedule_id)
         if row is None:
             raise HTTPException(status_code=404, detail="schedule not found")
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now = datetime.now(timezone.utc)
+        today_str = now.strftime("%Y-%m-%d")
+        ts = now.strftime("%Y%m%d%H%M%S")
         task_id = await _db.create_task(
             engine,
             chain_id=row.chain_id,
             trigger_type="manual_schedule",
             trigger_ref=str(schedule_id),
-            input_={"trigger_date": today_str},
+            input_=_schedule_input_for(row.chain_id, ts, today_str),
         )
         return ScheduleRunResponse(engine_task_id=_fmt_task(task_id))
 
@@ -1017,10 +1140,13 @@ async def _read_engine_params_from_biz(
 ) -> dict[str, Any]:
     """启动时经 biz_client 读 web 侧引擎参数（详设 §7.3/§8）。
 
-    成功返回 {default_max_attempts, default_timeout_s, backoff_cap, llm_model, vision_model}；
-    失败（BizApiError/网络）回退默认 {2, 30.0, 30, deepseek-chat, qwen-vl-max} + warning 不阻塞启动。
+    成功返回 {default_max_attempts, default_timeout_s, backoff_cap, llm_model,
+    vision_model, scrape.storage_dir, scrape.schedule_time}；
+    失败（BizApiError/网络）回退默认 + warning 不阻塞启动。
 
     v0.5 §7.1 扩展：+ llm_model / vision_model（模型名覆盖）。
+    v0.6 §5.5 扩展：+ scrape.storage_dir（connector 落盘根）/ scrape.schedule_time
+    （种子 cron，'HH:MM' 字符串）。
     """
     defaults: dict[str, Any] = {
         "default_max_attempts": 2,
@@ -1028,6 +1154,8 @@ async def _read_engine_params_from_biz(
         "backoff_cap": 30.0,
         "llm_model": "deepseek-chat",
         "vision_model": "qwen-vl-max",
+        "scrape.storage_dir": "/opt/liuquan/scrape/",
+        "scrape.schedule_time": "07:00",
     }
     if biz_client is None:
         return defaults
@@ -1041,6 +1169,12 @@ async def _read_engine_params_from_biz(
                 "backoff_cap": float(data.get("backoff_cap", 30.0)),
                 "llm_model": str(data.get("llm_model", "deepseek-chat")),
                 "vision_model": str(data.get("vision_model", "qwen-vl-max")),
+                "scrape.storage_dir": str(
+                    data.get("scrape.storage_dir", "/opt/liuquan/scrape/")
+                ),
+                "scrape.schedule_time": str(
+                    data.get("scrape.schedule_time", "07:00")
+                ),
             }
         print(
             f"warning: 读取引擎参数失败（HTTP {resp.status_code}），回退默认值"
@@ -1048,7 +1182,7 @@ async def _read_engine_params_from_biz(
     except Exception as exc:
         print(
             f"warning: 读取引擎参数异常（{type(exc).__name__}: {exc}），"
-            "回退默认值（{2, 30.0, 30, deepseek-chat, qwen-vl-max}）"
+            "回退默认值"
         )
     return defaults
 
@@ -1105,6 +1239,7 @@ def create_app(
     scheduler_interval: float = 30.0,
     scheduler_enabled: bool = True,
     scheduler_now_fn: Callable[[], datetime] | None = None,
+    scheduler_cron_overrides: dict[str, str] | None = None,  # v0.6 §5.4：种子 cron 覆盖
 ) -> FastAPI:
     """构造引擎常驻 FastAPI app（注入式设计，规范 R12）。
 
@@ -1120,6 +1255,8 @@ def create_app(
     - concurrency：队列消费并发上限（§2.3：2）；poll_interval：空队列退避秒
     - scheduler_interval：调度器 tick 间隔秒（默认 30）；scheduler_enabled：
       是否启动调度器（测试可禁用）；scheduler_now_fn：桩时钟（测试用）
+    - scheduler_cron_overrides：v0.6 §5.4 种子 cron 覆盖（scrape_download_chain
+      从设置读 scrape.schedule_time，默认 '0 7 * * *'）
 
     返回的 app.state.consumer / app.state.scheduler 即 QueueConsumer/Scheduler
     （lifespan 自动 start/stop；ASGITransport 测试不跑 lifespan，可手动
@@ -1130,10 +1267,28 @@ def create_app(
             raise ValueError("create_app 需要 runner 或 runner_kwargs（常驻消费依赖执行器）")
         runner = TaskRunner(engine, registry, **runner_kwargs)
         # 默认构造路径：lifespan 读取引擎参数后重建 runner 并替换（真正注入，
-        # 详设 §7.3 engine.* 参数；runner_kwargs 显式键优先，读取参数只补缺省）
-        default_runner_factory = lambda params: TaskRunner(  # noqa: E731
-            engine, registry, **{**runner_kwargs, **params}
+        # 详设 §7.3 engine.* 参数；runner_kwargs 显式键优先，读取参数只补缺省）。
+        # v0.6 §5.5：重建时 connectors 按 scrape.storage_dir 装配（connector 落盘根）。
+        _runner_param_keys = frozenset(
+            {
+                "default_max_attempts",
+                "default_timeout_s",
+                "backoff_cap",
+                "llm_model",
+                "vision_model",
+            }
         )
+
+        def default_runner_factory(params: dict[str, Any]) -> TaskRunner:
+            from engine.connectors import build_connectors
+
+            merged = {
+                **runner_kwargs,
+                **{k: v for k, v in params.items() if k in _runner_param_keys},
+                "connectors": build_connectors(params.get("scrape.storage_dir")),
+            }
+            return TaskRunner(engine, registry, **merged)
+
     else:
         default_runner_factory = None
     consumer = QueueConsumer(
@@ -1152,6 +1307,7 @@ def create_app(
             registry,
             interval=scheduler_interval,
             now_fn=scheduler_now_fn,
+            cron_overrides=scheduler_cron_overrides,
         )
     app = FastAPI(
         title="liuquan-engine",
@@ -1179,18 +1335,38 @@ def main() -> None:
     真实依赖（全部从 .env + registry 构建，代码零 URL/IP/密钥字面量，P2）：
     引擎库 create_engine / 业务库 create_tm_engine / 真注册表 / 真 Agent
     工厂。lifespan 自动完成崩溃恢复 + 启动消费循环。
+
+    v0.6 §5.3/§5.5（批 4）：启动先经 biz_client 读 engine-params——
+    scrape.storage_dir 装配 connector 落盘根（build_connectors）+ scrape.schedule_time
+    转种子 cron（scrape_download_chain 定时扒图）；biz_client 注入 runner
+    （EngineContext.biz_client，T4 方案 A）。
     """
+    app, port = asyncio.run(_build_app())
+    import uvicorn  # noqa: PLC0415  # 常驻进程入口才需要 uvicorn
+
+    uvicorn.run(app, host=_DEFAULT_HOST, port=port)
+
+
+async def _build_app() -> tuple[Any, int]:
+    """装配真实依赖并返回 (app, port)（uvicorn.run 需在 asyncio.run 之外调用）。"""
     repo_root = _repo_root()
     load_dotenv(repo_root / ".env")  # models.yaml 的 env: 引用在加载期解析（CLI 同款）
     engine = _db.create_engine()
     registry = load_registry(repo_root)
     model_registry = load_models(repo_root / "models.yaml")
 
-    # v0.5 §5：装配 connectors 注册表（工序按 id 引用外部资源）
-    from engine.connectors import CONNECTORS  # noqa: PLC0415
-    connectors: dict[str, Any] = {}
-    for connector_id, factory in CONNECTORS.items():
-        connectors[connector_id] = factory(None)  # ctx=None（启动期无具体上下文）
+    # v0.6 §5.3：biz_client 写接口客户端（决策 26；引擎零业务库连接串）
+    biz_client = BizApiClient()
+
+    # v0.6 §5.5：启动读 engine-params（storage_dir → connector 装配；schedule_time → 种子 cron）
+    engine_params = await _read_engine_params_from_biz(biz_client)
+    storage_dir = engine_params.get("scrape.storage_dir")
+    schedule_time = engine_params.get("scrape.schedule_time")
+
+    # v0.5 §5 + v0.6 §5.5：装配 connectors 注册表（工序按 id 引用外部资源；
+    # 落盘根 = settings 的 scrape.storage_dir）
+    from engine.connectors import build_connectors  # noqa: PLC0415
+    connectors = build_connectors(storage_dir)
 
     runner = TaskRunner(
         engine,
@@ -1201,17 +1377,18 @@ def main() -> None:
         writable_check=lambda: True,
         providers=build_providers(),  # 决策 26 读取接口化：provider = HTTP 调 web 读接口
         connectors=connectors,  # v0.5 §5：外部资源连接器
+        biz_client=biz_client,  # v0.6 §5.3：业务写接口客户端（T4 方案 A）
     )
     app = create_app(
         engine=engine,
         registry=registry,
         runner=runner,
-        biz_client=BizApiClient(),  # 决策 26 写入接口化：消费者经 HTTP 写接口落库
+        biz_client=biz_client,  # 决策 26 写入接口化：消费者经 HTTP 写接口落库
+        scheduler_cron_overrides={
+            "scrape_download_chain": _schedule_time_to_cron(schedule_time)
+        },
     )
-    port = _engine_port(repo_root)
-    import uvicorn  # noqa: PLC0415  # 常驻进程入口才需要 uvicorn
-
-    uvicorn.run(app, host=_DEFAULT_HOST, port=port)
+    return app, _engine_port(repo_root)
 
 
 if __name__ == "__main__":

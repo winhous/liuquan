@@ -120,8 +120,16 @@ CHAIN_INPUTS: dict[str, dict[str, Any]] = {
     },
     "scrape_suggest_chain": {
         "fields": [
-            {"name": "urls", "label": "商品链接（逗号分隔）", "type": "text", "required": True},
-            {"name": "source", "label": "来源（xhs/xianyu/crm，留空自动识别）", "type": "text", "required": False},
+            {"name": "image_ids", "label": "图片 ID（逗号分隔）", "type": "text", "required": True},
+        ]
+    },
+    # v0.6 批 4：下载链（贴链接立即扒走 /scrape/run；定时扒走调度器 input 模板，
+    # 页面触发面板展示 input 说明）
+    "scrape_download_chain": {
+        "fields": [
+            {"name": "urls", "label": "商品链接（每行一个）", "type": "textarea", "required": False},
+            {"name": "batch_id", "label": "批次 ID", "type": "text", "required": False},
+            {"name": "from_queue", "label": "定时队列（勾选从队列读）", "type": "checkbox", "required": False},
         ]
     },
     "crm_image_chain": {
@@ -142,6 +150,7 @@ CHAIN_LABELS: dict[str, str] = {
     "seo_optimize_chain": "SEO 优化链",
     "seo_healthcheck_chain": "listing 体检链",
     "scrape_suggest_chain": "扒图选品链",
+    "scrape_download_chain": "定时扒图",  # v0.6 批 4：拆两链后下载链（种子行展示名）
     "crm_image_chain": "对话图片链",
 }
 

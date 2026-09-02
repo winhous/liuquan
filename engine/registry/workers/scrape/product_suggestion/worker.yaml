@@ -1,17 +1,18 @@
-# product_suggestion 工序声明（详设-v0.5 §6.1，修订：model=default 文本模型）
+# product_suggestion 工序声明（详设-v0.6 §5.2，诚实化改造 T5；model=default 文本模型）
 # LLM 工序（reason: llm，model: default 文本模型，非 vision）：
-# 经 provider scrape.image_context 拿元数据 → AI 生成选品建议
-# → 输出 TaskProposal 候选（action_id=scrape.suggest，domain=scrape）
+# REASON 相位真调 LLM（prompt 含图片元数据，经 provider scrape.image_context
+# 按 input.image_ids 拿）→ LLM 输出 SuggestionResult → run() 校验 ctx.llm_output
+# 并透传 → 消费者 scrape.suggest（TaskProposal → tm.task_proposal pending）。
 #
-# 修订理由：vision 未配置时产品建议链不能失败（optional 语义），
-# 元数据已含商品信息，降低对视觉模型的依赖。
-# vision 识图留给批 5 crm image_caption。
+# v0.6 批 4 修订：不再纯模板拼装（v0.5 run.py 不调 LLM，选品建议 = 元数据复述）；
+# context params 显式声明 input.image_ids 引用（provider 白名单查询参数，
+# 详设-v0.1 §4.1 机制：params 值来自本工序 input 字段）。
 
 id: product_suggestion
 domain: scrape
-version: 1
+version: 2
 risk: suggest
-description: 扒图选品建议：基于图片元数据 AI 生成选品建议（default 文本模型）
+description: 扒图选品建议：基于图片元数据真接 LLM 生成选品建议（default 文本模型）
 input:
   model: SuggestionInput
 output:
@@ -23,5 +24,7 @@ retry:
   timeout_s: 30
 context:
   - id: scrape_image_context
+    params:
+      image_ids: input.image_ids
 prompt: prompt.md
 config_dir: config/

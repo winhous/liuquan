@@ -1,8 +1,17 @@
-# scrape 域 Action 登记（详设-v0.5 §6.4）
+# scrape 域 Action 登记（详设-v0.5 §6.4 + 详设-v0.6 §5.3）
 # scrape.suggest：product_suggestion 产出 SuggestionResult → 转提案（TaskProposal → tm.task_proposal）
+# scrape.download_done：下载链完成消费者（ScrapeBatchResult → from_queue=true 清定时队列；
+# 不产提案，target 用现有合法值 tm.task 占位——loader L10 白名单检查，
+# 见详设 §5.3「target 非提案出口」技术定）
 
 - action_id: scrape.suggest
   domain: scrape
   risk: suggest
   output_model: SuggestionResult
   target: tm.proposal
+
+- action_id: scrape.download_done
+  domain: scrape
+  risk: write
+  output_model: ScrapeBatchResult
+  target: tm.task

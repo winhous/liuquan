@@ -34,9 +34,16 @@ async def consume_scrape_proposal(
     audit_lookup: Callable[[list[str]], bool] | None = None,
     whitelist: Collection[str] | None = None,
     biz_client: BizApiClient | None = None,
+    source: dict | None = None,
     **_kwargs,
 ) -> ConsumeOutcome:
-    """扒图选品提案消费者：SuggestionResult → TaskProposal → tm 转交器落库。"""
+    """扒图选品提案消费者：SuggestionResult → TaskProposal → tm 转交器落库。
+
+    source（SourceTrace：chain_id/engine_task_id/worker_id/audit_ids）由调用方
+    （engine/server.py 转交钩子）注入——LLM 输出的 proposals 不含 source 追溯，
+    禁幻觉三件套（audit_ids 可查 + ref_id 白名单）依赖它（v0.6 批 4 修通：
+    suggest 链此前未接转交分发，断点 6）。
+    """
     # ---- 0. 契约归一 ----
     try:
         result = SuggestionResult.model_validate(deliverable)
@@ -46,14 +53,17 @@ async def consume_scrape_proposal(
         )
 
     if not result.proposals:
-        return ConsumeOutcome("accepted", note="无选品建议产出（proposals 为空）")
+        return ConsumeOutcome("accepted", reason="无选品建议产出（proposals 为空）")
 
-    # ---- 1. 遍历 proposals 构造 TaskProposal ----
+    # ---- 1. 遍历 proposals 构造 TaskProposal（source 追溯注入）----
     accepted = 0
     rejected = 0
     for prop_dict in result.proposals:
         try:
-            proposal = TaskProposal(**prop_dict)
+            merged = {**prop_dict}
+            if source is not None and "source" not in merged:
+                merged["source"] = source
+            proposal = TaskProposal(**merged)
             outcome = await consume_task_proposal(
                 proposal.model_dump(),
                 registry=registry,
@@ -72,5 +82,5 @@ async def consume_scrape_proposal(
 
     return ConsumeOutcome(
         "accepted",
-        note=f"选品提案处理完成：{accepted} 接受，{rejected} 拒绝",
+        reason=f"选品提案处理完成：{accepted} 接受，{rejected} 拒绝",
     )

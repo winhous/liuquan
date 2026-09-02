@@ -83,6 +83,17 @@ __all__ = [
     "InspectionResult",
     "SuggestionInput",
     "SuggestionResult",
+    # v0.6 批 4：拆两链 + 链路修通 Model（详设-v0.6 §5）
+    "ScrapeChainInput",
+    "LinkRecordCreateInput",
+    "LinkCreateResult",
+    "BatchDownloadInput",
+    "ScrapeBatchResult",
+    "ScrapeLinkContextParams",
+    "ScrapeLinkContextData",
+    "LinkQueueParams",
+    "LinkQueueData",
+    "ScrapeImageContextData",
     # v0.5 批 5：CRM 对话图片工序 Model
     "CrmImageChainInput",
     "MessageImageParams",
@@ -664,6 +675,113 @@ class SuggestionResult(BaseModel):
 
     proposals: list[dict] = []
     note: str = ""
+
+
+# ==== v0.6 批 4：拆两链 + 链路修通 Model（详设-v0.6 §5/§7）====
+
+
+class ScrapeChainInput(BaseModel):
+    """scrape_download_chain 链入参（详设-v0.6 §5.1：贴链接立即扒 / 定时扒共用）。
+
+    - 立即扒：urls 填满，from_queue=false
+    - 定时扒：urls 空，from_queue=true（urls 从定时队列读，§5.4 调度器 input 模板）
+    """
+
+    urls: list[str] = []
+    batch_id: str
+    source: str | None = None
+    from_queue: bool = False
+
+
+class LinkRecordCreateInput(BaseModel):
+    """link_record_create 工序入参（详设-v0.6 §5.2）。
+
+    from_queue=true 且 urls 空：经 provider scrape.link_queue 读定时队列再建记录。
+    """
+
+    urls: list[str] = []
+    batch_id: str
+    from_queue: bool = False
+
+
+class LinkCreateResult(BaseModel):
+    """link_record_create 工序输出（详设-v0.6 §5.2）。
+
+    link_ids 供下一步 batch_image_download；created_count/skipped_count 区分
+    新建与幂等命中（normalized_url 幂等：已存在返回现有行不重复建）。
+    队列为空 → link_ids 空（链快速完成）。
+    """
+
+    link_ids: list[int] = []
+    urls: list[str] = []
+    from_queue: bool = False
+    batch_id: str = ""
+    created_count: int = 0
+    skipped_count: int = 0
+
+
+class BatchDownloadInput(BaseModel):
+    """batch_image_download 工序入参（详设-v0.6 §5.2）。
+
+    from_queue 为透传字段（task.input.from_queue → ScrapeBatchResult.from_queue，
+    消费者 scrape.download_done 判断是否清定时队列）；链 input 表达式注入。
+    """
+
+    link_ids: list[int] = []
+    batch_id: str = ""
+    from_queue: bool = False
+
+
+class ScrapeBatchResult(BaseModel):
+    """batch_image_download 工序输出 / 下载链末产物（详设-v0.6 §5.2/§5.3）。
+
+    消费者 scrape.download_done 接收类型与链末输出一致（from_queue=true → 清队列）。
+    links: 逐链接处理摘要（含 status/error_note/degraded_note）；
+    image_ids: 本次落库图片 id 列表。
+    """
+
+    links: list[dict] = []
+    image_ids: list[int] = []
+    from_queue: bool = False
+    batch_id: str = ""
+    note: str = ""
+
+
+# ---- v0.6 批 4：扒图 Context provider Model（详设-v0.6 §7）----
+
+
+class ScrapeLinkContextParams(BaseModel):
+    """scrape.link_context provider 查询参数（按链接记录 id 白名单查询）。"""
+
+    link_ids: list[int] = []
+
+
+class ScrapeLinkContextData(BaseModel):
+    """scrape.link_context provider 返回（链接记录白名单；白名单 = links[].id）。"""
+
+    links: list[dict] = []
+
+
+class LinkQueueParams(BaseModel):
+    """scrape.link_queue provider 查询参数（定时队列为清单类数据，参数为空）。"""
+
+    pass
+
+
+class LinkQueueData(BaseModel):
+    """scrape.link_queue provider 返回：定时队列链接列表。"""
+
+    urls: list[str] = []
+
+
+class ScrapeImageContextData(BaseModel):
+    """scrape.image_context provider 返回（图片元数据白名单；白名单 = images[].id）。
+
+    images 元素字段：id/batch_id/source/url/link_record_id/source_mark/local_path/
+    day_dir/desc/tags/author_id/width/height/watermark/status/created_at。
+    """
+
+    images: list[dict] = []
 
 
 # ==== v0.5 批 5：CRM 对话图片工序 Model（详设-v0.5 §6.1）====

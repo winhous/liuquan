@@ -55,11 +55,14 @@ class BizApiClient:
         except httpx.HTTPError as exc:
             raise BizApiError(f"业务写接口网络异常：{exc.__class__.__name__}: {exc}") from exc
 
-    async def get(self, path: str) -> httpx.Response:
+    async def get(
+        self, path: str, params: dict | None = None
+    ) -> httpx.Response:
         """GET /api/biz{path}；非 200 抛 BizApiError（调用方映射 rejected）。
 
         同鉴权同错误语义，照 post 模式。用于引擎启动时读取引擎参数
         （GET /api/biz/settings/engine-params，详设 §7.3/§8）。
+        v0.6 §5.2：+params（查询串参数，如 image_inspect 按 ids 读图片）。
         """
         if not self._base_url or not self._token:
             raise BizApiError("业务读接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
@@ -69,10 +72,31 @@ class BizApiClient:
                 trust_env=False, timeout=10.0, transport=self._transport
             ) as client:
                 return await client.get(
-                    url, headers={"X-Biz-Token": self._token}
+                    url, params=params, headers={"X-Biz-Token": self._token}
                 )
         except httpx.HTTPError as exc:
             raise BizApiError(f"业务读接口网络异常：{exc.__class__.__name__}: {exc}") from exc
+
+    async def patch(
+        self, path: str, payload: dict
+    ) -> httpx.Response:
+        """PATCH /api/biz{path}；非 200 抛 BizApiError（调用方映射 rejected）。
+
+        v0.6 §5.2：批处理中间产物写回（PATCH /scrape/links/{id} 链接状态 /
+        PATCH /scrape/images/{id} 体检宽高水印）。
+        """
+        if not self._base_url or not self._token:
+            raise BizApiError("业务写接口未配置（LIUQUAN_BIZ_API_URL/TOKEN 缺失）")
+        url = f"{self._base_url}/api/biz{path}"
+        try:
+            async with httpx.AsyncClient(
+                trust_env=False, timeout=10.0, transport=self._transport
+            ) as client:
+                return await client.patch(
+                    url, json=payload, headers={"X-Biz-Token": self._token}
+                )
+        except httpx.HTTPError as exc:
+            raise BizApiError(f"业务写接口网络异常：{exc.__class__.__name__}: {exc}") from exc
 
 
 def _env_value(name: str) -> str | None:

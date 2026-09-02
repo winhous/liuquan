@@ -566,12 +566,17 @@ def create_biz_router(
         batch_id: str | None = None,
         source: str | None = None,
         ids: str | None = None,
+        link_record_id: int | None = None,  # v0.6：按链接筛选（白名单来源）
         limit: int = 100,
     ) -> list[dict]:
-        """GET /api/biz/scrape/images：白名单来源查询图片列表。"""
+        """GET /api/biz/scrape/images：白名单来源查询图片列表。
+
+        v0.6 §7：+link_record_id 筛选（provider scrape.image_context /
+        image_inspect 按链接取图用）。
+        """
         from web import scrape_store
 
-        _SOURCES = {"xhs", "xianyu", "crm"}
+        _SOURCES = {"xhs", "xianyu", "http"}
 
         if ids:
             id_list = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
@@ -586,12 +591,18 @@ def create_biz_router(
             raise HTTPException(status_code=422, detail=f"source 必须是 {_SOURCES} 之一")
 
         return await scrape_store.get_images(
-            batch_id=batch_id, source=source, limit=limit
+            batch_id=batch_id, source=source, link_record_id=link_record_id, limit=limit
         )
 
     @router.post("/scrape/images", dependencies=[Depends(_check_token)])
     async def create_scrape_image(payload: dict) -> dict:
-        """POST /api/biz/scrape/images：落产物（batch_id 幂等 409）。"""
+        """POST /api/biz/scrape/images：落产物（幂等 409 防重）。
+
+        v0.6 §5.2/§7：+link_record_id（挂链接）+ source_mark（默认 scraped）；
+        幂等键 = link_record_id + url（uq_scrape_image_link_url；批 4 语义——
+        同链接同 URL 只写一次，batch_image_download 对 409 幂等忽略）；
+        link_record_id 为空时回退 v0.5 的 batch_id + url 幂等（兼容存量调用）。
+        """
         from web import scrape_store
 
         batch_id = payload.get("batch_id", "")
@@ -599,15 +610,26 @@ def create_biz_router(
         if not batch_id or not url:
             raise HTTPException(status_code=422, detail="batch_id 和 url 必填")
 
-        # 幂等检查
-        existing = await scrape_store.check_batch_idempotent(batch_id)
-        # 检查同 batch_id + url 是否已存在
-        images = await scrape_store.get_images(batch_id=batch_id, limit=1000)
-        for img in images:
-            if img.get("url") == url:
-                raise HTTPException(status_code=409, detail="同 batch_id + url 已存在（幂等防重）")
+        link_record_id = payload.get("link_record_id")
 
-        source = payload.get("source", "crm")
+        # 幂等检查：link_record_id + url（v0.6 图片幂等键）或 batch_id + url（兼容存量）
+        if link_record_id is not None:
+            images = await scrape_store.get_images(
+                link_record_id=int(link_record_id), limit=1000
+            )
+            for img in images:
+                if img.get("url") == url:
+                    raise HTTPException(
+                        status_code=409, detail="同 link_record_id + url 已存在（幂等防重）"
+                    )
+        else:
+            existing = await scrape_store.check_batch_idempotent(batch_id)
+            images = await scrape_store.get_images(batch_id=batch_id, limit=1000)
+            for img in images:
+                if img.get("url") == url:
+                    raise HTTPException(status_code=409, detail="同 batch_id + url 已存在（幂等防重）")
+
+        source = payload.get("source", "http")
         img = await scrape_store.create_image_file(
             batch_id=batch_id,
             source=source,
@@ -621,6 +643,8 @@ def create_biz_router(
             height=payload.get("height"),
             watermark=payload.get("watermark", False),
             status=payload.get("status", "pending"),
+            link_record_id=int(link_record_id) if link_record_id is not None else None,
+            source_mark=payload.get("source_mark", "scraped"),
         )
         return img
 
@@ -699,6 +723,97 @@ def create_biz_router(
             "created_count": sum(1 for l in links if l["created"]),
             "existing_count": sum(1 for l in links if l["existing"]),
         }
+
+    @router.get("/scrape/links", dependencies=[Depends(_check_token)])
+    async def list_scrape_links(
+        source: str | None = None,
+        status: str | None = None,
+        ids: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """GET /api/biz/scrape/links：链接记录列表（白名单来源，详设-v0.6 §7）。
+
+        provider scrape.link_context（ids 批量）与素材库读接口用；返回 {links: [...]}。
+        """
+        from web import scrape_store
+
+        if ids:
+            id_list = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
+            links = []
+            for lid in id_list:
+                detail = await scrape_store.get_link_by_id(lid)
+                if detail:
+                    links.append(detail["link"])
+            return {"links": links}
+
+        links = await scrape_store.get_links(
+            source=source, status=status, limit=limit, offset=offset
+        )
+        return {"links": links}
+
+    @router.get("/scrape/links/{link_id}", dependencies=[Depends(_check_token)])
+    async def get_scrape_link(link_id: int) -> dict:
+        """GET /api/biz/scrape/links/{id}：单条链接 + 图片列表（白名单来源）。
+
+        batch_image_download 读 url/source/status（决策 26 读也走接口）。
+        """
+        from web import scrape_store
+
+        detail = await scrape_store.get_link_by_id(link_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="链接记录不存在")
+        return detail
+
+    @router.patch("/scrape/links/{link_id}", dependencies=[Depends(_check_token)])
+    async def update_scrape_link(link_id: int, payload: dict) -> dict:
+        """PATCH /api/biz/scrape/links/{id}：更新状态/图数/元数据/error_note/degraded_note。
+
+        batch_image_download 落链接终态（决策 26：写也走接口）。
+        """
+        from web import scrape_store
+
+        updated = await scrape_store.update_link(
+            link_id,
+            status=payload.get("status"),
+            image_count=payload.get("image_count"),
+            desc=payload.get("desc"),
+            tags=payload.get("tags"),
+            author_id=payload.get("author_id"),
+            storage_dir=payload.get("storage_dir"),
+            error_note=payload.get("error_note"),
+            degraded_note=payload.get("degraded_note"),
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="链接记录不存在")
+        return updated
+
+    @router.post("/scrape/queue/clear", dependencies=[Depends(_check_token)])
+    async def clear_scrape_queue() -> dict:
+        """POST /api/biz/scrape/queue/clear：清空定时队列（scrape.link_queue → []）。
+
+        消费者 scrape.download_done（from_queue=true 链成功完成后调用，
+        详设-v0.6 §5.3/§7）。
+        """
+        from web import scrape_store
+        from web.settings_store import SettingsStore
+
+        store = SettingsStore(_resolve_engine())
+        await scrape_store.set_link_queue([], settings=store)
+        return {"ok": True, "queue": []}
+
+    @router.get("/settings/link-queue", dependencies=[Depends(_check_token)])
+    async def read_link_queue() -> dict:
+        """GET /api/biz/settings/link-queue：读定时队列（白名单来源，详设-v0.6 §7）。
+
+        provider scrape.link_queue（link_record_create from_queue 分支）用。
+        """
+        from web import scrape_store
+        from web.settings_store import SettingsStore
+
+        store = SettingsStore(_resolve_engine())
+        queue = await scrape_store.get_link_queue(settings=store)
+        return {"urls": queue}
 
     # ==== CRM 对话图片接口（v0.5 批 5，详设-v0.5 §10）====
     from models.crm import MessageImage

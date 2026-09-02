@@ -1,0 +1,2 @@
+# batch_image_download 工序配置（详设-v0.6 §5.2；业务值外置 R10）
+# 体检阈值照 image_inspect 启发式（模块常量，config 占位保留 config_dir 契约）
