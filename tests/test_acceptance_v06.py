@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -35,10 +36,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from test_web_tm import _login  # noqa: F401  # 跨模块 helper（只住 tests/）
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # P2 合规：URL/token 运行期拼接
 _BIZ_TOKEN = "test" + "-biz-token"
+_FAKE_BIZ_URL = "ht" + "tp://" + "biz.test"
 
 # P2 合规：含 scheme 的 URL 一律运行期拼接（单一字符串常量不得含完整 scheme）
 _XHS_EXPLORE = "ht" + "tps://www.xiaohongshu.com/explore/abc123"
@@ -462,3 +466,323 @@ async def test_engine_params_scrape_keys(biz_engine) -> None:
     data2 = resp2.json()
     assert data2["scrape.storage_dir"] == "/data/liuquan/scrape/"
     assert data2["scrape.schedule_time"] == "08:30"
+
+
+# =====================================================================
+# 批 2：入口与队列 + 素材库（详设 §10/§12 批 2）——A59 / A60 / A63
+# =====================================================================
+
+
+def _noop_engine_handler(request: httpx.Request) -> httpx.Response:
+    """批 2 页面用最小引擎桩（registry 空 + schedules 空 + 建任务假 id，零网络）。"""
+    if request.url.path == "/api/engine/tasks" and request.method == "POST":
+        return httpx.Response(201, json={"task_id": "e-000100"})
+    if request.url.path == "/api/engine/registry":
+        return httpx.Response(200, json={"chains": []})
+    if request.url.path == "/api/engine/schedules":
+        return httpx.Response(200, json={"schedules": []})
+    return httpx.Response(404, json={"detail": "not found"})
+
+
+def _web_app(biz_engine, engine_handler) -> FastAPI:
+    """批 2 页面/接口测试用完整 web app（嵌入式 PG 全 store 注入 + 假引擎客户端）。"""
+    from web.app import create_app
+    from web.crm_store import CRMStore
+    from web.engineapi.client import EngineAPIClient
+    from web.settings_store import SettingsStore
+    from web.tm_store import TMStore
+
+    return create_app(
+        tm_store=TMStore(biz_engine),
+        crm_store=CRMStore(biz_engine),
+        settings_store=SettingsStore(biz_engine),
+        engine_client_factory=lambda: EngineAPIClient(
+            base_url=_FAKE_BIZ_URL,
+            transport=httpx.MockTransport(engine_handler),
+        ),
+    )
+
+
+# ==== A59：一链接一条 + url 幂等（web 层）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a59_link_record_url_idempotent(biz_engine) -> None:
+    """A59：web 层幂等/去重——①POST /settings/scrape/queue 同链接（不同 xsec_token）
+    两次 → 队列（scrape.link_queue 键）只 1 条（normalized_url 去重）；
+    ②POST /api/biz/scrape/links 同 normalized_url 两次 → 只 1 行 link_record
+    （第二次返回 existing，created/existing 标记）。"""
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    u1 = _XHS_EXPLORE + "?xsec_token=TOK1&xsec_source=pc_feed"
+    u2 = _XHS_EXPLORE + "?xsec_token=TOK2&xsec_source=pc_feed"
+
+    # ① 设置页「定时队列」加入去重（normalized_url 幂等追加）
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False)
+    _login(client)
+
+    resp1 = client.post("/settings/scrape/queue", data={"action": "add", "urls": u1})
+    assert resp1.status_code == 303
+    resp2 = client.post("/settings/scrape/queue", data={"action": "add", "urls": u2})
+    assert resp2.status_code == 303
+    store = SettingsStore(biz_engine)
+    queue = await store.get("scrape.link_queue", [])
+    assert isinstance(queue, list) and len(queue) == 1, (
+        f"同链接（不同 xsec_token）入队两次应只 1 条，实际 {queue!r}"
+    )
+
+    # ② /api/biz/scrape/links 幂等（normalized_url 唯一 → 只 1 行）
+    biz_client = TestClient(_biz_app(biz_engine), raise_server_exceptions=False)
+    headers = {"X-Biz-Token": _BIZ_TOKEN}
+    r1 = biz_client.post(
+        "/api/biz/scrape/links",
+        json={"urls": [u1], "batch_id": "batch-a59-1"},
+        headers=headers,
+    )
+    assert r1.status_code == 200
+    data1 = r1.json()
+    assert data1["created_count"] == 1
+    assert data1["links"][0]["created"] is True
+    assert data1["links"][0]["existing"] is False
+
+    r2 = biz_client.post(
+        "/api/biz/scrape/links",
+        json={"urls": [u2], "batch_id": "batch-a59-2"},
+        headers=headers,
+    )
+    assert r2.status_code == 200
+    data2 = r2.json()
+    assert data2["existing_count"] == 1
+    assert data2["links"][0]["existing"] is True
+    assert data2["links"][0]["id"] == data1["links"][0]["id"], (
+        "同 normalized_url 二次提交应返回现有行（不重复建）"
+    )
+
+    rows = await scrape_store.get_links(limit=50)
+    assert len(rows) == 1
+
+
+# ==== A60：图包导出（zip + metadata.json）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a60_link_export_zip(biz_engine, tmp_path) -> None:
+    """A60：图包导出——构造 link_record + image_file 行 + 磁盘假图片（local_path
+    相对 storage_dir）→ GET /scrape/links/{id}/export → 200 zip → 成员含图片 +
+    metadata.json；metadata 字段齐全（url/source/source_mark/width/height/
+    watermark/batch_id + 链接记录字段）。"""
+    import io
+    import json as _json
+    import zipfile
+    from datetime import time as dtime
+
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    await store.set("scrape.storage_dir", str(tmp_path), "扒图存储目录")
+
+    # 磁盘假图片（local_path 相对 storage_dir）
+    img_dir = tmp_path / "xhs" / "note1"
+    img_dir.mkdir(parents=True)
+    (img_dir / "01.jpg").write_bytes(b"fake-jpg-01")
+    (img_dir / "02.jpg").write_bytes(b"fake-jpg-02")
+
+    link = await scrape_store.create_link("url-export", "xhs", "batch-export")
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id, "
+                "local_path, source_mark, width, height, watermark) "
+                "VALUES (:b, :s, :u, :l, :p, :m, :w, :h, :wm)"
+            ),
+            {
+                "b": "batch-export", "s": "xhs", "u": "img-url-1", "l": link["id"],
+                "p": "xhs/note1/01.jpg", "m": "scraped", "w": 800, "h": 600, "wm": True,
+            },
+        )
+        await session.execute(
+            text(
+                "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id, "
+                "local_path, source_mark, width, height, watermark) "
+                "VALUES (:b, :s, :u, :l, :p, :m, :w, :h, :wm)"
+            ),
+            {
+                "b": "batch-export", "s": "xhs", "u": "img-url-2", "l": link["id"],
+                "p": "xhs/note1/02.jpg", "m": "scraped", "w": 1024, "h": 768, "wm": False,
+            },
+        )
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False)
+    resp = client.get(f"/scrape/links/{link['id']}/export")
+    assert resp.status_code == 200
+    assert resp.headers.get("content-type") == "application/zip"
+    assert f"link-{link['id']}-" in resp.headers.get("content-disposition", ""), (
+        "zip 文件名应含 link-{id}-{8位短hash}"
+    )
+
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = set(zf.namelist())
+    assert "metadata.json" in names
+    assert "xhs/note1/01.jpg" in names, f"zip 缺图片成员，实际 {sorted(names)}"
+    assert "xhs/note1/02.jpg" in names
+    assert zf.read("xhs/note1/01.jpg") == b"fake-jpg-01"
+
+    meta = _json.loads(zf.read("metadata.json"))
+    assert meta["url"] == "url-export"
+    assert meta["source"] == "xhs"
+    assert meta["batch_id"] == "batch-export"
+    assert meta["status"] == "pending"
+    assert "desc" in meta and "tags" in meta and "author_id" in meta
+    assert "error_note" in meta and "degraded_note" in meta
+
+    imgs = meta["images"]
+    assert len(imgs) == 2
+    for im in imgs:
+        for field in (
+            "url", "source_mark", "width", "height", "watermark",
+            "local_path", "created_at",
+        ):
+            assert field in im, f"metadata.images 缺字段 {field}"
+    assert {im["local_path"] for im in imgs} == {
+        "xhs/note1/01.jpg", "xhs/note1/02.jpg"
+    }
+    marks = {im["source_mark"] for im in imgs}
+    assert marks == {"scraped"}
+
+    # 页面可见降级提示：无图链接导出 → 重定向回详情页带 err（不 500）
+    empty_link = await scrape_store.create_link("url-empty", "xhs", "batch-empty")
+    resp_empty = client.get(f"/scrape/links/{empty_link['id']}/export")
+    assert resp_empty.status_code == 303
+    assert "err" in resp_empty.headers.get("location", "")
+
+    # 链接详情页渲染：状态/元数据 + 图片网格 + 图包导出按钮（页面可见）
+    detail_page = client.get(f"/scrape/links/{link['id']}")
+    assert detail_page.status_code == 200
+    assert "图包导出" in detail_page.text
+    assert "url-export" in detail_page.text
+    assert "图片网格" in detail_page.text
+
+
+# ==== A63：定时默认时间设置生效 ====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a63_schedule_time_setting_effect(biz_engine) -> None:
+    """A63：改 scrape.schedule_time → ①设置键变化 ②假引擎客户端收到
+    update_schedule_time(chain_id=scrape_download_chain 行, "0 8 * * *")
+    ③定时页渲染显示新 cron（list_schedules 返回该行）。"""
+    import json as _json
+    from datetime import time as dtime
+
+    from web.settings_store import SettingsStore
+
+    update_calls: list[str] = []
+    schedule_row: dict = {
+        "id": 1,
+        "chain_id": "scrape_download_chain",
+        "name": "定时扒图",
+        "cron": "0 7 * * *",
+        "enabled": True,
+        "last_run_at": None,
+        "next_run_at": None,
+    }
+
+    def _schedule_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/engine/registry":
+            return httpx.Response(
+                200,
+                json={"chains": [{"id": "scrape_download_chain", "name": "定时扒图"}]},
+            )
+        if request.url.path == "/api/engine/schedules" and request.method == "GET":
+            return httpx.Response(200, json={"schedules": [schedule_row]})
+        if request.url.path == "/api/engine/schedules/1/time" and request.method == "POST":
+            body = _json.loads(request.content)
+            schedule_row["cron"] = body.get("schedule")
+            update_calls.append(str(body.get("schedule")))
+            return httpx.Response(200, json={"ok": True})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    store = SettingsStore(biz_engine)
+    app = _web_app(biz_engine, _schedule_handler)
+    client = TestClient(app, follow_redirects=False)
+    _login(client)
+
+    # ① 保存 schedule_time=08:00 → 设置键变化
+    resp = client.post("/settings/scrape", data={"schedule_time": "08:00"})
+    assert resp.status_code == 303
+    val = await store.get("scrape.schedule_time", "07:00")
+    assert isinstance(val, dtime), f"scrape.schedule_time 应解析为 time，实际 {val!r}"
+    assert val.hour == 8 and val.minute == 0
+
+    # ② 假客户端收到 update_schedule_time（cron = "0 8 * * *"）
+    assert update_calls == ["0 8 * * *"], f"引擎 update_time 调用实锤：{update_calls}"
+
+    # ③ 定时页渲染显示新 cron
+    page = client.get("/settings/schedule")
+    assert page.status_code == 200
+    assert "0 8 * * *" in page.text, "定时页应显示更新后的 cron"
+
+
+# ==== 批 2 辅助单测（非 acceptance）====
+
+
+@pytest.mark.asyncio
+async def test_settings_scrape_queue_clear(biz_engine) -> None:
+    """设置页定时队列清空：action=clear → 队列 [] + 页面片段（HTMX）。"""
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    await scrape_store.set_link_queue(["u1", "u2"], settings=store)
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False)
+    _login(client)
+    resp = client.post(
+        "/settings/scrape/queue",
+        data={"action": "clear"},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    assert "定时队列已清空" in resp.text
+    assert await store.get("scrape.link_queue", []) == []
+
+
+@pytest.mark.asyncio
+async def test_scrape_run_engine_error_friendly(biz_engine) -> None:
+    """POST /scrape/run：引擎侧 422 透传友好错误（链路未通属预期，页面提示不 500）。"""
+    from web.app import create_app
+    from web.crm_store import CRMStore
+    from web.engineapi.client import EngineAPIClient
+    from web.settings_store import SettingsStore
+    from web.tm_store import TMStore
+
+    def _reject_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/engine/tasks" and request.method == "POST":
+            return httpx.Response(422, json={"detail": "input 校验失败（链未通）"})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    app = create_app(
+        tm_store=TMStore(biz_engine),
+        crm_store=CRMStore(biz_engine),
+        settings_store=SettingsStore(biz_engine),
+        engine_client_factory=lambda: EngineAPIClient(
+            base_url=_FAKE_BIZ_URL,
+            transport=httpx.MockTransport(_reject_handler),
+        ),
+    )
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+    resp = client.post("/scrape/run", json={"urls": [_XHS_EXPLORE]})
+    assert resp.status_code == 502
+    data = resp.json()
+    assert data["ok"] is False
+    assert "422" in data["error"], f"错误应透传引擎 422 详情：{data['error']}"
+    assert "input 校验失败" in data["error"]

@@ -300,14 +300,14 @@ assertions:
     desc: "拆两链 + input 契约各自明确"
   - id: A59
     version: v0.6
-    status: planned
-    plan: "批 2 后补：test_a59_link_record_url_idempotent——同链接（不同 xsec_token）重复提交不重复建记录（normalized_url 唯一）"
-    desc: "一链接一条 + url 幂等"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a59_link_record_url_idempotent"
+    desc: "一链接一条 + url 幂等：同链接（含不同 xsec_token）重复提交不重复建记录（normalized_url 唯一）——①设置页定时队列按 normalized_url 去重追加 ②/api/biz/scrape/links 幂等返回 existing"
   - id: A60
     version: v0.6
-    status: planned
-    plan: "批 2 后补：test_a60_link_export_zip——图包导出 zip 含图片 + metadata.json（字段齐全）"
-    desc: "图包导出（zip + metadata.json）"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a60_link_export_zip"
+    desc: "图包导出：链接记录导出 zip 含图片 + metadata.json（字段齐全：url/source/source_mark/width/height/watermark/batch_id）"
   - id: A61
     version: v0.6
     status: implemented
@@ -320,9 +320,9 @@ assertions:
     desc: "定时队列 + 定时链跑通"
   - id: A63
     version: v0.6
-    status: planned
-    plan: "批 2 后补：test_a63_schedule_time_setting_effect——改 scrape.schedule_time → 设置键变化 + 定时页 scrape_download_chain cron 变化（update_time 实锤）"
-    desc: "定时默认时间设置生效"
+    status: implemented
+    test: "tests/test_acceptance_v06.py::test_a63_schedule_time_setting_effect"
+    desc: "定时默认时间设置生效：改 scrape.schedule_time → 设置键变化 + 定时页 scrape_download_chain cron 变化（update_time 实锤）"
   - id: A64
     version: v0.6
     status: planned
