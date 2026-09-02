@@ -43,6 +43,9 @@ _TYPE_REGISTRY: dict[str, str] = {
     "ai.llm_model": "str",  # 语言模型名
     "ai.vision_model": "str",  # 识图模型名
     "scrape.storage_dir": "str",  # 扒图存储目录
+    # v0.6 批 1（详设-v0.6 §4.4）
+    "scrape.link_queue": "json",  # 扒图定时队列（JSON 数组）
+    "scrape.schedule_time": "time",  # 扒图定时默认时间（默认 07:00）
 }
 
 

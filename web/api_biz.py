@@ -23,7 +23,7 @@ from dotenv import dotenv_values
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -212,12 +212,25 @@ def create_biz_router(
             await store.get("ai.vision_model", "qwen-vl-max")
         )
 
+        # v0.6 §5.5：扒图存储目录 + 定时默认时间（读 settings 表，缺省回退默认；
+        # time 值序列化为 "HH:MM" 字符串——引擎启动装配 connector 落盘根 + 种子 cron）
+        scrape_storage_dir = str(
+            await store.get("scrape.storage_dir", "/opt/liuquan/scrape/")
+        )
+        _raw_schedule_time = await store.get("scrape.schedule_time", "07:00")
+        if isinstance(_raw_schedule_time, time):
+            scrape_schedule_time = _raw_schedule_time.strftime("%H:%M")
+        else:
+            scrape_schedule_time = str(_raw_schedule_time)
+
         return {
             "max_attempts": max_attempts,
             "timeout_s": timeout_s,
             "backoff_cap": backoff_cap,
             "llm_model": llm_model,
             "vision_model": vision_model,
+            "scrape.storage_dir": scrape_storage_dir,
+            "scrape.schedule_time": scrape_schedule_time,
         }
 
     # ---- 读接口：crm 上下文（引擎侧 provider 白名单与 prompt 数据来源）----
