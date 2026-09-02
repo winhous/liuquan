@@ -1,6 +1,6 @@
-"""v0.6 验收断言 A61/A64/A65 + 批 1 数据地基 + 批 3 连接器单测（详设-v0.6 §10；@version_acceptance）。
+"""v0.6 验收断言（详设-v0.6 §10；@version_acceptance）：A57-A68 + B5 收口四断言 + 批 1-5 辅助单测。
 
-覆盖（对应详设 §10 验收断言表 + §12 批 1 数据地基 / 批 3 连接器搬回）：
+覆盖（对应详设 §10 验收断言表 + §12 批 1-5）：
 - A61 图来源标记 + SKU×店铺留位（迁移 0011 结构断言）：scrape.link_record 表存在 +
   关键列（url/normalized_url/source/status/image_count/batch_id/error_note/
   degraded_note）+ UNIQUE(normalized_url)；scrape.image_file 增 link_record_id/
@@ -12,11 +12,21 @@
 - A65 闲鱼连接器照广成（H3）：10 主图 + 6 详情选择器（照广成原文）+ naturalWidth≥100 +
   过滤关键词 + _DEAD_PAGE_KEYWORDS + 全局 90s deadline + networkidle 降级
   （代码级 + fake page 行为单测）
-- 批 1 单测（非 acceptance）：scrape_store create_link 幂等（同 normalized_url
+- A57/A58/A59/A60/A62/A63/A66/A67/A68（批 2-4 链路修通）：立即扒端到端落素材库 /
+  拆两链 input 契约 / 链接幂等 / 图包导出 / 定时队列 + 定时链 / 定时时间设置生效 /
+  suggest 链诚实化（真接 LLM → 提案 pending）/ biz_client 注入 + image_inspect 写回 /
+  失败与降级明确提示
+- B5 收口四断言（批 5，planned → implemented）：
+  A29 候选忽略 dismissed 不建任务不飞书（行为断言）/
+  A47 贴链接 → image_file 落库 + 提案审核真实链路（下载链 + suggest 链组合）/
+  A48 提案批准 → tm.task domain=scrape 落 TM 清单（扒图徽章）/
+  A51 seo-optimize 规格 config/spec.yaml 可改行为变化实锤
+- 批 1-4 单测（非 acceptance）：scrape_store create_link 幂等（同 normalized_url
   二次调用返回现有行 created=false）/ get_links 筛选 / get_link_by_id（含图片列表）/
   update_link 落库 / get_link_queue/set_link_queue 读写 / normalize_link_url
   规范化（去 xsec_token 等易变 query 保留路径段）/ engine-params 新键
-  （scrape.storage_dir + scrape.schedule_time，缺省 + 改键返回变化）
+  （scrape.storage_dir + scrape.schedule_time，缺省 + 改键返回变化）/ 消费者
+  from_queue 语义 / 调度器 input 模板 / 工序 biz_client 未注入降级
 
 基建：tm_pg_cluster / engine_pg_cluster（conftest 嵌入式 PG，业务库迁移 upgrade
 head 自动含 0011）+ 本文件 autouse _clean_v06_tables（每测试后清 sys.settings +
