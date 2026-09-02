@@ -6,7 +6,7 @@
 scrape 表注册进 TmBase.metadata 后，migrations/business/env.py 的 target_metadata
 自动涵盖各 schema（R22 同源，env.py 已 import 本模块）。
 
-对齐详设-v0.6 §4.1/§4.2（迁移 0011）：
+对齐详设-v0.6 §4.1/§4.2（迁移 0011）+ §15.2（迁移 0012）：
 - link_record：链接记录表（一链接一条）
   - url：原始分享链接（含 xsec_token 等易变 query）
   - normalized_url：规范化链接（去易变 query 后的查重键），UNIQUE 幂等
@@ -18,6 +18,9 @@ scrape 表注册进 TmBase.metadata 后，migrations/business/env.py 的 target_
   - author_id：作者/卖家 ID；batch_id：批次（立即扒=web uuid；定时=sched-<ts>）
   - storage_dir：落盘相对路径（相对 scrape.storage_dir）
   - error_note：失败原因；degraded_note：元数据降级原因
+  - netdisk_status（迁移 0012，§15.2）：网盘上传状态，默认 'none'，
+    CHECK 四值（none/pending/uploaded/failed）；netdisk_url：夸克永久分享链接
+    （批 7 回填）；netdisk_uploaded_at：上传成功时间
   - created_at / updated_at
 - image_file（v0.5 表扩展）：
   - link_record_id：FK → link_record.id ON DELETE CASCADE（图片挂链接）
@@ -57,7 +60,8 @@ class LinkRecord(TmBase):
 
     normalized_url 唯一（去 xsec_token 等易变 query 后的查重键）：同作品
     不同 token 重复粘贴返回现有记录（幂等），不重复建、不重复下载。
-    source ∈ {xhs, xianyu, http}；status ∈ {pending, downloading, done, failed}。
+    source ∈ {xhs, xianyu, http}；status ∈ {pending, downloading, done, failed}；
+    netdisk_status ∈ {none, pending, uploaded, failed}（迁移 0012，批 7 回填）。
     """
 
     __tablename__ = "link_record"
@@ -71,6 +75,10 @@ class LinkRecord(TmBase):
         CheckConstraint(
             "status IN ('pending','downloading','done','failed')",
             name="chk_scrape_link_status",
+        ),
+        CheckConstraint(
+            "netdisk_status IN ('none','pending','uploaded','failed')",
+            name="chk_scrape_link_netdisk_status",  # 迁移 0012（夸克网盘上传状态）
         ),
         Index("idx_scrape_link_status_created", "status", "created_at"),
         Index("idx_scrape_link_batch", "batch_id"),
@@ -98,6 +106,14 @@ class LinkRecord(TmBase):
     storage_dir: Mapped[str | None] = mapped_column(Text)
     error_note: Mapped[str | None] = mapped_column(Text)
     degraded_note: Mapped[str | None] = mapped_column(Text)
+    # 迁移 0012（详设-v0.6 §15.2）：夸克网盘上传三列（批 7 消费者回填）
+    netdisk_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'none'")
+    )  # 'none','pending','uploaded','failed'
+    netdisk_url: Mapped[str | None] = mapped_column(Text)  # 夸克永久分享链接
+    netdisk_uploaded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )  # 上传成功时间
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -1,9 +1,11 @@
 """v0.6 验收断言（详设-v0.6 §10；@version_acceptance）：A57-A68 + B5 收口四断言 + 批 1-5 辅助单测。
 
-覆盖（对应详设 §10 验收断言表 + §12 批 1-5）：
-- A61 图来源标记 + SKU×店铺留位（迁移 0011 结构断言）：scrape.link_record 表存在 +
+覆盖（对应详设 §10 验收断言表 + §12 批 1-5 + §15 批 6）：
+- A61 图来源标记 + SKU×店铺留位（迁移 0011 结构断言）+ 批 6 迁移 0012 netdisk
+  三列：scrape.link_record 表存在 +
   关键列（url/normalized_url/source/status/image_count/batch_id/error_note/
-  degraded_note）+ UNIQUE(normalized_url)；scrape.image_file 增 link_record_id/
+  degraded_note/netdisk_status/netdisk_url/netdisk_uploaded_at）+
+  UNIQUE(normalized_url)；scrape.image_file 增 link_record_id/
   source_mark/sku_id/shop_id 列 + source_mark 默认 'scraped' + CHECK 四值可插 +
   非法值报错 + uq_scrape_image_link_url 唯一索引存在
 - A64 xhs 连接器照广成（H1/H2）：脚本 from source import XHS（非 from main import
@@ -138,9 +140,9 @@ def _biz_app(biz_engine) -> FastAPI:
 @pytest.mark.version_acceptance
 @pytest.mark.asyncio
 async def test_a61_image_source_mark_and_sku_shop_slot(biz_engine) -> None:
-    """A61：link_record 表 + 关键列 + UNIQUE(normalized_url)；image_file 增
-    link_record_id/source_mark/sku_id/shop_id + source_mark 默认/CHECK 四值/
-    非法值报错 + uq_scrape_image_link_url 唯一索引（迁移 0011 结构断言，真 SQL）。"""
+    """A61：link_record 表 + 关键列（含批 6 迁移 0012 netdisk 三列）+ UNIQUE(normalized_url)；
+    image_file 增 link_record_id/source_mark/sku_id/shop_id + source_mark 默认/CHECK 四值/
+    非法值报错 + uq_scrape_image_link_url 唯一索引（迁移 0011/0012 结构断言，真 SQL）。"""
     async with AsyncSession(biz_engine) as session:
         # ---- scrape.link_record 表存在 + 关键列存在 ----
         cols = await session.execute(
@@ -155,6 +157,8 @@ async def test_a61_image_source_mark_and_sku_shop_slot(biz_engine) -> None:
             "id", "url", "normalized_url", "source", "status", "image_count",
             "desc", "tags", "author_id", "batch_id", "storage_dir",
             "error_note", "degraded_note", "created_at", "updated_at",
+            # 批 6（迁移 0012，详设-v0.6 §15.2）：夸克网盘上传三列
+            "netdisk_status", "netdisk_url", "netdisk_uploaded_at",
         }
         assert required <= link_cols, (
             f"scrape.link_record 缺列: {required - link_cols}"
@@ -429,6 +433,69 @@ async def test_scrape_store_update_link() -> None:
     assert again["status"] == "failed"
     assert again["image_count"] == 5
     assert again["desc"] == "测试描述"
+
+
+@pytest.mark.asyncio
+async def test_scrape_store_link_netdisk_columns(biz_engine) -> None:
+    """迁移 0012 netdisk 三列（批 6，详设-v0.6 §15.2）：结构存在 + create_link
+    默认值 + update_link 支持 netdisk_status/netdisk_url/netdisk_uploaded_at 回填。"""
+    from datetime import datetime, timezone
+
+    from web import scrape_store
+
+    # ---- 结构断言（迁移 0012：netdisk_status CHECK 四值 + url + uploaded_at）----
+    async with AsyncSession(biz_engine) as session:
+        cols = await session.execute(
+            text(
+                "SELECT column_name, is_nullable, column_default FROM information_schema.columns "
+                "WHERE table_schema = 'scrape' AND table_name = 'link_record' "
+                "AND column_name IN ('netdisk_status', 'netdisk_url', 'netdisk_uploaded_at')"
+            )
+        )
+        rows = {r[0]: r for r in cols}
+        assert set(rows) == {"netdisk_status", "netdisk_url", "netdisk_uploaded_at"}, (
+            f"迁移 0012 应建 netdisk 三列，实际 {sorted(rows)}"
+        )
+        # netdisk_status 非空 + 默认 'none'
+        assert rows["netdisk_status"][1] == "NO"
+        assert "'none'" in (rows["netdisk_status"][2] or "")
+        # netdisk_uploaded_at 应为 timestamptz（information_schema 无类型，另行断言）
+    async with AsyncSession(biz_engine) as session:
+        chk = await session.execute(
+            text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'chk_scrape_link_netdisk_status'"
+            )
+        )
+        row = chk.first()
+        assert row is not None and "netdisk_status" in row[0] and "uploaded" in row[0], (
+            "netdisk_status 应有 CHECK（none/pending/uploaded/failed）"
+        )
+
+    # ---- create_link 默认值（netdisk_status='none'，url 空）----
+    link = await scrape_store.create_link("url-netdisk", "xhs", "b-netdisk")
+    assert link["netdisk_status"] == "none", (
+        f"netdisk_status 默认应为 none，实际 {link.get('netdisk_status')!r}"
+    )
+    assert link.get("netdisk_url") is None
+    assert link.get("netdisk_uploaded_at") is None
+
+    # ---- update_link 支持网盘三列回填（批 7 上传后调用形态）----
+    uploaded_at = datetime(2026, 9, 3, 10, 30, 0, tzinfo=timezone.utc)
+    updated = await scrape_store.update_link(
+        link["id"],
+        netdisk_status="uploaded",
+        netdisk_url="ht" + "tps://pan.quark.cn/s/abc123456789",
+        netdisk_uploaded_at=uploaded_at,
+    )
+    assert updated["netdisk_status"] == "uploaded"
+    assert updated["netdisk_url"] == "ht" + "tps://pan.quark.cn/s/abc123456789"
+    assert updated["netdisk_uploaded_at"] is not None
+
+    # 只更新部分字段其余保留
+    partial = await scrape_store.update_link(link["id"], netdisk_status="failed")
+    assert partial["netdisk_status"] == "failed"
+    assert partial["netdisk_url"] == "ht" + "tps://pan.quark.cn/s/abc123456789"
 
 
 @pytest.mark.asyncio

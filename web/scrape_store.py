@@ -4,6 +4,8 @@ v0.6 批 1 扩展（详设-v0.6 §4.3）：链接记录 CRUD（create_link 幂�
 get_link_by_id / update_link）+ 定时队列读写（get_link_queue / set_link_queue）
 + normalize_link_url（去易变 query 查重键）。存量 desc 列在原始 SQL 中补引号
 （PG16 实测未加引号的 desc 列名必语法错误，2026-09-03 批 1 修复留痕）。
+v0.6 批 6（详设 §15.2 迁移 0012）：update_link 支持 netdisk_status/netdisk_url/
+netdisk_uploaded_at 回填（夸克网盘上传，批 7 消费者用）。
 """
 from __future__ import annotations
 
@@ -299,10 +301,11 @@ async def get_images_by_ids(image_ids: list[str]) -> list[dict[str, Any]]:
 # 易变 query 参数（小写比较）：XHS 分享链接的 token/来源参数，规范化时去掉
 _VOLATILE_QUERY_PARAMS = ("xsec_token", "xsec_source", "xsec_token_f")
 
-# 链接记录全列（desc 是 PG 保留字，原始 SQL 一律加引号）
+# 链接记录全列（desc 是 PG 保留字，原始 SQL 一律加引号；netdisk 三列为迁移 0012）
 _LINK_COLUMNS = (
     'id, url, normalized_url, source, status, image_count, "desc", tags, '
     "author_id, batch_id, storage_dir, error_note, degraded_note, "
+    "netdisk_status, netdisk_url, netdisk_uploaded_at, "
     "created_at, updated_at"
 )
 
@@ -502,6 +505,11 @@ async def get_link_by_id(link_id: str | int) -> dict[str, Any] | None:
         return {"link": link, "images": _rows(imgs)}
 
 
+# 迁移 0012：netdisk_url/netdisk_uploaded_at 需区分「未传（不更新）」与
+# 「显式 None（清空，重传/失败清链接场景）」——用哨兵默认值
+_UNSET = object()
+
+
 async def update_link(
     link_id: str | int,
     *,
@@ -513,10 +521,15 @@ async def update_link(
     storage_dir: str | None = None,
     error_note: str | None = None,
     degraded_note: str | None = None,
+    netdisk_status: str | None = None,  # 迁移 0012：网盘上传状态（批 7 回填）
+    netdisk_url=_UNSET,  # 迁移 0012：夸克永久分享链接（_UNSET=不更新；None=清空）
+    netdisk_uploaded_at=_UNSET,  # 迁移 0012：上传成功时间（同上语义）
 ) -> dict[str, Any] | None:
-    """更新链接记录（只更新非 None 字段；updated_at 置 now；照 update_image 模式）。
+    """更新链接记录（只更新传入字段；updated_at 置 now；照 update_image 模式）。
 
-    返回更新后整行（含全部列）；行不存在返回 None。
+    批 6（迁移 0012）：支持网盘三列回填（netdisk_status/netdisk_url/
+    netdisk_uploaded_at，夸克上传消费者用）；netdisk_url/netdisk_uploaded_at
+    用 _UNSET 哨兵区分「未传」与「显式 None（清空）」。行不存在返回 None。
     """
     import json as _json
 
@@ -547,6 +560,15 @@ async def update_link(
     if degraded_note is not None:
         sets.append("degraded_note = :degraded_note")
         params["degraded_note"] = degraded_note
+    if netdisk_status is not None:
+        sets.append("netdisk_status = :netdisk_status")
+        params["netdisk_status"] = netdisk_status
+    if netdisk_url is not _UNSET:
+        sets.append("netdisk_url = :netdisk_url")
+        params["netdisk_url"] = netdisk_url
+    if netdisk_uploaded_at is not _UNSET:
+        sets.append("netdisk_uploaded_at = :netdisk_uploaded_at")
+        params["netdisk_uploaded_at"] = netdisk_uploaded_at
 
     if not sets:
         link = await get_link_by_id(link_id)
