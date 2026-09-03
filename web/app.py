@@ -699,7 +699,7 @@ def create_app(
         status_f = status if status in ("pending", "downloading", "done", "failed") else None
         status_in = ["pending", "downloading"] if status == "processing" else None
         page_size = 20
-        links = await scrape_store.get_links(
+        links_raw = await scrape_store.get_links(
             source=source_f,
             status=status_f,
             status_in=status_in,
@@ -709,6 +709,15 @@ def create_app(
         total = await scrape_store.count_links(
             source=source_f, status=status_f, status_in=status_in
         )
+        # 素材库勾图建档（BUG-2）：批量取本页链接的图片，传入模板
+        link_ids = [l["id"] for l in links_raw]
+        images_by_link = await scrape_store.get_images_by_link_ids(link_ids)
+        link_views = []
+        for l in links_raw:
+            lv = _link_view(l)
+            lv_images = images_by_link.get(l["id"], [])
+            lv["images"] = [_image_view(i) for i in lv_images]
+            link_views.append(lv)
         store = _settings_store(request)
         queue = await scrape_store.get_link_queue(settings=store)
         raw_time = await store.get("scrape.schedule_time", "07:00")
@@ -722,7 +731,7 @@ def create_app(
             _ctx(
                 request,
                 "seo-scrape",
-                links=[_link_view(l) for l in links],
+                links=link_views,
                 total=total,
                 page=page_no,
                 page_size=page_size,

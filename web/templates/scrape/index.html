@@ -93,6 +93,7 @@
           <table class="table table-vcenter">
             <thead>
               <tr>
+                <th style="width:36px"></th>
                 <th>来源</th><th>链接</th><th>状态</th><th>网盘</th><th>图数</th>
                 <th>元数据</th><th>批次</th><th>时间</th><th>操作</th>
               </tr>
@@ -100,6 +101,15 @@
             <tbody>
               {% for l in links %}
               <tr>
+                <td>
+                  {% if l.images %}
+                  <button class="btn btn-sm btn-outline-secondary p-0 lh-1 toggle-images"
+                          data-link-id="{{ l.id }}" title="展开图片"
+                          onclick="toggleLinkImages(this, {{ l.id }})">
+                    <i class="ti ti-chevron-right"></i>
+                  </button>
+                  {% endif %}
+                </td>
                 <td><span class="badge bg-secondary-lt">{{ l.source_badge }} {{ l.source_label }}</span></td>
                 <td>
                   <a href="/scrape/links/{{ l.id }}" class="text-reset text-decoration-none" title="{{ l.url }}">{{ l.summary }}</a>
@@ -142,10 +152,73 @@
                   </div>
                 </td>
               </tr>
+              {# BUG-2 修复（详设 §4.2 入口1）：展开图片行 —— 勾选跨链接图建档 #}
+              {% if l.images %}
+              <tr class="image-row image-row-{{ l.id }}" style="display:none;">
+                <td colspan="10" class="p-2">
+                  <div class="d-flex flex-wrap gap-2">
+                    {% for img in l.images %}
+                    <div class="position-relative" style="width:80px;">
+                      <div style="aspect-ratio:1/1;background:#f3f5f9;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+                        {% if img.local_path %}
+                        <img src="/scrape/thumbnail/{{ img.id }}" alt="" loading="lazy"
+                             style="width:100%;height:100%;object-fit:cover;"
+                             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                        <span style="display:none;font-size:20px;color:#9aa0ac;">🖼️</span>
+                        {% else %}
+                        <span style="font-size:20px;color:#9aa0ac;">🖼️</span>
+                        {% endif %}
+                      </div>
+                      <div class="form-check mt-1 text-center">
+                        <input type="checkbox" class="form-check-input img-select" value="{{ img.id }}"
+                               onchange="updateSkuBtn()" style="margin:0;">
+                      </div>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </td>
+              </tr>
+              {% endif %}
               {% endfor %}
             </tbody>
           </table>
         </div>
+
+        {# BUG-2：悬浮「用所选图建档」按钮（有勾选时显示） #}
+        <div id="sku-create-bar" class="position-sticky bottom-0 text-center py-2" style="display:none;z-index:10;">
+          <a href="/skus/new" id="btn-create-sku-from-scrape" class="btn btn-primary btn-lg shadow">
+            <i class="ti ti-box me-1"></i>用所选图建档 <span id="sku-selected-count" class="badge bg-white text-primary ms-1">0</span>
+          </a>
+        </div>
+
+        <script>
+        function toggleLinkImages(btn, linkId) {
+          const row = document.querySelector('.image-row-' + linkId);
+          if (!row) return;
+          const icon = btn.querySelector('i');
+          if (row.style.display === 'none') {
+            row.style.display = '';
+            icon.className = 'ti ti-chevron-down';
+          } else {
+            row.style.display = 'none';
+            icon.className = 'ti ti-chevron-right';
+          }
+        }
+        function updateSkuBtn() {
+          const checked = document.querySelectorAll('.img-select:checked');
+          const bar = document.getElementById('sku-create-bar');
+          const link = document.getElementById('btn-create-sku-from-scrape');
+          const cnt = document.getElementById('sku-selected-count');
+          if (checked.length > 0) {
+            const ids = Array.from(checked).map(c => c.value).join(',');
+            link.href = '/skus/new?image_ids=' + ids;
+            cnt.textContent = checked.length;
+            bar.style.display = '';
+          } else {
+            bar.style.display = 'none';
+          }
+        }
+        </script>
         {% else %}
         <div class="text-center py-5 text-muted">
           <div class="h1 mb-2">📸</div>

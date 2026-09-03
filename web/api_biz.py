@@ -67,6 +67,91 @@ class TodoCandidateWrite(BaseModel):
     source: SourceTrace
 
 
+# ---- v0.7 SKU 建档 — Pydantic 请求体（模块级：FastAPI TypeAdapter 正确解析）----
+
+
+class BomRowIn(BaseModel):
+    """BOM 子件行。"""
+
+    child_item_id: int
+    qty: float = 1
+
+
+class ItemRowIn(BaseModel):
+    """单品行（批量建档中的一行）。"""
+
+    name: str
+    kind: str  # physical/combo/custom
+    code: str
+    cost: float | None = None
+    supplier: str | None = None
+    remark: str | None = None
+    bom: list[BomRowIn] | None = None
+    image_file_ids: list[int] | None = None
+
+
+class ItemCreateIn(BaseModel):
+    """建档请求体（§8.1）。"""
+
+    product_name: str | None = None
+    rows: list[ItemRowIn]
+
+
+class ItemPatchIn(BaseModel):
+    """单品 patch 请求体。"""
+
+    code: str | None = None
+    cost: float | None = None
+    supplier: str | None = None
+    name: str | None = None
+    remark: str | None = None
+
+
+class ItemStatusIn(BaseModel):
+    """状态变更请求体。"""
+
+    to: str  # active / delisted
+
+
+class AlbumImagesIn(BaseModel):
+    """关联图片请求体。"""
+
+    image_file_ids: list[int]
+
+
+class ItemImagePatchIn(BaseModel):
+    """图片属性变更请求体。"""
+
+    sort: int | None = None
+    is_main: bool | None = None
+
+
+class UsageIn(BaseModel):
+    """图片店铺使用登记请求体。"""
+
+    shop_id: int
+    note: str | None = None
+
+
+class WarehouseCreateIn(BaseModel):
+    """创建仓库请求体。"""
+
+    name: str
+    remark: str | None = None
+
+
+class LedgerWriteIn(BaseModel):
+    """库存流水写入请求体。"""
+
+    item_id: int
+    warehouse_id: int
+    change_type: str
+    qty: float
+    ref_type: str | None = None
+    ref_id: int | None = None
+    note: str | None = None
+
+
 def create_biz_router(
     *,
     engine: AsyncEngine | None = None,
@@ -974,47 +1059,9 @@ def create_biz_router(
             }
 
     # ==== v0.7 SKU 建档 — catalog 组（§8.1）====
-
-    # ---- Pydantic 请求体 ----
-
-    class BomRowIn(BaseModel):
-        child_item_id: int
-        qty: float = 1
-
-    class ItemRowIn(BaseModel):
-        name: str
-        kind: str  # physical/combo/custom
-        code: str
-        cost: float | None = None
-        supplier: str | None = None
-        remark: str | None = None
-        bom: list[BomRowIn] | None = None
-        image_file_ids: list[int] | None = None
-
-    class ItemCreateIn(BaseModel):
-        product_name: str | None = None
-        rows: list[ItemRowIn]
-
-    class ItemPatchIn(BaseModel):
-        code: str | None = None
-        cost: float | None = None
-        supplier: str | None = None
-        name: str | None = None
-        remark: str | None = None
-
-    class ItemStatusIn(BaseModel):
-        to: str  # active / delisted
-
-    class AlbumImagesIn(BaseModel):
-        image_file_ids: list[int]
-
-    class ItemImagePatchIn(BaseModel):
-        sort: int | None = None
-        is_main: bool | None = None
-
-    class UsageIn(BaseModel):
-        shop_id: int
-        note: str | None = None
+    # Pydantic 请求体已移至模块级（BomRowIn / ItemRowIn / ItemCreateIn /
+    # ItemPatchIn / ItemStatusIn / AlbumImagesIn / ItemImagePatchIn / UsageIn）
+    # ——FastAPI TypeAdapter 对函数内模型 forward reference 解析失败致 422 修复。
 
     # ---- GET /api/biz/catalog/items ----
 
@@ -1305,19 +1352,7 @@ def create_biz_router(
             return await list_usages(session, image_file_id=image_file_id)
 
     # ==== v0.7 SKU 建档 — inventory 组（§8.2）====
-
-    class WarehouseCreateIn(BaseModel):
-        name: str
-        remark: str | None = None
-
-    class LedgerWriteIn(BaseModel):
-        item_id: int
-        warehouse_id: int
-        change_type: str
-        qty: float
-        ref_type: str | None = None
-        ref_id: int | None = None
-        note: str | None = None
+    # Pydantic 请求体已移至模块级（WarehouseCreateIn / LedgerWriteIn）
 
     # ---- GET /api/biz/inventory/warehouses ----
 

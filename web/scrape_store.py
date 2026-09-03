@@ -458,6 +458,36 @@ async def get_links(
         return _rows(result)
 
 
+async def get_images_by_link_ids(link_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+    """按多个 link_record_id 批量取图片（素材库页勾图建档用）。
+
+    返回 {link_id: [image_dict, ...]}，无图的 link_id 不出现在 dict 中。
+    """
+    if not link_ids:
+        return {}
+    placeholders = ", ".join([f":lid_{i}" for i in range(len(link_ids))])
+    params = {f"lid_{i}": lid for i, lid in enumerate(link_ids)}
+    async with get_db_session() as session:
+        result = await session.execute(
+            text(
+                f"""
+                SELECT id, link_record_id, source_mark, local_path,
+                       width, height, watermark, url, created_at
+                FROM scrape.image_file
+                WHERE link_record_id IN ({placeholders})
+                ORDER BY created_at DESC, id ASC
+                """
+            ),
+            params,
+        )
+        rows = _rows(result)
+    by_link: dict[int, list[dict[str, Any]]] = {}
+    for r in rows:
+        lid = r["link_record_id"]
+        by_link.setdefault(lid, []).append(r)
+    return by_link
+
+
 async def count_links(
     source: str | None = None,
     status: str | None = None,
