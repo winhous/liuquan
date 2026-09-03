@@ -416,6 +416,16 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v07.py::test_a81_custom_item_no_stock"
     desc: "custom：建档 kind=custom → 无库存 + 成本可空；custom 挂 BOM 409；custom 无 stock 行"
+  - id: A82
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a82_stock_ledger_transactional"
+    desc: "库存记账+流水（核心）：purchase +100→stock=100+ledger（before 0/after 100）；loss -3→97+ledger；超扣→4xx且无半条流水；combo/custom 记数 409；sale→501"
+  - id: A83
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a83_stock_not_gate_create"
+    desc: "库存不影响建档：无库存行也建档通过（接单采购模式——建档不读库存）"
   - id: A89
     version: v0.7
     status: implemented

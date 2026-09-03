@@ -1,4 +1,4 @@
-"""v0.7 验收断言（详设-v0.7 §10；@version_acceptance）：A76-A81/A89。
+"""v0.7 验收断言（详设-v0.7 §10；@version_acceptance）：A76-A83/A89。
 
 覆盖（对应详设 §10 验收断言表）：
 - A76：表结构——迁移 0013 建 schema catalog 7 表 + 约束（code UNIQUE/格式 CHECK、
@@ -13,6 +13,9 @@
   盒×1）→ 配方可见；child 非 physical → 4xx；BOM 挂 physical 档 → 4xx；
   combo 写库存 → 409
 - A81：custom 建档 → 无库存 + 成本可空；custom 记库存 409；custom 挂 BOM 409
+- A82：库存记账+流水（核心）：purchase +100→stock=100+ledger（before 0/after 100）；
+  loss -3→97+ledger；超扣→4xx且无半条流水；combo/custom 记数 409；sale→501
+- A83：库存不影响建档：无库存行也建档通过（接单采购模式）
 - A89：无图建档成功 + code 用 ERP 风格编号（如 GLCA00001 格式通过）
 
 基建：tm_pg_cluster（conftest 嵌入式 PG，业务库迁移 upgrade head 自动含 0013）。
@@ -681,3 +684,285 @@ async def test_a89_legacy_friendly_create_no_image(biz_engine) -> None:
                 )
             ).scalar_one()
             assert img_count == 0, f"ERP 档案 {code} 应无图"
+
+
+# ==== A82：库存记账 + 流水（核心）（详设 §5.1/§5.2 + §8.4 第 5 条）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a82_stock_ledger_transactional(biz_engine) -> None:
+    """A82：库存记账 + 流水（核心，详设 §5.1/§5.2 + §8.4 第 5 条）。
+
+    - 入库 purchase +100 → stock=100 + ledger（before 0/after 100）
+    - 报损 loss -3 → stock=97 + ledger
+    - 超扣（loss -200）→ 4xx 且无半条流水（事务原子性）
+    - combo 记库存 → 409
+    - custom 记库存 → 409
+    - sale → 501
+    """
+    from web.catalog_service import create_items, CatalogServiceError
+    from web.inventory_service import write_ledger, InventoryServiceError
+    from models.catalog import Stock, StockLedger, Warehouse
+
+    # ---- 准备：建 physical 档案 + 获取仓库 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        phys_ids = await create_items(
+            session,
+            product_name="A82库存测试",
+            rows=[{"name": "A82打火机", "kind": "physical", "code": "A82-PHYS-001"}],
+        )
+        phys_id = phys_ids[0]
+
+    # 获取种子仓库（代发仓）
+    async with AsyncSession(biz_engine) as session:
+        wh = (
+            await session.execute(
+                select(Warehouse).where(Warehouse.enabled == True)  # noqa: E712
+            )
+        ).scalars().first()
+        assert wh is not None, "种子仓库不存在"
+        warehouse_id = wh.id
+
+    # ---- 入库 purchase +100 → stock=100 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        result = await write_ledger(
+            session,
+            item_id=phys_id,
+            warehouse_id=warehouse_id,
+            change_type="purchase",
+            qty=100,
+            note="A82 入库测试",
+        )
+        assert result["before_qty"] == 0.0
+        assert result["after_qty"] == 100.0
+
+    # 验证 stock 行
+    async with AsyncSession(biz_engine) as session:
+        stock = (
+            await session.execute(
+                select(Stock).where(
+                    Stock.item_id == phys_id,
+                    Stock.warehouse_id == warehouse_id,
+                )
+            )
+        ).scalar_one_or_none()
+        assert stock is not None
+        assert float(stock.qty) == 100.0
+
+    # 验证 ledger 行
+    async with AsyncSession(biz_engine) as session:
+        ledger_rows = (
+            await session.execute(
+                select(StockLedger).where(
+                    StockLedger.item_id == phys_id,
+                    StockLedger.warehouse_id == warehouse_id,
+                    StockLedger.change_type == "purchase",
+                )
+            )
+        ).scalars().all()
+        assert len(ledger_rows) == 1
+        assert float(ledger_rows[0].qty_delta) == 100.0
+        assert float(ledger_rows[0].before_qty) == 0.0
+        assert float(ledger_rows[0].after_qty) == 100.0
+        assert ledger_rows[0].note == "A82 入库测试"
+
+    # ---- 报损 loss -3 → stock=97 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        result = await write_ledger(
+            session,
+            item_id=phys_id,
+            warehouse_id=warehouse_id,
+            change_type="loss",
+            qty=3,
+            note="A82 报损测试",
+        )
+        assert result["before_qty"] == 100.0
+        assert result["after_qty"] == 97.0
+
+    # 验证 stock = 97
+    async with AsyncSession(biz_engine) as session:
+        stock = (
+            await session.execute(
+                select(Stock).where(
+                    Stock.item_id == phys_id,
+                    Stock.warehouse_id == warehouse_id,
+                )
+            )
+        ).scalar_one()
+        assert float(stock.qty) == 97.0
+
+    # 验证 loss ledger 行
+    async with AsyncSession(biz_engine) as session:
+        loss_ledger = (
+            await session.execute(
+                select(StockLedger).where(
+                    StockLedger.item_id == phys_id,
+                    StockLedger.change_type == "loss",
+                )
+            )
+        ).scalars().all()
+        assert len(loss_ledger) == 1
+        assert float(loss_ledger[0].qty_delta) == -3.0
+        assert float(loss_ledger[0].before_qty) == 100.0
+        assert float(loss_ledger[0].after_qty) == 97.0
+
+    # ---- 超扣（loss -200）→ 4xx 且无半条流水 ----
+    # 记录当前 ledger 数量
+    async with AsyncSession(biz_engine) as session:
+        ledger_count_before = (
+            await session.execute(
+                select(func.count()).select_from(StockLedger).where(
+                    StockLedger.item_id == phys_id
+                )
+            )
+        ).scalar_one()
+
+    # 超扣应抛异常
+    async with AsyncSession(biz_engine) as session, session.begin():
+        with pytest.raises(InventoryServiceError, match="库存不足"):
+            await write_ledger(
+                session,
+                item_id=phys_id,
+                warehouse_id=warehouse_id,
+                change_type="loss",
+                qty=200,
+            )
+
+    # 验证：stock 未变（仍为 97），ledger 未增（事务回滚）
+    async with AsyncSession(biz_engine) as session:
+        stock = (
+            await session.execute(
+                select(Stock).where(
+                    Stock.item_id == phys_id,
+                    Stock.warehouse_id == warehouse_id,
+                )
+            )
+        ).scalar_one()
+        assert float(stock.qty) == 97.0, "超扣后 stock 应不变"
+
+        ledger_count_after = (
+            await session.execute(
+                select(func.count()).select_from(StockLedger).where(
+                    StockLedger.item_id == phys_id
+                )
+            )
+        ).scalar_one()
+        assert ledger_count_after == ledger_count_before, "超扣不应写入任何流水"
+
+    # ---- combo 记库存 → 409 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        combo_ids = await create_items(
+            session,
+            product_name="A82combo测试",
+            rows=[{
+                "name": "A82combo",
+                "kind": "combo",
+                "code": "A82-COMBO-001",
+                "bom": [{"child_item_id": phys_id, "qty": 1}],
+            }],
+        )
+        combo_id = combo_ids[0]
+
+    async with AsyncSession(biz_engine) as session, session.begin():
+        with pytest.raises(InventoryServiceError, match="只有 physical"):
+            await write_ledger(
+                session,
+                item_id=combo_id,
+                warehouse_id=warehouse_id,
+                change_type="purchase",
+                qty=10,
+            )
+
+    # ---- custom 记库存 → 409 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        custom_ids = await create_items(
+            session,
+            product_name="A82custom测试",
+            rows=[{"name": "A82custom", "kind": "custom", "code": "A82-CUSTOM-001"}],
+        )
+        custom_id = custom_ids[0]
+
+    async with AsyncSession(biz_engine) as session, session.begin():
+        with pytest.raises(InventoryServiceError, match="只有 physical"):
+            await write_ledger(
+                session,
+                item_id=custom_id,
+                warehouse_id=warehouse_id,
+                change_type="purchase",
+                qty=10,
+            )
+
+    # ---- sale → 501 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        with pytest.raises(InventoryServiceError, match="501"):
+            await write_ledger(
+                session,
+                item_id=phys_id,
+                warehouse_id=warehouse_id,
+                change_type="sale",
+                qty=1,
+            )
+
+
+# ==== A83：库存不影响建档（详设 §5.1 接单采购模式）====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a83_stock_not_gate_create(biz_engine) -> None:
+    """A83：库存不影响建档（详设 §5.1 接单采购模式）。
+
+    无库存行也建档通过——建档不读库存。
+    """
+    from web.catalog_service import create_items
+    from models.catalog import Item, Stock
+    from sqlalchemy import select as sel
+
+    # 建档 physical，不写库存
+    async with AsyncSession(biz_engine) as session, session.begin():
+        ids = await create_items(
+            session,
+            product_name="A83无库存建档",
+            rows=[{
+                "name": "A83新品",
+                "kind": "physical",
+                "code": "A83-PHYS-001",
+                "cost": 5.0,
+            }],
+        )
+        item_id = ids[0]
+
+    # 验证建档成功
+    async with AsyncSession(biz_engine) as session:
+        item = await session.get(Item, item_id)
+        assert item is not None
+        assert item.kind == "physical"
+        assert item.status == "active"
+
+        # 验证无 stock 行（建档不创建库存行）
+        stock_count = (
+            await session.execute(
+                sel(func.count()).select_from(Stock).where(Stock.item_id == item_id)
+            )
+        ).scalar_one()
+        assert stock_count == 0, "建档不应自动创建 stock 行"
+
+    # 再建一个 custom（更极端：永远不会有库存）
+    async with AsyncSession(biz_engine) as session, session.begin():
+        ids = await create_items(
+            session,
+            product_name="A83无库存建档",
+            rows=[{
+                "name": "A83定制",
+                "kind": "custom",
+                "code": "A83-CUSTOM-001",
+            }],
+        )
+        custom_id = ids[0]
+
+    async with AsyncSession(biz_engine) as session:
+        item = await session.get(Item, custom_id)
+        assert item is not None
+        assert item.kind == "custom"
+        assert item.status == "active"
