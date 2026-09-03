@@ -385,3 +385,9 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v06.py::test_a75_task_detail_page_renders"
     desc: "独立任务详情页（用户拍板，详设-v0.6 §15.7）：构造 task（tags/source JSONB/多行 detail/ai）+ 关联 task_proposal（evidence）+ task_event 2 条 + task_step → 任务中心行 title 变链接 /tasks/{id} + GET /tasks/{id} 200（完整 title/detail 全文逐行/domain 徽章/状态/tags/source_type + task.source 逐键 + proposal evidence ref_id/quote + 事件时间线中文标签/from 状态 + 步骤与完成守卫提示「有未完成步骤…会被拒绝」）；越界 id → 404"
+  # ---- v0.7 SKU 建档 A76-A89 ----
+  - id: A76
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a76_catalog_schema_tables_and_seed"
+    desc: "表结构：迁移 0013 建 schema catalog 7 表 + 约束（code UNIQUE/格式 CHECK、kind CHECK、stock UNIQUE、ledger 五类 CHECK、item_image/usage UNIQUE）+ sys.shop.platform 列（CHECK + default other）+ 两仓种子"

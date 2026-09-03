@@ -1,15 +1,15 @@
-"""v0.4 业务库 sys schema ORM + 迁移冒烟测试（详设-v0.4 §3/§4；R22 结构同源）。
+"""v0.4 + v0.7 业务库 sys schema ORM + 迁移冒烟测试（详设-v0.4 §3/§4 + v0.7 §3.7；R22 结构同源）。
 
 全部走嵌入式 PG（tests/conftest.py 的 tm_pg_cluster：复用 engine 簇另建 liuquan
-库 + tm/crm/sys schema + alembic upgrade head 真跑（自动含 0006/0007））——测的就是
+库 + tm/crm/sys schema + alembic upgrade head 真跑（自动含 0006/0007/0013））——测的就是
 迁移 DDL 与 models/sys.py ORM 的逐字段同源 + 两表落地 + 约束/索引生效（真 SQL 真事务，不桩）。
 
 覆盖：
 - schema 同源（sys）：settings 表列集合 + CHECK（chk_setting_key_format）
-- schema 同源（sys）：shop 表列集合 + CHECK（chk_shop_name）+ 索引（idx_shop_enabled）
+- schema 同源（sys）：shop 表列集合 + CHECK（chk_shop_name + chk_sys_shop_platform）+ 索引（idx_shop_enabled）
 - 迁移 0007（tm）：tm.task.source_type CHECK 含 'schedule' 值
-- 冒烟（sys）：settings/shop 插入读取往返 + 默认值
-- 反向（sys）：settings 非法键名被拒 / shop 重名被拒 / shop name 长度违规被拒
+- 冒烟（sys）：settings/shop 插入读取往返 + 默认值（含 platform 默认 'other'）
+- 反向（sys）：settings 非法键名被拒 / shop 重名被拒 / shop name 长度违规被拒 / shop platform 非法值被拒
 
 注意（本文件自身在 P2 扫描对象内）：
 - 回环地址与连接串一律运行期拼接（"127." 加 "0.0.1"），任何单一字符串常量
@@ -36,13 +36,13 @@ from models.sys import Setting, Shop
 
 EXPECTED_COLUMNS: dict[str, set[str]] = {
     "settings": {"key", "value", "description", "updated_at"},
-    "shop": {"id", "name", "remark", "enabled", "created_at", "updated_at"},
+    "shop": {"id", "name", "remark", "enabled", "platform", "created_at", "updated_at"},
 }
 
-# settings CHECK：key 正则 = 1；shop CHECK：name 长度 = 1
-EXPECTED_CHECK_COUNTS = {"settings": 1, "shop": 1}
+# settings CHECK：key 正则 = 1；shop CHECK：name 长度 + platform = 2
+EXPECTED_CHECK_COUNTS = {"settings": 1, "shop": 2}
 
-EXPECTED_NAMED_CHECKS = {"chk_setting_key_format", "chk_shop_name"}
+EXPECTED_NAMED_CHECKS = {"chk_setting_key_format", "chk_shop_name", "chk_sys_shop_platform"}
 EXPECTED_INDEXES = {"shop": {"idx_shop_enabled", "shop_pkey", "shop_name_key"}}
 
 
@@ -187,6 +187,7 @@ async def test_shop_insert_read_roundtrip(sys_session) -> None:
     assert shop.name == "测试店铺"
     assert shop.remark == "备注"
     assert shop.enabled is True  # 默认 True
+    assert shop.platform == "other"  # 默认 'other'（v0.7 §3.7）
     assert shop.created_at is not None
     assert shop.updated_at is not None
 
@@ -251,3 +252,28 @@ async def test_shop_name_boundary_100_ok(sys_session) -> None:
     await sys_session.refresh(shop)
     assert shop.id is not None
     assert len(shop.name) == 100
+
+
+@pytest.mark.asyncio
+async def test_shop_platform_invalid_rejected(sys_session) -> None:
+    """shop platform CHECK：非法值被拒（v0.7 §3.7）。"""
+    shop = Shop(name="测试平台店", platform="invalid_platform")
+    sys_session.add(shop)
+    with pytest.raises(IntegrityError):
+        await sys_session.commit()
+    await sys_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_shop_platform_valid_values(sys_session) -> None:
+    """shop platform：四个合法值全部可写（v0.7 §3.7）。"""
+    for plat in ("etsy", "xianyu", "xhs", "other"):
+        shop = Shop(name=f"平台店铺-{plat}", platform=plat)
+        sys_session.add(shop)
+    await sys_session.commit()
+    # 验证四个都成功写入
+    result = await sys_session.execute(
+        text("SELECT platform FROM sys.shop WHERE name LIKE '平台店铺-%' ORDER BY platform")
+    )
+    platforms = {r[0] for r in result.fetchall()}
+    assert platforms == {"etsy", "xianyu", "xhs", "other"}

@@ -37,7 +37,7 @@ def _build_full_manifest(
     overrides: {编号数字: 额外字段 dict}，用于覆盖默认值。
     """
     entries = []
-    for i in range(1, 76):  # A1-A75（批 9 起含 A75）
+    for i in range(1, 77):  # A1-A76（v0.7 批 1 起含 A76）
         aid = f"A{i}"
         if i in overrides:
             ov = overrides[i]
@@ -45,10 +45,17 @@ def _build_full_manifest(
             for k, v in ov.items():
                 fields.append(f"    {k}: {repr(v) if isinstance(v, str) else v}")
             entries.append("\n".join(fields))
-        elif i in (47, 48, 51) or i >= 57:
+        elif i in (47, 48, 51) or 57 <= i <= 75:
             entries.append(
                 f'  - id: {aid}\n'
                 f'    version: {"v0.6" if i >= 57 else "v0.5"}\n'
+                f'    status: planned\n'
+                f'    plan: "后续补"\n    desc: "planned gap"'
+            )
+        elif i == 76:
+            entries.append(
+                f'  - id: {aid}\n'
+                f'    version: v0.7\n'
                 f'    status: planned\n'
                 f'    plan: "后续补"\n    desc: "planned gap"'
             )

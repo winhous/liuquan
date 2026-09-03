@@ -59,15 +59,20 @@ class Setting(TmBase):
 
 
 class Shop(TmBase):
-    """sys.shop：店铺管理（详设-v0.4 §4）。
+    """sys.shop：店铺管理（详设-v0.4 §4 + v0.7 §3.7 platform 列）。
 
     name 唯一（CHECK + 索引）；enabled 启停（禁用不出现在 CRM 下拉）。
     CRM customer.source_shop 存的是店铺名文本，无 FK（R21 精神）。
+    platform 店铺平台（迁移 0013，详设-v0.7 §3.7）：etsy/xianyu/xhs/other。
     """
 
     __tablename__ = "shop"
     __table_args__ = (
         CheckConstraint("length(name) BETWEEN 1 AND 100", name="chk_shop_name"),
+        CheckConstraint(
+            "platform IN ('etsy','xianyu','xhs','other')",
+            name="chk_sys_shop_platform",
+        ),
         Index("idx_shop_enabled", "enabled"),
         {"schema": "sys"},
     )
@@ -80,6 +85,9 @@ class Shop(TmBase):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
+    platform: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'other'")
+    )  # 'etsy','xianyu','xhs','other'（v0.7 §3.7）
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -60,6 +60,8 @@ EXPECTED_IDS: dict[str, str] = {
     "A73": "v0.6",  # 批 8（详设 §15.4）：定时队列在扒图页（设置页去队列块）
     "A74": "v0.6",  # 批 8（详设 §15.4）：netdisk.upload_default 设置键生效
     "A75": "v0.6",  # 批 9（详设 §15.7）：独立任务详情页 GET /tasks/{id}
+    # v0.7 SKU 建档
+    "A76": "v0.7",  # 批 1 数据地基：catalog 7 表结构 + 约束 + 两仓种子 + sys.shop.platform
 }
 
 

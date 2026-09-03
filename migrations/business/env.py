@@ -30,6 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
 from models.tm import TmBase  # noqa: E402  （sys.path 注入后导入）
 from models import crm  # noqa: E402,F401  （注册 crm 四表进 TmBase.metadata，R22 同源）
 from models import scrape  # noqa: E402,F401  （注册 scrape 两表进 TmBase.metadata，R22 同源；v0.6 批 1）
+from models import sys  # noqa: E402,F401  （注册 sys 两表进 TmBase.metadata，R22 同源；v0.7 §3.8 跨 schema FK 前提）
 
 _DB_URL_ENV = "LIUQUAN_TM_DB_URL"
 
