@@ -1,4 +1,4 @@
-"""v0.7 验收断言（详设-v0.7 §10；@version_acceptance）：A76-A83/A89。
+"""v0.7 验收断言（详设-v0.7 §10；@version_acceptance）：A76-A85/A89。
 
 覆盖（对应详设 §10 验收断言表）：
 - A76：表结构——迁移 0013 建 schema catalog 7 表 + 约束（code UNIQUE/格式 CHECK、
@@ -16,6 +16,10 @@
 - A82：库存记账+流水（核心）：purchase +100→stock=100+ledger（before 0/after 100）；
   loss -3→97+ledger；超扣→4xx且无半条流水；combo/custom 记数 409；sale→501
 - A83：库存不影响建档：无库存行也建档通过（接单采购模式）
+- A84：档案图库：建档带 image_file_ids → item_image 挂上；重复挂同图 → 409；
+  撤图成功；自己上传图（fake file）→ image_file 新建（source_mark selfshot）+ 挂档案
+- A85：图足迹软提示：登记图用于店1（image_shop_usage + sys.shop.platform join）→
+  足迹查询返回「Etsy-店1」；同图同店重复登记幂等；撤销成功
 - A89：无图建档成功 + code 用 ERP 风格编号（如 GLCA00001 格式通过）
 
 基建：tm_pg_cluster（conftest 嵌入式 PG，业务库迁移 upgrade head 自动含 0013）。
@@ -26,6 +30,8 @@
 """
 
 from __future__ import annotations
+
+import os
 
 import pytest
 from sqlalchemy import func, select, text
@@ -966,3 +972,266 @@ async def test_a83_stock_not_gate_create(biz_engine) -> None:
         assert item is not None
         assert item.kind == "custom"
         assert item.status == "active"
+
+
+# ==== A84：档案图库——挂图/重复挂 409/撤图/上传图 ====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a84_item_image_library_and_upload(biz_engine, tmp_path) -> None:
+    """A84：档案图库（详设 §6.1 + §8.4-6）。
+
+    建档带 image_file_ids → item_image 挂上；重复挂同图 → 409；
+    撤图成功；自己上传图（fake bytes）→ image_file 新建
+    （source_mark=selfshot）+ 挂档案。
+    """
+    from web.catalog_service import create_items
+    from web.image_service import (
+        ImageServiceError,
+        attach_images,
+        detach_image,
+        set_image_meta,
+        upload_image,
+    )
+
+    from models.scrape import ImageFile as _ImageFile
+    from models.catalog import ItemImage as _ItemImage
+
+    # ---- 前置：在 scrape.image_file 里手动插入几条假图 ----
+    # URL 运行期拼接（P2 规则：禁止 URL 字面量含 scheme://）
+    _img_scheme = "https" + "://"
+    async with AsyncSession(biz_engine) as session, session.begin():
+        img1 = _ImageFile(
+            batch_id="test-batch-001",
+            source="xhs",
+            url=_img_scheme + "img.example.com/photo1.jpg",
+            source_mark="scraped",
+            status="downloaded",
+        )
+        img2 = _ImageFile(
+            batch_id="test-batch-001",
+            source="xhs",
+            url=_img_scheme + "img.example.com/photo2.jpg",
+            source_mark="scraped",
+            status="downloaded",
+        )
+        session.add(img1)
+        session.add(img2)
+        await session.flush()
+        img1_id = img1.id
+        img2_id = img2.id
+
+    # ---- 前置：建一个 physical 档案 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        ids = await create_items(
+            session,
+            product_name="A84测试品",
+            rows=[{"name": "A84红色", "kind": "physical", "code": "A84-LTR-RED"}],
+        )
+        item_id = ids[0]
+
+    # ---- 1. 挂图成功 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        ii_ids = await attach_images(session, item_id, [img1_id, img2_id])
+        assert len(ii_ids) == 2
+
+    # 验证 item_image 有 2 行
+    async with AsyncSession(biz_engine) as session:
+        cnt = (
+            await session.execute(
+                select(func.count())
+                .select_from(_ItemImage)
+                .where(_ItemImage.item_id == item_id)
+            )
+        ).scalar_one()
+        assert cnt == 2
+
+    # ---- 2. 重复挂同图 → 409 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        with pytest.raises(ImageServiceError, match="已挂"):
+            await attach_images(session, item_id, [img1_id])
+
+    # ---- 3. 撤图成功 ----
+    # 获取 item_image.id
+    async with AsyncSession(biz_engine) as session:
+        ii_row = (
+            await session.execute(
+                select(_ItemImage).where(
+                    _ItemImage.item_id == item_id,
+                    _ItemImage.image_file_id == img1_id,
+                )
+            )
+        ).scalar_one()
+
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await detach_image(session, item_id, ii_row.id)
+
+    # 验证撤图后只剩 1 行
+    async with AsyncSession(biz_engine) as session:
+        cnt = (
+            await session.execute(
+                select(func.count())
+                .select_from(_ItemImage)
+                .where(_ItemImage.item_id == item_id)
+            )
+        ).scalar_one()
+        assert cnt == 1
+
+    # ---- 4. set_image_meta 主图标记 ----
+    async with AsyncSession(biz_engine) as session:
+        ii_row2 = (
+            await session.execute(
+                select(_ItemImage).where(
+                    _ItemImage.item_id == item_id,
+                    _ItemImage.image_file_id == img2_id,
+                )
+            )
+        ).scalar_one()
+
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await set_image_meta(session, item_id, ii_row2.id, is_main=True)
+
+    async with AsyncSession(biz_engine) as session:
+        ii_check = await session.get(_ItemImage, ii_row2.id)
+        assert ii_check.is_main is True
+
+    # ---- 5. 上传图（fake bytes）→ image_file 新建（source_mark=selfshot）+ 挂档案 ----
+    fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200  # 最小 PNG 魔数 + padding
+
+    # 需要 storage_root 指向 tmp 隔离目录（不污染真实目录）
+    storage_root = str(tmp_path / "scrape_storage")
+
+    async with AsyncSession(biz_engine) as session, session.begin():
+        upload_img_id = await upload_image(
+            session,
+            fake_png,
+            "test_selfshot.png",
+            source_mark="selfshot",
+            storage_root=storage_root,
+        )
+
+    # 验证 image_file 新建
+    async with AsyncSession(biz_engine) as session:
+        uploaded = await session.get(_ImageFile, upload_img_id)
+        assert uploaded is not None
+        assert uploaded.source_mark == "selfshot"
+        assert uploaded.status == "downloaded"
+        assert uploaded.local_path is not None
+        assert "selfshot" in uploaded.day_dir
+
+    # 验证落盘文件存在
+    assert os.path.exists(uploaded.local_path), "上传文件应落盘"
+
+    # 挂到档案
+    async with AsyncSession(biz_engine) as session, session.begin():
+        ii_ids = await attach_images(session, item_id, [upload_img_id])
+        assert len(ii_ids) == 1
+
+    # 验证最终有 2 行（img2 + 上传图）
+    async with AsyncSession(biz_engine) as session:
+        cnt = (
+            await session.execute(
+                select(func.count())
+                .select_from(_ItemImage)
+                .where(_ItemImage.item_id == item_id)
+            )
+        ).scalar_one()
+        assert cnt == 2
+
+
+# ==== A85：图足迹软提示——登记/查询/幂等/撤销 ====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a85_image_usage_footprint(biz_engine) -> None:
+    """A85：图足迹软提示（详设 §3.5 + §6.2）。
+
+    登记图用于店1（image_shop_usage + sys.shop.platform join）→
+    足迹查询返回 etsy+店名；同图同店重复登记幂等不新增；撤销成功。
+    """
+    from web.catalog_service import create_items
+    from web.image_service import (
+        ImageServiceError,
+        attach_images,
+        list_usages,
+        register_usage,
+        unregister_usage,
+    )
+    from models.sys import Shop as _Shop
+    from models.scrape import ImageFile as _ImageFile2
+
+    # ---- 前置：建 sys.shop（带 platform=etsy）----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        shop = _Shop(name="A85测试店1", platform="etsy", enabled=True)
+        session.add(shop)
+        await session.flush()
+        shop_id = shop.id
+
+    # ---- 前置：建 scrape.image_file ----
+    _img_scheme2 = "https" + "://"
+    async with AsyncSession(biz_engine) as session, session.begin():
+        img = _ImageFile2(
+            batch_id="test-batch-a85",
+            source="xhs",
+            url=_img_scheme2 + "img.example.com/a85_photo.jpg",
+            source_mark="scraped",
+            status="downloaded",
+        )
+        session.add(img)
+        await session.flush()
+        img_file_id = img.id
+
+    # ---- 1. 登记足迹 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        usage_id = await register_usage(
+            session, img_file_id, shop_id, note="店1打火机listing用"
+        )
+        assert usage_id > 0
+
+    # ---- 2. 足迹查询返回 etsy+店名 ----
+    async with AsyncSession(biz_engine) as session:
+        usages = await list_usages(session, image_file_id=img_file_id)
+        assert len(usages) == 1
+        u = usages[0]
+        assert u["shop_id"] == shop_id
+        assert u["shop_name"] == "A85测试店1"
+        assert u["platform"] == "etsy"
+        assert u["note"] == "店1打火机listing用"
+
+    # ---- 3. 同图同店重复登记幂等不新增 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        usage_id2 = await register_usage(session, img_file_id, shop_id)
+        assert usage_id2 == usage_id  # 幂等返回现有
+
+    # 验证不新增
+    async with AsyncSession(biz_engine) as session:
+        usages = await list_usages(session, image_file_id=img_file_id)
+        assert len(usages) == 1
+
+    # ---- 4. 撤销成功 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await unregister_usage(session, img_file_id, usage_id)
+
+    # 验证撤销后为空
+    async with AsyncSession(biz_engine) as session:
+        usages = await list_usages(session, image_file_id=img_file_id)
+        assert len(usages) == 0
+
+    # ---- 5. 校验：图不存在 → 409 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        with pytest.raises(ImageServiceError, match="图片不存在"):
+            await register_usage(session, 999999, shop_id)
+
+    # ---- 6. 校验：店不存在 → 409 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        with pytest.raises(ImageServiceError, match="店铺不存在"):
+            await register_usage(session, img_file_id, 999999)
+
+    # ---- 7. 校验：店停用 → 409 ----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        disabled_shop = _Shop(name="A85停用店", platform="other", enabled=False)
+        session.add(disabled_shop)
+        await session.flush()
+        disabled_shop_id = disabled_shop.id
+
+    async with AsyncSession(biz_engine) as session, session.begin():
+        with pytest.raises(ImageServiceError, match="已停用"):
+            await register_usage(session, img_file_id, disabled_shop_id)

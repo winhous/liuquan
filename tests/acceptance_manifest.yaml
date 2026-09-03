@@ -426,6 +426,16 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v07.py::test_a83_stock_not_gate_create"
     desc: "库存不影响建档：无库存行也建档通过（接单采购模式——建档不读库存）"
+  - id: A84
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a84_item_image_library_and_upload"
+    desc: "档案图库：建档带 image_file_ids → item_image 挂上；重复挂同图 → 409；撤图成功；自己上传图（fake file）→ image_file 新建（source_mark selfshot）+ 挂档案"
+  - id: A85
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a85_image_usage_footprint"
+    desc: "图足迹软提示：登记图用于店1（image_shop_usage + sys.shop.platform join）→ 足迹查询返回「Etsy-店1」；同图同店重复登记幂等；撤销成功"
   - id: A89
     version: v0.7
     status: implemented

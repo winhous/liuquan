@@ -36,8 +36,8 @@ def _build_full_manifest(
 
     overrides: {编号数字: 额外字段 dict}，用于覆盖默认值。
     """
-    # 批 2 已实现的 v0.7 断言集合（A77-A81 + A89）
-    v07_batch2_done = {77, 78, 79, 80, 81, 89}
+    # 批 2/3/4 已实现的 v0.7 断言集合（A77-A85 + A89）
+    v07_done = {77, 78, 79, 80, 81, 82, 83, 84, 85, 89}
     entries = []
     for i in range(1, 90):  # A1-A89（v0.7 批 2 起含 A77-A81/A89）
         aid = f"A{i}"
@@ -54,14 +54,14 @@ def _build_full_manifest(
                 f'    status: planned\n'
                 f'    plan: "后续补"\n    desc: "planned gap"'
             )
-        elif i == 76 or i in v07_batch2_done:
+        elif i == 76 or i in v07_done:
             entries.append(
                 f'  - id: {aid}\n'
                 f'    version: v0.7\n'
                 f'    status: planned\n'
                 f'    plan: "后续补"\n    desc: "planned gap"'
             )
-        elif 82 <= i <= 89 and i not in v07_batch2_done:
+        elif 82 <= i <= 89 and i not in v07_done:
             entries.append(
                 f'  - id: {aid}\n'
                 f'    version: v0.7\n'
