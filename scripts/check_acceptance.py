@@ -27,7 +27,7 @@ except ImportError:
     print("红: pyyaml 未安装（pip install pyyaml）")
     sys.exit(1)
 
-# ---- 硬编码 A1-A75 全集（含版本归属，缺任一 id 即红）----
+# ---- 硬编码 A1-A89 全集（含版本归属，缺任一 id 即红）----
 EXPECTED_IDS: dict[str, str] = {
     # v0.1 引擎地基
     "A1": "v0.1", "A2": "v0.1", "A3": "v0.1", "A4": "v0.1",
@@ -126,7 +126,7 @@ def check_manifest(
         sorted_missing = sorted(missing, key=lambda x: int(x[1:]))
         red.append(
             f"manifest 缺少断言编号: {', '.join(sorted_missing)} "
-            f"（共 {len(missing)} 个，需覆盖 A1-A75 全集）"
+            f"（共 {len(missing)} 个，需覆盖 A1-A89 全集）"
         )
 
     # 逐条检查
