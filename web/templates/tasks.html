@@ -191,7 +191,7 @@
             {% for t in tasks %}
             <tr class="{{ 'table-danger' if t.overdue else '' }}">
               <td class="text-truncate" style="max-width:300px;">
-                <div class="fw-semibold">{{ t.title }}</div>
+                <div class="fw-semibold"><a href="/tasks/{{ t.id }}" class="text-decoration-none" title="查看任务详情 {{ t.display_id }}">{{ t.title }}</a></div>
                 <div class="text-muted small text-truncate">
                   {{ t.display_id }}
                   {% if t.derived_from_label %}

@@ -59,6 +59,18 @@ class _TaskWithRel:
     step_total: int = 0
     step_done: int = 0
 
+
+@dataclass(frozen=True)
+class TaskDetail:
+    """get_task_detail 返回包装（详设-v0.6 §15.7 任务详情页数据组装）：
+    task=None 表示不存在（路由 404）；events 按 created_at DESC；steps 按
+    sort_order；proposal = task_id 回填的最新一条关联提案（决策 12/16）。"""
+
+    task: Task | None = None
+    events: list[TaskEvent] | None = None
+    steps: list[dict] | None = None
+    proposal: TaskProposal | None = None
+
 # 业务库连接串变量名（R20：值只存 .env；本模块经 dotenv_values 读仓库根
 # .env 文件，不触碰 os.environ——P2 规则 4 的合法来源即「.env 文件」）
 _TM_DB_URL_ENV = "LIUQUAN_TM_DB_URL"
@@ -208,6 +220,54 @@ class TMStore:
             )
             for t in rows
         ]
+
+    async def get_task_detail(self, task_id: int) -> TaskDetail:
+        """任务详情页数据组装（详设-v0.6 §15.7）：task 全字段 + task_event
+        时间线（created_at DESC，新→旧）+ task_step（sort_order）+ 关联提案
+        （task_proposal WHERE task_id = task.id 的最新一条——批准时 task_id 回填，
+        决策 12/16 依据强制展示）。task 不存在返回 task=None（路由 404）。"""
+        async with self._maker() as session:
+            task = await session.get(Task, task_id)
+            if task is None:
+                return TaskDetail(task=None, events=[], steps=[], proposal=None)
+            events = (
+                (
+                    await session.execute(
+                        select(TaskEvent)
+                        .where(TaskEvent.task_id == task_id)
+                        .order_by(TaskEvent.created_at.desc(), TaskEvent.id.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            proposal = (
+                await session.execute(
+                    select(TaskProposal)
+                    .where(TaskProposal.task_id == task_id)
+                    .order_by(TaskProposal.created_at.desc(), TaskProposal.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            steps = (
+                (
+                    await session.execute(
+                        select(TaskStep)
+                        .where(TaskStep.task_id == task_id)
+                        .order_by(TaskStep.sort_order.asc(), TaskStep.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return TaskDetail(
+            task=task,
+            events=list(events),
+            steps=[
+                {"id": r.id, "content": r.content, "status": r.status} for r in steps
+            ],
+            proposal=proposal,
+        )
 
     async def count_overdue(self) -> int:
         """逾期任务数（status 非 done/void 且 due < 今天；提醒条计数）。"""

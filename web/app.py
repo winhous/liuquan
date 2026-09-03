@@ -69,6 +69,23 @@ STATUS_LABEL = {
 
 RISK_LABEL = {"read": "只读分析", "suggest": "建议", "write": "写操作"}
 
+# task_event 十二态 -> 中文标签（详设-v0.6 §15.7 流转历史卡时间线展示；
+# 与 models/tm.py TaskEvent CHECK 十二态一一对应，未知值回退原 event_type）
+EVENT_LABELS = {
+    "created": "已创建",
+    "approved": "已批准",
+    "started": "已开始",
+    "completed": "已完成",
+    "voided": "已作废",
+    "blocked": "已阻塞",
+    "unblocked": "已解除阻塞",
+    "derived": "已派生",
+    "updated": "已编辑",
+    "suggested": "AI 建议",
+    "transferred": "已流转",
+    "disagreed": "分歧留痕",
+}
+
 # 来源徽章 = domain（决策 16：任务来源标徽章，一眼可见"这任务是谁提的"）
 # v0.5 §3.1：补 scrape 徽章
 DOMAIN_META: dict[str, dict[str, str]] = {
@@ -299,6 +316,71 @@ def _proposal_view(p: TaskProposal) -> dict[str, Any]:
         "evidence": p.evidence or [],
         "source": p.source or {},
     }
+
+
+def _dt_str(dt: Any) -> str:
+    """datetime -> 'YYYY-MM-DD HH:MM' 展示形（None -> 空串；任务详情页头部/时间线）。"""
+    if dt is None:
+        return ""
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _source_cell(value: Any) -> str:
+    """task.source JSONB 逐键展示的单元格文本：标量原样，dict/list 转 JSON 文本。"""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _event_view(e: TaskEvent) -> dict[str, Any]:
+    """task_event 时间线条目视图（详设-v0.6 §15.7）：中文标签 + from→to 状态 + 备注。
+
+    detail JSONB 预格式化为中文可读文本（updated/suggested/transferred/disagreed
+    事件的结构化详情摘要，模板直接展示；不经模板 tojson 以免非 ASCII 转义）。"""
+    detail_text = ""
+    if isinstance(e.detail, (dict, list)):
+        detail_text = json.dumps(e.detail, ensure_ascii=False)
+    return {
+        "event_type": e.event_type,
+        "label": EVENT_LABELS.get(e.event_type, e.event_type),
+        "from_status": e.from_status,
+        "from_label": STATUS_LABEL.get(e.from_status or "", e.from_status or ""),
+        "to_status": e.to_status,
+        "to_label": STATUS_LABEL.get(e.to_status or "", e.to_status or ""),
+        "actor": e.actor,
+        "note": e.note,
+        "detail_text": detail_text,
+        "created_at": _dt_str(e.created_at),
+    }
+
+
+def _task_detail_view(t: Task) -> dict[str, Any]:
+    """任务详情页视图（详设-v0.6 §15.7 头部）：_task_view 之上补全字段
+    （created_at/updated_at/done_at/source_type 中文），detail 全文透传。"""
+    view = _task_view(t)
+    view.update(
+        {
+            "created_by": t.created_by,
+            "created_at": _dt_str(t.created_at),
+            "updated_at": _dt_str(t.updated_at),
+            "done_at": _dt_str(t.done_at),
+            "source_type_label": "AI 提案批准" if t.source_type == "ai" else "人工创建",
+            "blocked_reason": t.blocked_reason,
+            "result_note": t.result_note,
+        }
+    )
+    return view
+
+
+def _safe_return_to(raw: str) -> str:
+    """POST 后返回地址白名单：只允许站内 /tasks 前缀（详情页操作 303 回详情）。
+    防开放重定向：'//' 开头（协议相对）与站外一律回退任务中心。"""
+    raw = (raw or "").strip()
+    if raw.startswith("/tasks") and not raw.startswith("//"):
+        return raw
+    return "/tasks"
 
 
 def _role_label(request: Request) -> str:
@@ -1109,13 +1191,17 @@ def create_app(
         action: str = Form(...),
         result_note: str = Form(""),
         blocked_reason: str = Form(""),
+        return_to: str = Form(""),
     ):
         """状态操作：started/completed/voided/blocked/unblocked（§3.5.1）。
 
         completed/voided 必填 result_note（决策 17，页面弹窗必填 + DB CHECK
         兜底）；blocked 必填 blocked_reason（决策 11：等物料/等回复）。
+        详情页操作（详设-v0.6 §15.7 批 9 技术定）：可选 return_to 表单参数 →
+        POST 后 303 回详情页（列表页不带该参数，行为不变回 /tasks）。
         """
         store = _store(request)
+        path = _safe_return_to(return_to)
         try:
             await store.transition(
                 task_id,
@@ -1125,8 +1211,8 @@ def create_app(
                 blocked_reason=blocked_reason.strip() or None,
             )
         except TMWebError as exc:
-            return _redirect(err=str(exc))
-        return _redirect(msg=f"{task_display_id(task_id)} {_ACTION_MSG.get(action, action)}")
+            return _redirect(path, err=str(exc))
+        return _redirect(path, msg=f"{task_display_id(task_id)} {_ACTION_MSG.get(action, action)}")
 
     @app.post("/tasks/create")
     async def task_create(
@@ -1191,9 +1277,14 @@ def create_app(
         due: str = Form(...),
         domain: str = Form(...),
         detail: str = Form(""),
+        return_to: str = Form(""),
     ):
-        """编辑任务（§3.5.5）：改 title/role/due/domain/detail，updated 事件带快照。"""
+        """编辑任务（§3.5.5）：改 title/role/due/domain/detail，updated 事件带快照。
+
+        详情页编辑（详设-v0.6 §15.7 批 9 技术定）：可选 return_to → 303 回详情页。
+        """
         store = _store(request)
+        path = _safe_return_to(return_to)
         try:
             task = await store.edit_task(
                 task_id,
@@ -1205,18 +1296,24 @@ def create_app(
                 actor=_role_label(request),
             )
         except (TMWebError, ValueError) as exc:
-            return _redirect(err=str(exc))
-        return _redirect(msg=f"{task_display_id(task_id)} 已更新")
+            return _redirect(path, err=str(exc))
+        return _redirect(path, msg=f"{task_display_id(task_id)} 已更新")
 
     @app.post("/tasks/reopen")
-    async def task_reopen(request: Request, task_id: int = Form(...)):
-        """重开：done/void -> open（改状态 + updated 事件留痕，决策 17 第 4 条）。"""
+    async def task_reopen(
+        request: Request, task_id: int = Form(...), return_to: str = Form("")
+    ):
+        """重开：done/void -> open（改状态 + updated 事件留痕，决策 17 第 4 条）。
+
+        详情页重开（详设-v0.6 §15.7 批 9 技术定）：可选 return_to → 303 回详情页。
+        """
         store = _store(request)
+        path = _safe_return_to(return_to)
         try:
             await store.reopen_task(task_id, actor=_role_label(request))
         except TMWebError as exc:
-            return _redirect(err=str(exc))
-        return _redirect(msg=f"{task_display_id(task_id)} 已重开回待处理")
+            return _redirect(path, err=str(exc))
+        return _redirect(path, msg=f"{task_display_id(task_id)} 已重开回待处理")
 
     @app.post("/tasks/proposals/approve")
     async def proposal_approve(request: Request, proposal_id: int = Form(...)):
@@ -1291,6 +1388,53 @@ def create_app(
             return JSONResponse({"status": "error", "detail": str(exc)})
         terminal = data.get("status") in ("done", "failed", "error")
         return JSONResponse({**data, "terminal": terminal})
+
+    # ---- 任务详情页（详设-v0.6 §15.7 批 9，用户拍板：独立任务详情页）----
+    # 注意：注册须在 GET /tasks/engine/{engine_task_id} 之后（/tasks/engine 是非 int
+    # 路径段，先注册会先匹配，路由内 int 校验失败返回 422 遮蔽后续路由）。
+
+    @app.get("/tasks/{task_id}")
+    async def task_detail_page(request: Request, task_id: int):
+        """独立任务详情页 GET /tasks/{id}：完整 title + detail 全文 + 头部字段 +
+        来源与依据（task.source 逐键 + 关联提案 evidence）+ 流转历史（task_event
+        时间线）+ 步骤清单 + 完成/作废/编辑/开始等入口（操作 = 简单表单 POST +
+        303 回详情，批 9 技术定）。越界/不存在 id → 404。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)  # A16 口径
+        store = _store(request)
+        detail = await store.get_task_detail(task_id)
+        if detail.task is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="任务不存在")
+        task = detail.task
+        open_steps = sum(1 for s in detail.steps if s["status"] == "open")
+        return templates.TemplateResponse(
+            request,
+            "tasks_detail.html",
+            _ctx(
+                request,
+                "tm",
+                task=_task_detail_view(task),
+                source_rows=[
+                    {"key": k, "value": _source_cell(v)}
+                    for k, v in (task.source or {}).items()
+                ],
+                events=[_event_view(e) for e in detail.events],
+                steps=detail.steps,
+                open_steps=open_steps,
+                proposal=_proposal_view(detail.proposal) if detail.proposal else None,
+                status_options=list(STATUS_LABEL.items()),
+                role_values=ROLE_VALUES,
+                domain_options=[
+                    (key, meta["label"])
+                    for key, meta in DOMAIN_META.items()
+                    if key != "demo"  # 编辑表单的来源域选项（决策 16）
+                ],
+                msg=request.query_params.get("msg", ""),
+                err=request.query_params.get("err", ""),
+            ),
+        )
 
 
     # ---- CRM（v0.3，决策 19/22/23/24；活档案 + 异步链）----

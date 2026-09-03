@@ -1,4 +1,4 @@
-"""v0.6 验收断言（详设-v0.6 §10 + §15.4；@version_acceptance）：A57-A74 + B5 收口四断言 + 批 1-8 辅助单测。
+"""v0.6 验收断言（详设-v0.6 §10 + §15.4 + §15.7；@version_acceptance）：A57-A75 + B5 收口四断言 + 批 1-9 辅助单测。
 
 覆盖（对应详设 §10 验收断言表 + §12 批 1-5 + §15 批 6-8）：
 - A61 图来源标记 + SKU×店铺留位（迁移 0011 结构断言）+ 批 6 迁移 0012 netdisk
@@ -25,6 +25,9 @@
 - A73/A74（批 8，详设 §15.3/§15.4）：定时队列管理在扒图页（/scrape 含队列块 +
   /settings/scrape 无队列块）/ 设置键 netdisk.upload_default 生效（改 false →
   设置键 + engine-params + 扒图页复选框初始值 + 引擎定时 input upload_netdisk=false）
+- A75（批 9，详设 §15.7）：独立任务详情页 GET /tasks/{id}（完整 title/detail 全文/
+  tags/domain 徽章/source_type + task.source 逐键 + 关联提案 evidence + 事件时间线 +
+  步骤与完成守卫提示；越界 404；列表行 title 变链接入口）
 - B5 收口四断言（批 5，planned → implemented）：
   A29 候选忽略 dismissed 不建任务不飞书（行为断言）/
   A47 贴链接 → image_file 落库 + 提案审核真实链路（下载链 + suggest 链组合）/
@@ -3446,6 +3449,163 @@ async def test_a74_netdisk_upload_default_setting(biz_engine) -> None:
         )
     finally:
         _ENGINE_INPUT_DEFAULTS["netdisk.upload_default"] = prev  # 恢复模块快照（同进程防污染）
+
+
+# =====================================================================
+# 批 9（详设-v0.6 §15.7，用户拍板）：A75 独立任务详情页 GET /tasks/{id}
+# =====================================================================
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a75_task_detail_page_renders(biz_engine) -> None:
+    """A75：独立任务详情页（用户拍板，详设-v0.6 §15.7）——构造 task（tags +
+    source JSONB + 多行 detail + ai source_type）+ 关联 task_proposal（approved +
+    task_id 回填 + evidence）+ task_event 2 条 + task_step 1 条 →
+    ①任务中心行 title 变链接 /tasks/{id}（详情入口）②GET /tasks/{id} 200 +
+    完整 title + detail 全文（多行原文逐行在页面）+ domain 徽章 + tags +
+    source_type + 来源与依据（task.source 逐键 + proposal evidence ref_id/quote 可见）
+    + 事件时间线（中文标签/from 状态）可见 + 步骤（content + 待完成徽章 + 完成守卫
+    提示）③越界 id → 404。页面渲染照 test_a48/_web_app + 引擎桩模式（零引擎依赖）。"""
+    import json as _json
+    import re as _re
+    from datetime import date as _date
+
+    detail_text = (
+        "卖点：永生花花束 手工定制、花期 1-2 年\n"
+        "目标市场：婚礼花艺 / 家居摆件 / 伴手礼\n"
+        "关键词：永生花,定制花束,婚礼装饰"
+    )
+    # ---- ① 构造 task + 事件 + 步骤 + 关联提案（照批准流落库形态）----
+    async with AsyncSession(biz_engine) as session, session.begin():
+        task_id = (
+            await session.execute(
+                text(
+                    "INSERT INTO tm.task (title, detail, domain, role, due, status, "
+                    "source_type, source, created_by, tags) "
+                    "VALUES (:title, :detail, :domain, :role, :due, 'in_progress', 'ai', "
+                    "CAST(:source AS jsonb), :created_by, CAST(:tags AS jsonb)) "
+                    "RETURNING id"
+                ),
+                {
+                    "title": "选品建议：永生花花束",
+                    "detail": detail_text,
+                    "domain": "scrape",
+                    "role": "运营",
+                    "due": _date.today(),
+                    "source": _json.dumps(
+                        {
+                            "chain_id": "scrape_suggest_chain",
+                            "engine_task_id": "e-a75-001",
+                            "worker_id": "product_suggestion",
+                            "audit_ids": ["audit-a75-1"],
+                        }
+                    ),
+                    "created_by": "管理员",
+                    "tags": _json.dumps(["采购", "报价"]),
+                },
+            )
+        ).scalar_one()
+        # 事件时间线（created + started，from→to 记录）
+        await session.execute(
+            text(
+                "INSERT INTO tm.task_event (task_id, event_type, from_status, to_status, actor) "
+                "VALUES (:tid, 'created', NULL, NULL, '运营'), "
+                "(:tid, 'started', 'open', 'in_progress', '运营')"
+            ),
+            {"tid": task_id},
+        )
+        # 步骤 1 条（open，未全勾 → 完成守卫提示）
+        await session.execute(
+            text(
+                "INSERT INTO tm.task_step (task_id, content, status, sort_order) "
+                "VALUES (:tid, '确认花材供应商报价', 'open', 1)"
+            ),
+            {"tid": task_id},
+        )
+        # 关联提案（approved + task_id 回填——决策 16 依据强制展示）
+        await session.execute(
+            text(
+                "INSERT INTO tm.task_proposal (title, detail, domain, action_id, risk, "
+                "suggested_role, suggested_due_days, evidence, source, status, "
+                "reviewed_by, reviewed_at, task_id) "
+                "VALUES (:title, :detail, :domain, 'scrape.suggest', 'suggest', '运营', 3, "
+                "CAST(:evidence AS jsonb), CAST(:source AS jsonb), 'approved', '管理员', "
+                "now(), :task_id)"
+            ),
+            {
+                "title": "选品建议：永生花花束",
+                "detail": "卖点：花艺定制；目标市场：婚礼花艺",
+                "domain": "scrape",
+                "evidence": _json.dumps(
+                    [
+                        {
+                            "kind": "image",
+                            "ref_id": "a75-img-1",
+                            "quote": "永生花束实拍图（主图）",
+                        }
+                    ]
+                ),
+                "source": _json.dumps(
+                    {
+                        "chain_id": "scrape_suggest_chain",
+                        "engine_task_id": "e-a75-001",
+                        "worker_id": "product_suggestion",
+                        "audit_ids": ["audit-a75-1"],
+                    }
+                ),
+                "task_id": task_id,
+            },
+        )
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+
+    # ---- ② 任务中心行 title 变链接（详情入口）----
+    listing = client.get("/tasks")
+    assert listing.status_code == 200, f"/tasks -> {listing.status_code}"
+    assert f'href="/tasks/{task_id}"' in listing.text, (
+        "任务中心行 title 应变链接 → /tasks/{id}（详情入口）"
+    )
+
+    # ---- ③ 详情页渲染：完整 title + detail 全文 + 徽章 + 依据 + 时间线 + 步骤 ----
+    resp = client.get(f"/tasks/{task_id}")
+    assert resp.status_code == 200, f"GET /tasks/{task_id} -> {resp.status_code}"
+    page = resp.text
+    for needle in ("任务详情", "来源与依据", "流转历史", "任务步骤"):
+        assert needle in page, f"详情页应含区块标题：{needle}"
+    assert "选品建议：永生花花束" in page, "详情页应含完整 title"
+    for line in detail_text.splitlines():
+        assert line in page, f"detail 全文应逐行完整可见（pre-wrap）：{line!r}"
+    assert _re.search(r'class="badge bg-orange[^"]*">扒图<', page) is not None, (
+        "详情页应渲染 domain 来源徽章「扒图」（bg-orange）"
+    )
+    assert "进行中" in page, "详情页应渲染状态徽章（in_progress=进行中）"
+    assert _date.today().isoformat() in page, "详情页应展示截止日期"
+    assert "AI 提案" in page, "详情页应展示 source_type 中文（ai=AI 提案）"
+    for tag in ("采购", "报价"):
+        assert f">{tag}<" in page, f"tags 应可见：{tag}"
+    # 来源与依据：task.source 逐键可见 + 关联提案 evidence（决策 16）
+    assert "chain_id" in page and "scrape_suggest_chain" in page, "task.source chain_id 应可见"
+    assert "engine_task_id" in page and "e-a75-001" in page, "task.source engine_task_id 应可见"
+    assert "audit_ids" in page and "audit-a75-1" in page, "task.source audit_ids 应可见"
+    assert "a75-img-1" in page, "关联提案 evidence ref_id 应可见"
+    assert "永生花束实拍图（主图）" in page, "关联提案 evidence quote 应可见"
+    # 事件时间线（中文标签 + from 状态中文）
+    assert "已创建" in page, "事件时间线应含 created 中文标签「已创建」"
+    assert "已开始" in page, "事件时间线应含 started 中文标签「已开始」"
+    assert "待处理" in page, "事件时间线应展示 from 状态中文（open=待处理）"
+    # 步骤卡 + 完成守卫提示（未全勾，决策 31）
+    assert "确认花材供应商报价" in page, "步骤卡应展示步骤 content"
+    assert "待完成" in page, "open 步骤应渲染「待完成」状态徽章"
+    assert "有未完成步骤" in page and "会被拒绝" in page, (
+        "有未完成步骤时应展示完成守卫提示（决策 31）"
+    )
+
+    # ---- ④ 越界/不存在 id → 404 ----
+    resp404 = client.get("/tasks/999999999")
+    assert resp404.status_code == 404, f"越界 id 应 404，实际 {resp404.status_code}"
 
 
 # ==== 复核反馈修复回归（2026-09-03）：缩略图 500（str→BIGINT）+ 打开本地文件夹 ====

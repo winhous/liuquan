@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %}任务详情 · 刘全{% endblock %}
+{% block content_title %}任务详情{% endblock %}
+{% block content %}
+
+<!-- 消息/错误提示（PRG 后 query 参数） -->
+{% if msg %}
+<div class="alert alert-success alert-dismissible" role="alert">
+  <i class="ti ti-circle-check me-1"></i>{{ msg }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+{% if err %}
+<div class="alert alert-danger alert-dismissible" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+
+<!-- 头部：返回 + 完整 title + 状态/来源徽章 + 基本字段（详设-v0.6 §15.7） -->
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+      <div>
+        <a href="/tasks" class="btn btn-sm btn-outline-secondary mb-2"><i class="ti ti-arrow-left me-1"></i>返回任务中心</a>
+        <h2 class="mb-1">
+          {{ task.title }}
+          <span class="badge status-{{ task.status }} ms-1">{{ task.status_label }}</span>
+          <span class="badge {{ task.domain_meta.cls }} ms-1">{{ task.domain_meta.label }}</span>
+          {% if task.source_type == 'ai' %}<span class="badge bg-info-subtle ms-1" title="本任务由 AI 提案批准生成">AI 提案</span>
+          {% else %}<span class="badge bg-secondary ms-1">人工创建</span>{% endif %}
+        </h2>
+        <div class="text-muted">
+          {{ task.display_id }} · 负责人 <strong>{{ task.role }}</strong>
+          · 截止 {{ task.due_label }}{% if task.overdue %} <span class="text-danger fw-bold">⚠ 逾期</span>{% endif %}
+          · 创建人 {{ task.created_by }}
+          {% if task.created_at %}· 创建 {{ task.created_at }}{% endif %}
+          {% if task.updated_at %}· 更新 {{ task.updated_at }}{% endif %}
+          {% if task.done_at %}· 结束 {{ task.done_at }}{% endif %}
+        </div>
+        {% if task.tags %}
+        <div class="mt-2">
+          {% for tag in task.tags %}<span class="badge bg-cyan-lt me-1">{{ tag }}</span>{% endfor %}
+        </div>
+        {% endif %}
+        {% if task.blocked_reason %}
+        <div class="mt-2 small text-danger">阻塞原因：{{ task.blocked_reason }}</div>
+        {% endif %}
+        {% if task.result_note %}
+        <div class="mt-2"><span class="text-muted small">回复（{{ '已完成' if task.status == 'done' else '已作废' }}）：</span><span class="small">{{ task.result_note }}</span></div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 操作区（批 9 技术定：简单表单 POST + 303 回详情；派生/步骤/下一步回任务中心） -->
+    <div class="d-flex gap-2 flex-wrap align-items-center mt-3 pt-3 border-top">
+      {% if task.status == 'open' %}
+      <form method="post" action="/tasks/status" class="d-inline">
+        <input type="hidden" name="task_id" value="{{ task.id }}">
+        <input type="hidden" name="action" value="started">
+        <input type="hidden" name="return_to" value="/tasks/{{ task.id }}">
+        <button type="submit" class="btn btn-sm btn-outline-primary">开始任务</button>
+      </form>
+      {% endif %}
+      {% if task.status == 'in_progress' %}
+      <form method="post" action="/tasks/status" class="d-flex flex-wrap align-items-center gap-2">
+        <input type="hidden" name="task_id" value="{{ task.id }}">
+        <input type="hidden" name="return_to" value="/tasks/{{ task.id }}">
+        <select name="action" class="form-select form-select-sm w-auto" aria-label="结束方式">
+          <option value="completed">完成任务</option>
+          <option value="voided">作废任务</option>
+        </select>
+        <input type="text" name="result_note" class="form-control form-control-sm w-auto" style="min-width:260px;"
+               required maxlength="500" placeholder="必填回复（不回复不能结束，决策 17）">
+        <button type="submit" class="btn btn-sm btn-primary">提交结束</button>
+      </form>
+      {% endif %}
+      {% if task.status == 'blocked' %}
+      <form method="post" action="/tasks/status" class="d-inline">
+        <input type="hidden" name="task_id" value="{{ task.id }}">
+        <input type="hidden" name="action" value="unblocked">
+        <input type="hidden" name="return_to" value="/tasks/{{ task.id }}">
+        <button type="submit" class="btn btn-sm btn-outline-success">解除阻塞</button>
+      </form>
+      {% endif %}
+      {% if task.status in ('done', 'void') %}
+      <form method="post" action="/tasks/reopen" class="d-inline">
+        <input type="hidden" name="task_id" value="{{ task.id }}">
+        <input type="hidden" name="return_to" value="/tasks/{{ task.id }}">
+        <button type="submit" class="btn btn-sm btn-warning">重开任务</button>
+      </form>
+      {% endif %}
+      {% if task.status not in ('done', 'void') %}
+      <a class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" href="#detail-edit-form" role="button" aria-expanded="false">编辑</a>
+      {% endif %}
+      <a href="/tasks" class="btn btn-sm btn-outline-secondary ms-auto"><i class="ti ti-list me-1"></i>回任务中心处理（派生/步骤/下一步）</a>
+    </div>
+
+    <!-- 编辑（批 9 技术定：页面内嵌简单表单，POST /tasks/edit + return_to；非 modal） -->
+    {% if task.status not in ('done', 'void') %}
+    <div class="collapse mt-3" id="detail-edit-form">
+      <div class="border rounded p-3">
+        <form method="post" action="/tasks/edit">
+          <input type="hidden" name="task_id" value="{{ task.id }}">
+          <input type="hidden" name="return_to" value="/tasks/{{ task.id }}">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label">标题<span class="text-danger">*</span></label>
+              <input type="text" name="title" class="form-control" required maxlength="80" value="{{ task.title }}">
+            </div>
+            <div class="col-4">
+              <label class="form-label">负责人<span class="text-danger">*</span></label>
+              <select name="role" class="form-select">
+                {% for r in role_values %}<option value="{{ r }}" {{ 'selected' if task.role == r }}>{{ r }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-4">
+              <label class="form-label">截止<span class="text-danger">*</span></label>
+              <input type="date" name="due" class="form-control" required value="{{ task.due_label }}">
+            </div>
+            <div class="col-4">
+              <label class="form-label">来源域<span class="text-danger">*</span></label>
+              <select name="domain" class="form-select">
+                {% for dk, dl in domain_options %}<option value="{{ dk }}" {{ 'selected' if task.domain == dk }}>{{ dl }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">详情</label>
+              <textarea name="detail" class="form-control" rows="5">{{ task.detail }}</textarea>
+            </div>
+            <div class="col-12">
+              <button type="submit" class="btn btn-sm btn-primary">保存</button>
+              <span class="text-muted small ms-2">编辑会写 updated 事件（from/to 快照留痕）</span>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 内容卡：detail 全文（pre-wrap——选品建议卖点/目标市场/关键词多行在此完整可见） -->
+<div class="card mt-3">
+  <div class="card-header">
+    <h3 class="card-title"><i class="ti ti-file-text me-1"></i>任务内容</h3>
+  </div>
+  <div class="card-body">
+    {% if task.detail %}
+    <div style="white-space: pre-wrap;" class="mb-0">{{ task.detail }}</div>
+    {% else %}
+    <div class="text-muted">（本任务无详细内容）</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-3 mt-0 align-items-stretch">
+  <!-- 来源与依据：task.source JSONB 逐键 + 关联提案依据（决策 16 强制展示） -->
+  <div class="col-lg-7 d-flex">
+    <div class="card w-100">
+      <div class="card-header">
+        <h3 class="card-title"><i class="ti ti-shield-check me-1"></i>来源与依据</h3>
+      </div>
+      <div class="card-body">
+        <div class="small text-muted fw-bold mb-1">来源追溯（task.source，AI 任务带引擎任务/链/工序/审计追溯）</div>
+        {% if source_rows %}
+        <table class="table table-sm table-vcenter mb-3">
+          <tbody>
+            {% for r in source_rows %}
+            <tr>
+              <th class="w-25 text-muted fw-normal">{{ r.key }}</th>
+              <td style="word-break: break-all;">{{ r.value }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="text-muted small mb-3">（无来源追溯结构）</div>
+        {% endif %}
+
+        {% if proposal %}
+        <!-- 关联提案（批准该任务的 tm.task_proposal，决策 12/16：依据强制展示） -->
+        <div class="small text-muted fw-bold mb-1">关联 AI 提案（{{ proposal.display_id }}，批准时依据）</div>
+        <div class="fw-bold mb-1">{{ proposal.title }}</div>
+        <div style="white-space: pre-wrap;" class="small mb-2">{{ proposal.detail }}</div>
+        <div class="small text-muted mb-1">
+          来源：{{ proposal.source.chain_id }} · 引擎任务 {{ proposal.source.engine_task_id }}
+          {% if proposal.source.worker_id %} · 工序 {{ proposal.source.worker_id }}{% endif %}
+          · 建议 {{ proposal.suggested_role }} / {% if proposal.suggested_due_days is not none %}{{ proposal.suggested_due_days }} 天内{% else %}未建议截止{% endif %}
+        </div>
+        <div class="small text-muted fw-bold mb-1"><i class="ti ti-shield-check me-1"></i>依据（AI 只能引用链喂给它的数据，机器校验拒幻觉）</div>
+        {% for e in proposal.evidence %}
+        <div class="small border-start border-2 border-warning ps-2 mb-1">
+          <span class="badge bg-secondary">{{ e.kind }}</span> <code>{{ e.ref_id }}</code>
+          <div class="text-muted">“{{ e.quote }}”</div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="text-muted small">（本任务无关联 AI 提案——人工创建任务无提案依据）</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 流转历史：task_event 时间线（created_at DESC） -->
+  <div class="col-lg-5 d-flex">
+    <div class="card w-100">
+      <div class="card-header">
+        <h3 class="card-title"><i class="ti ti-history me-1"></i>流转历史</h3>
+      </div>
+      <div class="card-body" style="max-height:480px;overflow-y:auto;">
+        {% if events %}
+        {% for e in events %}
+        <div class="d-flex flex-column border-bottom py-2">
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary">{{ e.label }}</span>
+            {% if e.from_status or e.to_status %}
+            <span class="small text-muted">
+              {% if e.from_status %}{{ e.from_label }}{% else %}—{% endif %}
+              <i class="ti ti-arrow-right mx-1"></i>
+              {% if e.to_status %}{{ e.to_label }}{% else %}—{% endif %}
+            </span>
+            {% endif %}
+            <span class="small text-muted ms-auto">{{ e.created_at }}</span>
+          </div>
+          {% if e.actor %}<div class="small text-muted mt-1">操作者：{{ e.actor }}</div>{% endif %}
+          {% if e.note %}<div class="small mt-1">{{ e.note }}</div>{% endif %}
+          {% if e.detail_text %}<div class="small text-muted mt-1" style="word-break: break-all;">{{ e.detail_text }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="text-muted small">（暂无流转记录）</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 步骤卡：任务步骤清单（只读展示，勾选回任务中心；完成守卫提示照决策 31） -->
+<div class="card mt-3">
+  <div class="card-header">
+    <h3 class="card-title"><i class="ti ti-checkbox me-1"></i>任务步骤</h3>
+    <div class="card-actions">
+      <a href="/tasks" class="btn btn-sm btn-outline-secondary"><i class="ti ti-edit me-1"></i>勾选/管理步骤回任务中心</a>
+    </div>
+  </div>
+  <div class="card-body">
+    {% if open_steps > 0 %}
+    <div class="alert alert-warning py-2"><i class="ti ti-alert-triangle me-1"></i>有未完成步骤：全部步骤勾完才能完成任务——未勾完时「完成」会被拒绝（决策 31）</div>
+    {% elif steps %}
+    <div class="alert alert-success py-2"><i class="ti ti-circle-check me-1"></i>步骤已全部完成，可结束任务</div>
+    {% endif %}
+    {% if steps %}
+    <div class="table-responsive">
+      <table class="table table-sm table-vcenter card-table">
+        <tbody>
+          {% for s in steps %}
+          <tr>
+            <td class="w-100">{{ s.content }}</td>
+            <td class="text-end">
+              <span class="badge {{ 'status-open' if s.status == 'open' else 'status-done' }}">
+                {% if s.status == 'open' %}待完成{% else %}已完成{% endif %}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-muted small">（本任务无步骤——添加步骤后，全部完成才能结束任务）</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
