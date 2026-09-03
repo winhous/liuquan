@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}库存管理 · SKU 建档 · 刘全{% endblock %}
+{% block content_title %}库存管理{% endblock %}
+{% block content %}
+
+{% if msg %}
+<div class="alert alert-success alert-dismissible" role="alert">
+  <i class="ti ti-check me-1"></i>{{ msg }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+{% if err %}
+<div class="alert alert-danger alert-dismissible" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<!-- 搜索 -->
+<form method="get" action="/skus/stock" class="row g-2 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label mb-1">搜索</label>
+    <input name="keyword" class="form-control form-control-sm" value="{{ keyword or '' }}" placeholder="编号/档名/商品名">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-sm btn-outline-primary">筛选</button>
+  </div>
+</form>
+
+<div class="card mb-3">
+  <div class="card-header">
+    <h5 class="card-title mb-0"><i class="ti ti-package me-1"></i>实物档案（{{ items | length }} 条）</h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-vcenter table-hover mb-0">
+        <thead>
+          <tr>
+            <th>编号</th>
+            <th>商品名</th>
+            <th>档名</th>
+            <th>规格摘要</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr>
+            <td><code>{{ item.code }}</code></td>
+            <td>{{ item.product_name or "—" }}</td>
+            <td>{{ item.name }}</td>
+            <td>
+              {% set specs = item.specs or {} %}
+              {% if specs %}
+                {% set keys = specs.keys() | list %}
+                {% for k in keys[:3] %}
+                  {{ k }}:{{ specs[k] }}{{ " / " if not loop.last }}
+                {% endfor %}
+                {% if keys | length > 3 %}…{% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
+              {% if item.status == 'active' %}
+              <span class="badge bg-green-lt">在售</span>
+              {% else %}
+              <span class="badge bg-secondary-lt">下架</span>
+              {% endif %}
+            </td>
+            <td>
+              <a href="/skus/{{ item.id }}/inventory" class="btn btn-sm btn-outline-primary">记账</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if not items %}
+<div class="empty">
+  <p class="empty-title">暂无实物档案</p>
+  <p class="empty-subtitle text-muted">请先在 <a href="/skus">货品建档</a> 中创建实物档案</p>
+</div>
+{% endif %}
+{% endblock %}

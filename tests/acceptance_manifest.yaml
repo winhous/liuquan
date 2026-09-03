@@ -466,3 +466,23 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v07.py::test_a91_specs_and_migration"
     desc: "迁移 0014：真 SQL 断言 catalog.item 有 product_code/specs 列（specs default '{}'）；建档写 specs 读出一致；specs 超 10 键/键空/值超长 → 4xx；patch specs 全量替换成功"
+  - id: A92
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a92_edit_functionality"
+    desc: "编辑功能：POST /skus/{id}/edit 改档名/成本/采购源/商品名/规格成功→详情页可见；编号改重→err回表单；kind不可改；delisted combo改配方成功；active combo配方提交被拒"
+  - id: A93
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a93_no_stock_on_catalog_pages"
+    desc: "建档页去库存：GET /skus 与 /skus/{id} DOM 不含库存摘要/管理库存；GET /skus/stock 200 含记账入口 /inventory"
+  - id: A94
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a94_gallery_browser"
+    desc: "图库文件夹浏览器：/gallery/folders 200（folder_type）；search?q 命中；multipart 上传→200 {id}；new.html DOM 含上传/搜索框/文件夹容器"
+  - id: A95
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a95_navigation"
+    desc: "导航重构：MODULES 无顶级 skus；erp children 含 erp-skus/erp-stock-manage/erp-replenish/erp-alert/erp-stock（名含生产库存）；/skus 与 /skus/stock 均 200"

@@ -37,10 +37,10 @@ def _build_full_manifest(
     overrides: {编号数字: 额外字段 dict}，用于覆盖默认值。
     A90/A91 = v0.7 复核修订批 1 新增（编号自动生成 / specs+迁移 0014）。
     """
-    # 批 2/3/4 已实现的 v0.7 断言集合（A77-A85 + A89）
-    v07_done = {77, 78, 79, 80, 81, 82, 83, 84, 85, 89}
+    # 批 2/3/4 已实现的 v0.7 断言集合（A77-A85 + A89 + A90-A95 批 1/2 修订）
+    v07_done = {77, 78, 79, 80, 81, 82, 83, 84, 85, 89, 90, 91, 92, 93, 94, 95}
     entries = []
-    for i in range(1, 92):  # A1-A91（A77-A81/A89 批 2 起；A90/A91 批 1 修订）
+    for i in range(1, 96):  # A1-A95（A92-A95 批 2 页面层）
         aid = f"A{i}"
         if i in overrides:
             ov = overrides[i]
@@ -62,7 +62,7 @@ def _build_full_manifest(
                 f'    status: planned\n'
                 f'    plan: "后续补"\n    desc: "planned gap"'
             )
-        elif 82 <= i <= 89 and i not in v07_done:
+        elif 82 <= i <= 95 and i not in v07_done:
             entries.append(
                 f'  - id: {aid}\n'
                 f'    version: v0.7\n'

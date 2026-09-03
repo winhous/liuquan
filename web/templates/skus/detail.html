@@ -70,7 +70,7 @@
               hx-post="/skus/{{ item.id }}/delete" hx-confirm="确认删除「{{ item.name }}」？仅在无下游引用时可删。">
           <button class="btn btn-danger btn-sm"><i class="ti ti-trash me-1"></i>删除</button>
         </form>
-        <a href="/skus/{{ item.id }}/inventory" class="btn btn-outline-primary btn-sm"><i class="ti ti-package me-1"></i>库存</a>
+        <a href="/skus/{{ item.id }}/edit" class="btn btn-outline-primary btn-sm"><i class="ti ti-edit me-1"></i>编辑档案</a>
       </div>
     </div>
   </div>
@@ -133,29 +133,7 @@
       </div>
     </div>
 
-    <!-- 库存摘要 -->
-    {% if item.kind == 'physical' %}
-    <div class="card mt-3">
-      <div class="card-header d-flex justify-content-between">
-        <h3 class="card-title mb-0"><i class="ti ti-package me-1"></i>库存</h3>
-        <a href="/skus/{{ item.id }}/inventory" class="btn btn-sm btn-outline-primary">管理库存</a>
-      </div>
-      <div class="card-body">
-        {% if item.stocks %}
-        <table class="table table-sm mb-0">
-          <thead><tr><th>仓库</th><th>数量</th></tr></thead>
-          <tbody>
-            {% for s in item.stocks %}
-            <tr><td>{{ s.warehouse_name }}</td><td>{{ s.qty }}</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        {% else %}
-        <p class="text-muted mb-0">暂无库存记录。</p>
-        {% endif %}
-      </div>
-    </div>
-    {% endif %}
+    <!-- 移至 /skus/stock 管理页（§16.5 M18） -->
   </div>
 </div>
 

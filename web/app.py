@@ -192,9 +192,6 @@ _ACTION_MSG = {
 MODULES: list[dict[str, Any]] = [
     {"id": "workspace", "name": "工作台", "icon": "ti ti-dashboard", "href": "/modules/workspace",
      "desc": "统计数据等工作台内容后续在定（决策 15：统计一定会做）"},
-    # v0.7：SKU 建档一级菜单（workspace 之后、tm 之前，详设 §4.3）
-    {"id": "skus", "name": "SKU 建档", "icon": "ti ti-box", "href": "/skus",
-     "desc": "货档案建档/配方/图库/库存（v0.7）"},
     {"id": "tm", "name": "任务中心", "icon": "ti ti-list-check", "href": "/tasks",
      "desc": "AI 提案转任务、人工处理回流（v0.2 首个真实模块）"},
     {"id": "crm", "name": "CRM", "icon": "ti ti-message-circle", "href": "/crm",
@@ -204,12 +201,15 @@ MODULES: list[dict[str, Any]] = [
          {"id": "crm-translate", "name": "对话翻译", "icon": "ti ti-language", "href": "/translate"},
          {"id": "crm-follow", "name": "跟进待办", "icon": "ti ti-list", "href": "/tasks"},
      ]},
-    {"id": "erp", "name": "ERP 增强", "icon": "ti ti-box", "href": "/modules/erp",
-     "desc": "库存 / 补货建议 / 异常预警（v0.6，只读 NocoBase 视图）",
+    # v0.7 §16.5：ERP 一级菜单（原 erp 增强 + sku 建档合入）
+    {"id": "erp", "name": "ERP", "icon": "ti ti-box", "href": "/skus",
+     "desc": "建档 / 库存 / 补货 / 预警（v0.7）",
      "children": [
-         {"id": "erp-stock", "name": "库存", "icon": "ti ti-box", "href": "/modules/erp"},
+         {"id": "erp-skus", "name": "货品建档", "icon": "ti ti-box", "href": "/skus"},
+         {"id": "erp-stock-manage", "name": "库存管理", "icon": "ti ti-package", "href": "/skus/stock"},
          {"id": "erp-replenish", "name": "补货建议", "icon": "ti ti-shopping-cart", "href": "/modules/erp"},
          {"id": "erp-alert", "name": "异常预警", "icon": "ti ti-alert-triangle", "href": "/modules/erp"},
+         {"id": "erp-stock", "name": "生产库存（只读）", "icon": "ti ti-eye", "href": "/modules/erp"},
      ]},
     # v0.5 §3.1：SEO 一级菜单下挂二级（扒图第一/关键词研究/SEO 优化/listing 体检）
     # 一级「扒图」菜单移除
@@ -1176,7 +1176,7 @@ def create_app(
             "skus/index.html",
             _ctx(
                 request,
-                "skus",
+                "erp-skus",
                 groups=groups,
                 total=result["total"],
                 msg=msg,
@@ -1207,7 +1207,7 @@ def create_app(
             "skus/new.html",
             _ctx(
                 request,
-                "skus",
+                "erp-skus",
                 items=items_result["items"],
                 images=images,
                 warehouses=[{"id": w.id, "name": w.name} for w in warehouses],
@@ -1237,13 +1237,29 @@ def create_app(
             code = form.get(f"row_{idx}_code", "")
             cost_str = form.get(f"row_{idx}_cost", "")
             supplier = form.get(f"row_{idx}_supplier", "")
+            product_code = form.get(f"row_{idx}_product_code", "")
             row: dict = {
                 "name": str(name).strip(),
                 "kind": str(kind),
                 "code": str(code).strip(),
                 "cost": float(cost_str) if cost_str else None,
                 "supplier": str(supplier).strip() or None,
+                "product_code": str(product_code).strip() or None,
             }
+            # 规格属性（row_0_spec_key_0 / row_0_spec_value_0）
+            specs: dict = {}
+            si = 0
+            while True:
+                spec_key = form.get(f"row_{idx}_spec_key_{si}")
+                if spec_key is None:
+                    break
+                spec_val = form.get(f"row_{idx}_spec_value_{si}", "")
+                sk = str(spec_key).strip()
+                if sk:
+                    specs[sk] = str(spec_val).strip()
+                si += 1
+            if specs:
+                row["specs"] = specs
             # BOM 行（前端对非 combo 行隐藏字段仍随表单提交空值：空 child 视为无配方行）
             bom_rows = []
             bidx = 0
@@ -1284,6 +1300,100 @@ def create_app(
             return _redirect("/skus/new", err=str(exc))
         return _redirect("/skus", msg=f"建档成功（{len(ids)} 条）")
 
+    # ---- §16.5 库存管理新页 ----
+
+    @app.get("/skus/stock")
+    async def sku_stock(request: Request, keyword: str = "", msg: str = "", err: str = ""):
+        """库存管理页（物理档 + 库存结存）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_store import list_items
+        from web.inventory_service import list_stocks
+
+        biz = _resolve_biz_engine(request)
+        async with async_sessionmaker(biz, expire_on_commit=False)() as session:
+            result = await list_items(
+                session,
+                kind="physical",
+                keyword=keyword or None,
+                page_size=200,
+            )
+            # 聚合每项库存结存
+            items_with_stock = []
+            for item in result["items"]:
+                stocks = await list_stocks(session, item_id=item["id"])
+                total_qty = sum(float(s["qty"]) for s in stocks) if stocks else 0
+                item["stock_qty"] = total_qty
+                items_with_stock.append(item)
+        return templates.TemplateResponse(
+            request,
+            "skus/stock.html",
+            _ctx(
+                request,
+                "erp-stock-manage",
+                items=items_with_stock,
+                keyword=keyword,
+                msg=msg,
+                err=err,
+            ),
+        )
+
+    # gallery API endpoints (§16.6) — before wildcard /skus/{item_id}
+
+    @app.get("/skus/gallery/folders")
+    async def sku_gallery_folders(request: Request):
+        """图库文件夹列表（JSON）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web import scrape_store
+        folders = await scrape_store.get_gallery_folders()
+        return JSONResponse(folders)
+
+    @app.get("/skus/gallery/folder/{folder_type}/{folder_id}")
+    async def sku_gallery_folder_images(request: Request, folder_type: str, folder_id: str):
+        """文件夹内图片列表（JSON）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web import scrape_store
+        images = await scrape_store.get_gallery_folder_images(folder_type, folder_id)
+        return JSONResponse(images)
+
+    @app.get("/skus/gallery/search")
+    async def sku_gallery_search(request: Request, q: str = ""):
+        """图库搜索（JSON）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web import scrape_store
+        images = await scrape_store.get_images(keyword=q or None, limit=200)
+        return JSONResponse(images)
+
+    @app.post("/skus/gallery/upload")
+    async def sku_gallery_upload(request: Request):
+        """图片上传（multipart file → image_service）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        form = await request.form()
+        file = form.get("file")
+        if file is None or not hasattr(file, "read"):
+            return JSONResponse({"detail": "未选择文件"}, status_code=400)
+        file_bytes = await file.read()
+        filename = getattr(file, "filename", "upload.jpg") or "upload.jpg"
+
+        biz = _resolve_biz_engine(request)
+        # 获取 storage_root 设置
+        from web.settings_store import SettingsStore
+        store = SettingsStore(biz)
+        storage_root = await store.get("scrape.storage_dir", "/opt/liuquan/scrape/")
+
+        from web.image_service import upload_image
+        async with async_sessionmaker(biz, expire_on_commit=False)() as session, session.begin():
+            img_id = await upload_image(
+                session, file_bytes, filename,
+                source_mark="selfshot",
+                storage_root=storage_root,
+            )
+        return JSONResponse({"id": img_id})
+
     @app.get("/skus/{item_id}")
     async def sku_detail(request: Request, item_id: int, msg: str = "", err: str = ""):
         """档案详情页。"""
@@ -1305,13 +1415,146 @@ def create_app(
             "skus/detail.html",
             _ctx(
                 request,
-                "skus",
+                "erp-skus",
                 item=detail,
                 shops=[{"id": s["id"], "name": s["name"]} for s in shops],
                 msg=msg,
                 err=err,
             ),
         )
+
+    # ---- §16.4 编辑功能 ----
+
+    @app.get("/skus/{item_id}/edit")
+    async def sku_edit(request: Request, item_id: int, msg: str = "", err: str = ""):
+        """编辑档案表单页。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_store import get_item_detail, list_items
+
+        biz = _resolve_biz_engine(request)
+        async with async_sessionmaker(biz, expire_on_commit=False)() as session:
+            detail = await get_item_detail(session, item_id)
+            if detail is None:
+                return _redirect("/skus", err="档案不存在")
+            all_items_result = await list_items(session, page_size=1000)
+        # 图片列表
+        from web import scrape_store
+        images = await scrape_store.get_images(limit=1000)
+        preselected_ids = [img["image_file_id"] for img in detail.get("images", [])]
+        return templates.TemplateResponse(
+            request,
+            "skus/edit.html",
+            _ctx(
+                request,
+                "erp-skus",
+                item=detail,
+                all_items=all_items_result["items"],
+                images=images,
+                preselected_image_ids=preselected_ids,
+                msg=msg,
+                err=err,
+            ),
+        )
+
+    @app.post("/skus/{item_id}/edit")
+    async def sku_edit_submit(request: Request, item_id: int):
+        """编辑档案提交。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_service import CatalogServiceError, patch_item, delete_bom_row, add_bom_row
+
+        biz = _resolve_biz_engine(request)
+        form = await request.form()
+        name = (form.get("name") or "").strip()
+        code = (form.get("code") or "").strip()
+        cost_str = form.get("cost", "")
+        supplier = (form.get("supplier") or "").strip()
+        remark = (form.get("remark") or "").strip()
+        product_name = (form.get("product_name") or "").strip()
+        product_code = (form.get("product_code") or "").strip()
+
+        # 解析规格属性
+        specs: dict = {}
+        si = 0
+        while True:
+            spec_key = form.get(f"spec_key_{si}")
+            if spec_key is None:
+                break
+            spec_val = form.get(f"spec_value_{si}", "")
+            sk = str(spec_key).strip()
+            if sk:
+                specs[sk] = str(spec_val).strip()
+            si += 1
+
+        # 解析 BOM（combo delisted 可编辑）
+        bom_data: list[dict] | None = None
+        bi = 0
+        while True:
+            child_str = form.get(f"bom_{bi}_child")
+            if child_str is None:
+                break
+            if str(child_str).strip():
+                qty_str = form.get(f"bom_{bi}_qty", "1")
+                bom_data = bom_data or []
+                bom_data.append({
+                    "child_item_id": int(str(child_str).strip()),
+                    "qty": float(qty_str) if str(qty_str).strip() else 1,
+                })
+            bi += 1
+
+        try:
+            async with async_sessionmaker(biz, expire_on_commit=False)() as session, session.begin():
+                await patch_item(
+                    session,
+                    item_id,
+                    name=name or None,
+                    code=code or None,
+                    cost=float(cost_str) if cost_str else None,
+                    supplier=supplier or None,
+                    remark=remark or None,
+                    product_name=product_name or None,
+                    product_code=product_code or None,
+                    specs=specs if specs else None,
+                )
+                # BOM 全量替换（combo delisted 可编辑）
+                if bom_data is not None:
+                    # 获取当前 item 信息
+                    from models.catalog import Item
+                    item = await session.get(Item, item_id)
+                    if item and item.kind == "combo":
+                        if item.status == "active":
+                            raise CatalogServiceError("在售状态不可修改配方，请先下架")
+                        # 清空旧 BOM
+                        from models.catalog import ItemBom
+                        from sqlalchemy import select as sa_select
+                        old_bom = (
+                            await session.execute(
+                                sa_select(ItemBom).where(ItemBom.parent_item_id == item_id)
+                            )
+                        ).scalars().all()
+                        for old_row in old_bom:
+                            await session.delete(old_row)
+                        # 重新添加
+                        for bom_row in bom_data:
+                            await add_bom_row(
+                                session,
+                                item_id,
+                                child_item_id=bom_row["child_item_id"],
+                                qty=bom_row["qty"],
+                            )
+                # 挂图
+                image_ids_raw = form.get("image_file_ids", "")
+                image_ids = [int(x) for x in str(image_ids_raw).split(",") if x.strip().isdigit()]
+                if image_ids:
+                    from web.image_service import attach_images
+                    try:
+                        await attach_images(session, item_id, image_ids)
+                    except Exception:
+                        pass
+        except CatalogServiceError as exc:
+            return _redirect(f"/skus/{item_id}/edit", err=str(exc))
+        return _redirect(f"/skus/{item_id}", msg="已保存")
 
     @app.get("/skus/{item_id}/inventory")
     async def sku_inventory(
@@ -1339,7 +1582,7 @@ def create_app(
             "skus/inventory.html",
             _ctx(
                 request,
-                "skus",
+                "erp-stock-manage",
                 item=detail,
                 stocks=stocks,
                 ledgers=ledgers,

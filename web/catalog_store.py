@@ -13,9 +13,6 @@ from models.catalog import (
     Item,
     ItemBom,
     ItemImage,
-    Stock,
-    StockLedger,
-    Warehouse,
 )
 from models.sys import Shop
 
@@ -59,6 +56,8 @@ async def list_items(
                 "code": i.code,
                 "name": i.name,
                 "product_name": i.product_name,
+                "product_code": i.product_code,
+                "specs": i.specs or {},
                 "kind": i.kind,
                 "cost": float(i.cost) if i.cost is not None else None,
                 "supplier": i.supplier or "",
@@ -136,29 +135,15 @@ async def get_item_detail(session: AsyncSession, item_id: int) -> dict | None:
             ],
         })
 
-    # 库存摘要
-    stock_rows = (
-        await session.execute(
-            select(Stock, Warehouse.name.label("warehouse_name"))
-            .join(Warehouse, Stock.warehouse_id == Warehouse.id)
-            .where(Stock.item_id == item_id)
-        )
-    ).all()
-    stocks = [
-        {
-            "id": s.Stock.id,
-            "warehouse_id": s.Stock.warehouse_id,
-            "warehouse_name": s.warehouse_name,
-            "qty": float(s.Stock.qty),
-        }
-        for s in stock_rows
-    ]
+    # 库存摘要已移至 /skus/stock 库存管理页（§16.5 M18 去库存）
 
     return {
         "id": item.id,
         "code": item.code,
         "name": item.name,
         "product_name": item.product_name,
+        "product_code": item.product_code,
+        "specs": item.specs or {},
         "kind": item.kind,
         "cost": float(item.cost) if item.cost is not None else None,
         "supplier": item.supplier or "",
@@ -168,7 +153,6 @@ async def get_item_detail(session: AsyncSession, item_id: int) -> dict | None:
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "bom": bom,
         "images": images,
-        "stocks": stocks,
     }
 
 

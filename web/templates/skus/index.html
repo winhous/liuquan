@@ -57,6 +57,7 @@
           <thead>
             <tr>
               <th>编号</th>
+              <th>商品代号</th>
               <th>档名</th>
               <th>类型</th>
               <th>成本</th>
@@ -68,6 +69,7 @@
             {% for item in items %}
             <tr>
               <td><code>{{ item.code }}</code></td>
+              <td>{{ item.product_code or "—" }}</td>
               <td>{{ item.name }}</td>
               <td>
                 {% if item.kind == 'physical' %}
@@ -88,7 +90,7 @@
               </td>
               <td>
                 <a href="/skus/{{ item.id }}" class="btn btn-sm btn-outline-primary">详情</a>
-                <a href="/skus/{{ item.id }}/inventory" class="btn btn-sm btn-outline-secondary">库存</a>
+                <a href="/skus/{{ item.id }}/edit" class="btn btn-sm btn-outline-secondary">编辑</a>
               </td>
             </tr>
             {% endfor %}

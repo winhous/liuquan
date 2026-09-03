@@ -24,6 +24,11 @@
       <div class="row-item border rounded p-3 mb-3" data-idx="0">
         <div class="row g-2 mb-2">
           <div class="col-md-3">
+            <label class="form-label">商品代号</label>
+            <input name="row_0_product_code" class="form-control" placeholder="如 LTR（同商品名共用）" maxlength="20" pattern="[A-Za-z0-9_-]{1,20}">
+            <small class="text-muted">格式：字母/数字/下划线/连字符，1-20 字符</small>
+          </div>
+          <div class="col-md-3">
             <label class="form-label">档名 <span class="text-danger">*</span></label>
             <input name="row_0_name" class="form-control" required maxlength="120" placeholder="红色">
           </div>
@@ -35,18 +40,41 @@
               <option value="custom">定制</option>
             </select>
           </div>
-          <div class="col-md-3">
-            <label class="form-label">编号 <span class="text-danger">*</span></label>
-            <input name="row_0_code" class="form-control" required pattern="[A-Za-z0-9_-]{1,40}" maxlength="40" placeholder="LTR-RED">
-          </div>
           <div class="col-md-2">
+            <label class="form-label">编号</label>
+            <input name="row_0_code" class="form-control" pattern="[A-Za-z0-9_-]{1,40}" maxlength="40" placeholder="留空自动生成（P/C/U-代号-序号）">
+          </div>
+          <div class="col-md-1">
             <label class="form-label">成本</label>
             <input name="row_0_cost" class="form-control" type="number" step="0.01" min="0" placeholder="12.50">
           </div>
-          <div class="col-md-2">
+          <div class="col-md-1">
             <label class="form-label">采购源</label>
-            <input name="row_0_supplier" class="form-control" placeholder="1688/淘宝">
+            <input name="row_0_supplier" class="form-control" placeholder="1688">
           </div>
+        </div>
+        <!-- 规格属性（可折叠） -->
+        <div class="specs-area" id="specs-0" style="display:none">
+          <label class="form-label fw-bold">规格属性</label>
+          <div class="specs-rows" id="specs-rows-0">
+            <div class="specs-row row g-2 mb-1">
+              <div class="col-md-4">
+                <input name="row_0_spec_key_0" class="form-control form-control-sm" placeholder="键（如：颜色）" list="specs-keys-list-0">
+              </div>
+              <div class="col-md-7">
+                <input name="row_0_spec_value_0" class="form-control form-control-sm" placeholder="值（如：红色）">
+              </div>
+              <div class="col-auto">
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSpecRow(this)">删除</button>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="addSpecRow(0)">+ 加规格行</button>
+          <datalist id="specs-keys-list-0">
+            <option value="颜色"><option value="尺寸"><option value="材质"><option value="型号">
+            <option value="风格"><option value="容量"><option value="数量"><option value="重量">
+            <option value="产地"><option value="颜色分类">
+          </datalist>
         </div>
         <!-- BOM 区（combo 显示） -->
         <div class="bom-area" id="bom-0" style="display:none">
@@ -73,41 +101,21 @@
           </div>
           <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="addBomRow(0)">+ 加配方行</button>
         </div>
+        <!-- 展开规格属性按钮 -->
+        <button type="button" class="btn btn-sm btn-outline-secondary mt-2 specs-toggle" onclick="toggleSpecs(0)">
+          <i class="ti ti-list details me-1"></i>规格属性
+        </button>
       </div>
     </div>
   </div>
 
-  <!-- 选图区 -->
+  <!-- 选图区（图库文件夹浏览器） -->
   <div class="card mb-3">
     <div class="card-header">
       <h3 class="card-title"><i class="ti ti-photo me-1"></i>选图（可选，可后补）</h3>
     </div>
     <div class="card-body">
-      {% if images %}
-      <div class="row g-2" id="image-picker">
-        {% for img in images %}
-        <div class="col-auto">
-          <div class="form-check">
-            <input class="form-check-input image-check" type="checkbox"
-                   name="image_file_ids_raw" value="{{ img.id }}"
-                   id="img-{{ img.id }}"
-                   {% if img.id in preselected_image_ids %}checked{% endif %}>
-            <label class="form-check-label" for="img-{{ img.id }}">
-              {% if img.local_path %}
-              <img src="/scrape/thumbnail/{{ img.id }}" alt="" style="width:80px;height:80px;object-fit:cover;border-radius:4px;">
-              {% else %}
-              <div style="width:80px;height:80px;background:#f1f5f9;border-radius:4px;display:grid;place-items:center;">📷</div>
-              {% endif %}
-            </label>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-      <input type="hidden" name="image_file_ids" id="image-ids-field" value="{{ preselected_image_ids | join(',') }}">
-      <small class="text-muted d-block mt-2">勾选图片后将挂到所有新建档案上。</small>
-      {% else %}
-      <p class="text-muted mb-0">暂无素材库图片。可先建档，后补图。</p>
-      {% endif %}
+      {% include 'skus/_gallery_picker.html' %}
     </div>
   </div>
 
@@ -130,6 +138,11 @@ function addRow() {
     </div>
     <div class="row g-2 mb-2">
       <div class="col-md-3">
+        <label class="form-label">商品代号</label>
+        <input name="row_${idx}_product_code" class="form-control" placeholder="如 LTR（同商品名共用）" maxlength="20" pattern="[A-Za-z0-9_-]{1,20}">
+        <small class="text-muted">格式：字母/数字/下划线/连字符，1-20 字符</small>
+      </div>
+      <div class="col-md-3">
         <label class="form-label">档名 <span class="text-danger">*</span></label>
         <input name="row_${idx}_name" class="form-control" required maxlength="120">
       </div>
@@ -141,18 +154,40 @@ function addRow() {
           <option value="custom">定制</option>
         </select>
       </div>
-      <div class="col-md-3">
-        <label class="form-label">编号 <span class="text-danger">*</span></label>
-        <input name="row_${idx}_code" class="form-control" required pattern="[A-Za-z0-9_-]{1,40}" maxlength="40">
-      </div>
       <div class="col-md-2">
+        <label class="form-label">编号</label>
+        <input name="row_${idx}_code" class="form-control" pattern="[A-Za-z0-9_-]{1,40}" maxlength="40" placeholder="留空自动生成">
+      </div>
+      <div class="col-md-1">
         <label class="form-label">成本</label>
         <input name="row_${idx}_cost" class="form-control" type="number" step="0.01" min="0">
       </div>
-      <div class="col-md-2">
+      <div class="col-md-1">
         <label class="form-label">采购源</label>
         <input name="row_${idx}_supplier" class="form-control">
       </div>
+    </div>
+    <!-- 规格属性 -->
+    <div class="specs-area" id="specs-${idx}" style="display:none">
+      <label class="form-label fw-bold">规格属性</label>
+      <div class="specs-rows" id="specs-rows-${idx}">
+        <div class="specs-row row g-2 mb-1">
+          <div class="col-md-4">
+            <input name="row_${idx}_spec_key_0" class="form-control form-control-sm" placeholder="键" list="specs-keys-list-${idx}">
+          </div>
+          <div class="col-md-7">
+            <input name="row_${idx}_spec_value_0" class="form-control form-control-sm" placeholder="值">
+          </div>
+          <div class="col-auto">
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSpecRow(this)">删除</button>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="addSpecRow(${idx})">+ 加规格行</button>
+      <datalist id="specs-keys-list-${idx}">
+        <option value="颜色"><option value="尺寸"><option value="材质"><option value="型号">
+        <option value="风格"><option value="容量"><option value="数量"><option value="重量">
+      </datalist>
     </div>
     <div class="bom-area" id="bom-${idx}" style="display:none">
       <label class="form-label fw-bold">配方（BOM）</label>
@@ -176,6 +211,9 @@ function addRow() {
       </div>
       <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="addBomRow(${idx})">+ 加配方行</button>
     </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary mt-2 specs-toggle" onclick="toggleSpecs(${idx})">
+      <i class="ti ti-list details me-1"></i>规格属性
+    </button>
   </div>`;
   container.insertAdjacentHTML('beforeend', tpl);
   onKindChange(idx, 'physical'); // 新行默认 physical：禁用 BOM 输入
@@ -189,6 +227,40 @@ function onKindChange(idx, kind) {
     // 非 combo 时禁用 BOM 输入（disabled 字段不随表单提交，避免隐藏空值触发后端 500）
     bom.querySelectorAll('select, input, button').forEach(el => { el.disabled = !show; });
   }
+}
+
+// 规格属性折叠
+let specsState = {};
+function toggleSpecs(idx) {
+  const area = document.getElementById('specs-' + idx);
+  if (!area) return;
+  specsState[idx] = !specsState[idx];
+  area.style.display = specsState[idx] ? '' : 'none';
+}
+
+// 规格属性行增删
+let specCounters = {};
+function addSpecRow(idx) {
+  if (!specCounters[idx]) specCounters[idx] = 1;
+  const si = specCounters[idx]++;
+  const container = document.getElementById('specs-rows-' + idx);
+  const tpl = `
+  <div class="specs-row row g-2 mb-1">
+    <div class="col-md-4">
+      <input name="row_${idx}_spec_key_${si}" class="form-control form-control-sm" placeholder="键" list="specs-keys-list-${idx}">
+    </div>
+    <div class="col-md-7">
+      <input name="row_${idx}_spec_value_${si}" class="form-control form-control-sm" placeholder="值">
+    </div>
+    <div class="col-auto">
+      <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSpecRow(this)">删除</button>
+    </div>
+  </div>`;
+  container.insertAdjacentHTML('beforeend', tpl);
+}
+
+function removeSpecRow(btn) {
+  btn.closest('.specs-row').remove();
 }
 
 // 初始化：默认行（physical）隐藏并禁用 BOM 区

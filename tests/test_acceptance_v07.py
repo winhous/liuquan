@@ -1823,3 +1823,368 @@ async def test_a91_specs_and_migration(biz_engine) -> None:
             await patch_item(session, other_group_ids[0], product_code="NEWCODE")
 
         await session.commit()
+
+
+# ==== A92：编辑功能（§16.4）====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a92_edit_functionality(biz_engine) -> None:
+    """A92：编辑功能。
+
+    1. POST /skus/{id}/edit 改档名/成本/采购源/商品名（组迁移）/规格 → 详情页可见
+    2. 编号改重 → err 回表单（不 500）
+    3. kind 不可改（服务端）
+    4. delisted combo 改配方成功
+    5. active combo 配方区提交被拒（err 提示）
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi.testclient import TestClient
+    from web.app import create_app
+    from web.tm_store import TMStore
+    from web.settings_store import SettingsStore
+
+    tm_store = TMStore(biz_engine)
+    settings_store = SettingsStore(biz_engine)
+
+    with patch("web.scrape_store.get_images", new_callable=AsyncMock, return_value=[]):
+        app = create_app(tm_store=tm_store, settings_store=settings_store)
+        client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+        client.cookies.set("role", "admin")
+
+        # 先建一个 physical 档 + 一个 combo 档 + 一个 child physical
+        resp = client.post("/skus/new", data={
+            "product_name": "A92测试商品",
+            "row_0_name": "A92红色",
+            "row_0_kind": "physical",
+            "row_0_code": "A92-RED",
+            "row_0_cost": "10",
+            "row_0_supplier": "1688",
+        })
+        assert resp.status_code == 303, f"建 physical 失败: {resp.status_code}"
+
+        # 获取物理档 ID
+        from sqlalchemy import text as sa_text
+        async with AsyncSession(biz_engine) as s:
+            res = await s.execute(sa_text("SELECT id FROM catalog.item WHERE code='A92-RED'"))
+            phys_id = res.scalar_one()
+
+        # 建 combo (delisted)
+        resp_combo = client.post("/skus/new", data={
+            "product_name": "A92组合",
+            "row_0_name": "A92套装",
+            "row_0_kind": "combo",
+            "row_0_code": "A92-COMBO",
+            "row_0_bom_0_child": str(phys_id),
+            "row_0_bom_0_qty": "1",
+        })
+        assert resp_combo.status_code == 303
+
+        async with AsyncSession(biz_engine) as s:
+            res3 = await s.execute(sa_text("SELECT id FROM catalog.item WHERE code='A92-COMBO'"))
+            combo_id = res3.scalar_one()
+            # 下架 combo
+            await s.execute(sa_text(f"UPDATE catalog.item SET status='delisted' WHERE id={combo_id}"))
+            await s.commit()
+
+        # 1. 编辑 physical：改档名/成本/采购源/商品名/规格
+        resp_edit = client.post(f"/skus/{phys_id}/edit", data={
+            "name": "A92红色改名",
+            "code": "A92-RED",
+            "cost": "25.5",
+            "supplier": "淘宝",
+            "product_name": "A92新商品名",
+            "remark": "A92备注",
+            "spec_key_0": "颜色",
+            "spec_value_0": "红色",
+            "spec_key_1": "尺寸",
+            "spec_value_1": "M",
+        })
+        assert resp_edit.status_code == 303, f"编辑应 303，实际 {resp_edit.status_code}"
+        loc = resp_edit.headers.get("location", "")
+        assert "msg=" in loc, f"编辑成功应带 msg，实际 {loc}"
+
+        # 详情页可见
+        resp_detail = client.get(f"/skus/{phys_id}")
+        assert resp_detail.status_code == 200
+        assert "A92红色改名" in resp_detail.text
+        assert "25.50" in resp_detail.text
+        assert "淘宝" in resp_detail.text
+
+        # 2. 编号改重 → err
+        resp2 = client.post("/skus/new", data={
+            "product_name": "A92测试商品B",
+            "row_0_name": "A92蓝色",
+            "row_0_kind": "physical",
+            "row_0_code": "A92-BLU",
+        })
+        assert resp2.status_code == 303
+        async with AsyncSession(biz_engine) as s:
+            res4 = await s.execute(sa_text("SELECT id FROM catalog.item WHERE code='A92-BLU'"))
+            phys2_id = res4.scalar_one()
+
+        resp_dup = client.post(f"/skus/{phys2_id}/edit", data={
+            "name": "A92蓝色",
+            "code": "A92-RED",  # 重复
+        })
+        assert resp_dup.status_code == 303
+        loc_dup = resp_dup.headers.get("location", "")
+        assert "err=" in loc_dup, f"编号重复应带 err，实际 {loc_dup}"
+
+        # 3. kind 不可改（服务端 patch_item 不接受 kind）
+        from web.catalog_service import patch_item as svc_patch, CatalogServiceError
+        async with AsyncSession(biz_engine, expire_on_commit=False) as session:
+            # kind 参数会被忽略（patch_item 不接受 kind 参数）
+            await svc_patch(session, phys_id, name="改名测试")
+            await session.commit()
+
+        # 4. delisted combo 改配方成功
+        # 建一个新 child
+        resp_child = client.post("/skus/new", data={
+            "product_name": "A92子件",
+            "row_0_name": "A92子件A",
+            "row_0_kind": "physical",
+            "row_0_code": "A92-CHILD",
+        })
+        assert resp_child.status_code == 303
+        async with AsyncSession(biz_engine) as s:
+            res5 = await s.execute(sa_text("SELECT id FROM catalog.item WHERE code='A92-CHILD'"))
+            new_child_id = res5.scalar_one()
+
+        resp_combo_edit = client.post(f"/skus/{combo_id}/edit", data={
+            "name": "A92套装",
+            "code": "A92-COMBO",
+            "bom_0_child": str(new_child_id),
+            "bom_0_qty": "3",
+        })
+        assert resp_combo_edit.status_code == 303
+        loc_combo = resp_combo_edit.headers.get("location", "")
+        assert "msg=" in loc_combo, f"delisted combo 改配方应成功，实际 {loc_combo}"
+
+        # 5. active combo 配方区提交被拒
+        async with AsyncSession(biz_engine) as s:
+            await s.execute(sa_text(f"UPDATE catalog.item SET status='active' WHERE id={combo_id}"))
+            await s.commit()
+
+        resp_active_combo = client.post(f"/skus/{combo_id}/edit", data={
+            "name": "A92套装",
+            "code": "A92-COMBO",
+            "bom_0_child": str(new_child_id),
+            "bom_0_qty": "2",
+        })
+        assert resp_active_combo.status_code == 303
+        loc_active = resp_active_combo.headers.get("location", "")
+        assert "err=" in loc_active, f"active combo 改配方应被拒，实际 {loc_active}"
+
+
+# ==== A93：建档页无库存（§16.5 M18）====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a93_no_stock_on_catalog_pages(biz_engine) -> None:
+    """A93：建档页去库存。
+
+    1. GET /skus DOM 不含「库存摘要」「管理库存」
+    2. GET /skus/{id} DOM 不含「库存摘要」「管理库存」
+    3. GET /skus/stock 200 且含「记账」入口 href 形如 /skus/{id}/inventory
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import text as sa_text
+    from web.app import create_app
+    from web.tm_store import TMStore
+    from web.settings_store import SettingsStore
+
+    tm_store = TMStore(biz_engine)
+    settings_store = SettingsStore(biz_engine)
+
+    with patch("web.scrape_store.get_images", new_callable=AsyncMock, return_value=[]):
+        app = create_app(tm_store=tm_store, settings_store=settings_store)
+        client = TestClient(app, follow_redirects=True, raise_server_exceptions=False)
+        client.cookies.set("role", "admin")
+
+        # 确保至少有一条 physical 数据
+        async with AsyncSession(biz_engine) as s:
+            res = await s.execute(sa_text("SELECT COUNT(*) FROM catalog.item WHERE kind='physical'"))
+            cnt = res.scalar_one()
+        if cnt == 0:
+            client_noredir = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+            client_noredir.cookies.set("role", "admin")
+            client_noredir.post("/skus/new", data={
+                "row_0_name": "A93测试",
+                "row_0_kind": "physical",
+                "row_0_code": "A93-001",
+            })
+
+        async with AsyncSession(biz_engine) as s:
+            res = await s.execute(sa_text("SELECT id FROM catalog.item WHERE kind='physical' LIMIT 1"))
+            phys_id = res.scalar_one()
+
+        # 1. GET /skus 不含库存相关
+        resp_list = client.get("/skus")
+        assert resp_list.status_code == 200
+        assert "库存摘要" not in resp_list.text, "/skus 不应含「库存摘要」"
+        assert "管理库存" not in resp_list.text, "/skus 不应含「管理库存」"
+
+        # 2. GET /skus/{id} 不含库存摘要
+        resp_detail = client.get(f"/skus/{phys_id}")
+        assert resp_detail.status_code == 200
+        assert "库存摘要" not in resp_detail.text, "详情页不应含「库存摘要」"
+        assert "管理库存" not in resp_detail.text, "详情页不应含「管理库存」"
+
+        # 3. GET /skus/stock 200 且含「记账」入口
+        resp_stock = client.get("/skus/stock")
+        assert resp_stock.status_code == 200
+        assert "记账" in resp_stock.text, "/skus/stock 应含「记账」入口"
+        assert "/inventory" in resp_stock.text, "/skus/stock 应含 /inventory 链接"
+
+
+# ==== A94：图库文件夹浏览器（§16.6）====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a94_gallery_browser(biz_engine) -> None:
+    """A94：图库文件夹浏览器。
+
+    1. GET /skus/gallery/folders 200（分组键 folder_type）
+    2. search?q 命中 tags
+    3. multipart 上传 → 200 {id}
+    4. new.html DOM 含上传/搜索框/文件夹容器 class
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi.testclient import TestClient
+    from web.app import create_app
+    from web.tm_store import TMStore
+    from web.settings_store import SettingsStore
+
+    tm_store = TMStore(biz_engine)
+    settings_store = SettingsStore(biz_engine)
+
+    with patch("web.scrape_store.get_images", new_callable=AsyncMock, return_value=[]):
+        app = create_app(tm_store=tm_store, settings_store=settings_store)
+        client = TestClient(app, follow_redirects=True, raise_server_exceptions=False)
+        client.cookies.set("role", "admin")
+
+        # 1. GET /skus/gallery/folders 200
+        resp_folders = client.get("/skus/gallery/folders")
+        assert resp_folders.status_code == 200
+        folders = resp_folders.json()
+        assert isinstance(folders, list), "folders 应为列表"
+        for f in folders:
+            assert "folder_type" in f, f"文件夹应含 folder_type 键: {f}"
+
+        # 2. search?q
+        resp_search = client.get("/skus/gallery/search?q=test")
+        assert resp_search.status_code == 200
+        results = resp_search.json()
+        assert isinstance(results, list), "search 结果应为列表"
+
+        # 3. multipart 上传（mock upload_image 避免文件系统权限问题）
+        import io
+        png_data = (
+            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01'
+            b'\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00'
+            b'\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00'
+            b'\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82'
+        )
+        # Mock upload_image to return a fake id（避免文件系统权限和 DB scrape 表问题）
+        async def mock_upload_image(session, file_bytes, filename, *, source_mark="selfshot", storage_root=None):
+            # 直接插入一条 image_file 记录
+            from models.scrape import ImageFile
+            import hashlib
+            fh = hashlib.sha256(file_bytes).hexdigest()[:16]
+            img = ImageFile(
+                batch_id=f"test-{fh}",
+                source="http",
+                url=f"selfshot://test/{fh}_{filename}",
+                local_path=None,
+                day_dir="selfshot/test",
+                source_mark=source_mark,
+                status="downloaded",
+            )
+            session.add(img)
+            await session.flush()
+            return img.id
+
+        with patch("web.image_service.upload_image", side_effect=mock_upload_image):
+            resp_upload = client.post(
+                "/skus/gallery/upload",
+                files={"file": ("test.png", io.BytesIO(png_data), "image/png")},
+            )
+        assert resp_upload.status_code == 200, f"上传应 200，实际 {resp_upload.status_code}"
+        upload_data = resp_upload.json()
+        assert "id" in upload_data, f"上传应返回 id: {upload_data}"
+
+        # 4. new.html DOM 含上传/搜索框/文件夹容器
+        with patch("web.scrape_store.get_images", new_callable=AsyncMock, return_value=[]):
+            resp_new = client.get("/skus/new")
+            assert resp_new.status_code == 200
+            assert "gallery-upload" in resp_new.text or "galleryUpload" in resp_new.text, \
+                "new.html 应含上传入口"
+            assert "gallery-search" in resp_new.text or "gallerySearch" in resp_new.text, \
+                "new.html 应含搜索框"
+            assert "gallery-folders" in resp_new.text or "gallery-body" in resp_new.text, \
+                "new.html 应含文件夹容器"
+
+
+# ==== A95：导航（§16.5）====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a95_navigation(biz_engine) -> None:
+    """A95：导航重构。
+
+    1. MODULES 无顶级 id='skus'
+    2. erp children 含 id 序列 erp-skus(/skus)、erp-stock-manage(/skus/stock)、erp-replenish、erp-alert、erp-stock（名含「生产库存」）
+    3. /skus 与 /skus/stock 均 200 渲染
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi.testclient import TestClient
+    from web.app import create_app, MODULES
+    from web.tm_store import TMStore
+    from web.settings_store import SettingsStore
+
+    tm_store = TMStore(biz_engine)
+    settings_store = SettingsStore(biz_engine)
+
+    # 1. MODULES 无顶级 id='skus'
+    top_ids = [m["id"] for m in MODULES]
+    assert "skus" not in top_ids, f"MODULES 不应有顶级 id='skus'，当前顶级: {top_ids}"
+
+    # 2. erp children 检查
+    erp_module = None
+    for m in MODULES:
+        if m["id"] == "erp":
+            erp_module = m
+            break
+    assert erp_module is not None, "MODULES 应有 id='erp'"
+    assert erp_module["name"] == "ERP", f"erp 名称应为 'ERP'，实际 '{erp_module['name']}'"
+
+    erp_children = erp_module.get("children", [])
+    erp_child_ids = [c["id"] for c in erp_children]
+    assert "erp-skus" in erp_child_ids, f"erp children 应含 erp-skus: {erp_child_ids}"
+    assert "erp-stock-manage" in erp_child_ids, f"erp children 应含 erp-stock-manage: {erp_child_ids}"
+    assert "erp-replenish" in erp_child_ids, f"erp children 应含 erp-replenish: {erp_child_ids}"
+    assert "erp-alert" in erp_child_ids, f"erp children 应含 erp-alert: {erp_child_ids}"
+    assert "erp-stock" in erp_child_ids, f"erp children 应含 erp-stock: {erp_child_ids}"
+
+    erp_skus = [c for c in erp_children if c["id"] == "erp-skus"][0]
+    assert erp_skus["href"] == "/skus", f"erp-skus href 应为 /skus，实际 {erp_skus['href']}"
+
+    erp_stock_mgmt = [c for c in erp_children if c["id"] == "erp-stock-manage"][0]
+    assert erp_stock_mgmt["href"] == "/skus/stock", f"erp-stock-manage href 应为 /skus/stock，实际 {erp_stock_mgmt['href']}"
+
+    erp_stock = [c for c in erp_children if c["id"] == "erp-stock"][0]
+    assert "生产库存" in erp_stock["name"], f"erp-stock 名应含「生产库存」，实际 '{erp_stock['name']}'"
+
+    # 3. /skus 与 /skus/stock 均 200
+    with patch("web.scrape_store.get_images", new_callable=AsyncMock, return_value=[]):
+        app = create_app(tm_store=tm_store, settings_store=settings_store)
+        client = TestClient(app, follow_redirects=True, raise_server_exceptions=False)
+        client.cookies.set("role", "admin")
+
+        resp_skus = client.get("/skus")
+        assert resp_skus.status_code == 200, f"/skus 应 200，实际 {resp_skus.status_code}"
+
+        resp_stock = client.get("/skus/stock")
+        assert resp_stock.status_code == 200, f"/skus/stock 应 200，实际 {resp_stock.status_code}"

@@ -1,0 +1,176 @@
+<!-- _gallery_picker.html：图库文件夹浏览器（§16.6，new.html 与 edit.html 共用） -->
+<!-- 依赖 jQuery/原生 JS + fetch API -->
+
+<div id="gallery-picker">
+  <!-- 顶部工具栏：上传 + 搜索 -->
+  <div class="d-flex gap-2 mb-3 align-items-center">
+    <button type="button" class="btn btn-sm btn-outline-success" onclick="galleryUpload()">
+      <i class="ti ti-upload me-1"></i>上传图片
+    </button>
+    <input type="file" id="gallery-upload-input" accept="image/*" style="display:none" onchange="galleryDoUpload(this)">
+    <div class="input-group" style="max-width:300px">
+      <input type="text" id="gallery-search-input" class="form-control form-control-sm" placeholder="搜索标签/文件名…"
+             onkeydown="if(event.key==='Enter'){gallerySearch();return false}">
+      <button class="btn btn-sm btn-outline-primary" onclick="gallerySearch()">搜索</button>
+    </div>
+    <span id="gallery-selected-count" class="badge bg-primary ms-auto" style="display:none">已选 0 张</span>
+  </div>
+
+  <!-- 主体：默认文件夹网格 / 搜索结果 / 文件夹图片 -->
+  <div id="gallery-body">
+    <div id="gallery-folders" class="row g-2"></div>
+    <div id="gallery-images" class="row g-2" style="display:none"></div>
+  </div>
+
+  <!-- 返回按钮 -->
+  <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="gallery-back" style="display:none"
+          onclick="galleryShowFolders()">
+    <i class="ti ti-arrow-left me-1"></i>返回文件夹
+  </button>
+</div>
+
+<!-- 已选图片隐藏字段 -->
+<input type="hidden" name="image_file_ids" id="image-ids-field" value="{{ preselected_image_ids | join(',') if preselected_image_ids is defined else '' }}">
+
+<script>
+// 已选图片 ID 集合
+let gallerySelected = new Set(
+  (document.getElementById('image-ids-field').value || '').split(',').filter(Boolean)
+);
+
+function galleryUpdateCount() {
+  const el = document.getElementById('gallery-selected-count');
+  if (gallerySelected.size > 0) {
+    el.textContent = '已选 ' + gallerySelected.size + ' 张';
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+  document.getElementById('image-ids-field').value = Array.from(gallerySelected).join(',');
+}
+
+function galleryToggle(imgId, cb) {
+  if (cb.checked) gallerySelected.add(String(imgId));
+  else gallerySelected.delete(String(imgId));
+  galleryUpdateCount();
+}
+
+// 上传
+function galleryUpload() {
+  document.getElementById('gallery-upload-input').click();
+}
+
+async function galleryDoUpload(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const resp = await fetch('/skus/gallery/upload', { method: 'POST', body: formData });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.id) {
+        gallerySelected.add(String(data.id));
+        galleryUpdateCount();
+        alert('上传成功（id=' + data.id + '）');
+      }
+    } else {
+      const err = await resp.json().catch(() => ({}));
+      alert('上传失败：' + (err.detail || resp.statusText));
+    }
+  } catch (e) {
+    alert('上传异常：' + e.message);
+  }
+  input.value = '';
+}
+
+// 搜索
+async function gallerySearch() {
+  const q = document.getElementById('gallery-search-input').value.trim();
+  if (!q) return;
+  try {
+    const resp = await fetch('/skus/gallery/search?q=' + encodeURIComponent(q));
+    if (!resp.ok) return;
+    const images = await resp.json();
+    galleryShowImages(images, '搜索结果');
+    document.getElementById('gallery-back').style.display = '';
+  } catch (e) { console.error(e); }
+}
+
+// 文件夹列表
+async function galleryLoadFolders() {
+  try {
+    const resp = await fetch('/skus/gallery/folders');
+    if (!resp.ok) return;
+    const folders = await resp.json();
+    const container = document.getElementById('gallery-folders');
+    container.innerHTML = '';
+    if (!folders || folders.length === 0) {
+      container.innerHTML = '<p class="text-muted">暂无文件夹。请先上传图片或通过素材库添加。</p>';
+      return;
+    }
+    folders.forEach(f => {
+      const col = document.createElement('div');
+      col.className = 'col-auto';
+      const coverHtml = f.cover_image_id
+        ? `<img src="/scrape/thumbnail/${f.cover_image_id}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;">`
+        : `<div style="width:80px;height:80px;background:#f1f5f9;border-radius:4px;display:grid;place-items:center;">📁</div>`;
+      col.innerHTML = `
+        <div class="card cursor-pointer" onclick="galleryLoadFolder('${f.folder_type}', '${f.id}')" style="width:120px;cursor:pointer">
+          <div class="card-body p-2 text-center">
+            ${coverHtml}
+            <div class="text-truncate small mt-1" title="${f.title}">${f.title || f.id}</div>
+            <div class="text-muted small">${f.count} 张</div>
+          </div>
+        </div>`;
+      container.appendChild(col);
+    });
+  } catch (e) { console.error(e); }
+}
+
+// 加载文件夹图片
+async function galleryLoadFolder(folderType, folderId) {
+  try {
+    const resp = await fetch(`/skus/gallery/folder/${folderType}/${folderId}`);
+    if (!resp.ok) return;
+    const images = await resp.json();
+    galleryShowImages(images, '文件夹图片');
+    document.getElementById('gallery-back').style.display = '';
+  } catch (e) { console.error(e); }
+}
+
+function galleryShowImages(images, title) {
+  document.getElementById('gallery-folders').style.display = 'none';
+  const container = document.getElementById('gallery-images');
+  container.style.display = '';
+  container.innerHTML = '';
+  if (!images || images.length === 0) {
+    container.innerHTML = '<p class="text-muted">暂无图片。</p>';
+    return;
+  }
+  images.forEach(img => {
+    const col = document.createElement('div');
+    col.className = 'col-auto';
+    const checked = gallerySelected.has(String(img.id)) ? 'checked' : '';
+    col.innerHTML = `
+      <div class="form-check">
+        <input class="form-check-input image-check" type="checkbox"
+               value="${img.id}" ${checked}
+               onchange="galleryToggle(${img.id}, this)">
+        <label class="form-check-label">
+          <img src="/scrape/thumbnail/${img.id}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;">
+        </label>
+      </div>`;
+    container.appendChild(col);
+  });
+}
+
+function galleryShowFolders() {
+  document.getElementById('gallery-folders').style.display = '';
+  document.getElementById('gallery-images').style.display = 'none';
+  document.getElementById('gallery-back').style.display = 'none';
+}
+
+// 初始化：加载文件夹
+galleryLoadFolders();
+</script>
