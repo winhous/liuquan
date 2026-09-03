@@ -178,12 +178,24 @@ function addRow() {
     </div>
   </div>`;
   container.insertAdjacentHTML('beforeend', tpl);
+  onKindChange(idx, 'physical'); // 新行默认 physical：禁用 BOM 输入
 }
 
 function onKindChange(idx, kind) {
   const bom = document.getElementById('bom-' + idx);
-  if (bom) bom.style.display = kind === 'combo' ? '' : 'none';
+  if (bom) {
+    const show = kind === 'combo';
+    bom.style.display = show ? '' : 'none';
+    // 非 combo 时禁用 BOM 输入（disabled 字段不随表单提交，避免隐藏空值触发后端 500）
+    bom.querySelectorAll('select, input, button').forEach(el => { el.disabled = !show; });
+  }
 }
+
+// 初始化：默认行（physical）隐藏并禁用 BOM 区
+(function() {
+  const kindSel = document.querySelector('[name="row_0_kind"]');
+  if (kindSel) onKindChange(0, kindSel.value);
+})();
 
 let bomCounters = {};
 function addBomRow(idx) {

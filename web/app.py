@@ -1244,17 +1244,20 @@ def create_app(
                 "cost": float(cost_str) if cost_str else None,
                 "supplier": str(supplier).strip() or None,
             }
-            # BOM 行
+            # BOM 行（前端对非 combo 行隐藏字段仍随表单提交空值：空 child 视为无配方行）
             bom_rows = []
             bidx = 0
             while True:
                 child_id_str = form.get(f"row_{idx}_bom_{bidx}_child")
                 if child_id_str is None:
                     break
+                if not str(child_id_str).strip():
+                    bidx += 1
+                    continue  # 空配方行（隐藏 BOM 字段/中间空行）→ 跳过
                 qty_str = form.get(f"row_{idx}_bom_{bidx}_qty", "1")
                 bom_rows.append({
-                    "child_item_id": int(child_id_str),
-                    "qty": float(qty_str) if qty_str else 1,
+                    "child_item_id": int(str(child_id_str).strip()),
+                    "qty": float(qty_str) if str(qty_str).strip() else 1,
                 })
                 bidx += 1
             if bom_rows:

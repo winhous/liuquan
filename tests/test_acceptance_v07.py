@@ -1346,6 +1346,86 @@ async def test_a87_web_create_and_list(biz_engine) -> None:
     assert "用所选图建档" in tpl_content, "素材库详情页应包含「用所选图建档」按钮"
 
 
+# ==== A87b（回归锁）：建档提交携带隐藏 BOM 空字段不得 500 ====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a87b_hidden_bom_fields_no_500(biz_engine) -> None:
+    """回归锁：浏览器随表单提交隐藏 BOM 空字段（row_N_bom_0_child=""）曾致
+    int("") ValueError → Internal Server Error（用户复核发现：建档点击提交必现 500）。
+    修复 = 后端空 child 跳过 + 前端非 combo 行禁用 BOM 输入。
+    此处模拟真实浏览器字段集（含隐藏 BOM 空行），断言不再 500。
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi.testclient import TestClient
+    from web.app import create_app
+    from web.tm_store import TMStore
+    from web.settings_store import SettingsStore
+
+    tm_store = TMStore(biz_engine)
+    settings_store = SettingsStore(biz_engine)
+
+    with patch("web.scrape_store.get_images", new_callable=AsyncMock, return_value=[]):
+        app = create_app(tm_store=tm_store, settings_store=settings_store)
+        client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+        client.cookies.set("role", "admin")
+
+        # 1. physical 行 + 浏览器必然发送的隐藏 BOM 空字段 → 建档成功（303 跳 /skus），不得 500
+        resp = client.post("/skus/new", data={
+            "product_name": "A87b打火机",
+            "row_0_name": "A87b红",
+            "row_0_kind": "physical",
+            "row_0_code": "A87B-RED",
+            "row_0_cost": "10.5",
+            "row_0_bom_0_child": "",
+            "row_0_bom_0_qty": "1",
+            "row_0_bom_1_child": "",
+            "row_0_bom_1_qty": "1",
+        })
+        assert resp.status_code == 303, \
+            f"physical 行 + 隐藏 BOM 空字段应 303 建档成功，实际 {resp.status_code}"
+        assert resp.headers.get("location", "").startswith("/skus?msg="), \
+            f"应跳转建档成功页，实际 location={resp.headers.get('location')}"
+
+        # 2. combo 行但配方空（用户漏填）→ 业务错误重定向回表单，不得 500
+        resp2 = client.post("/skus/new", data={
+            "product_name": "A87b组合",
+            "row_0_name": "A87b精装",
+            "row_0_kind": "combo",
+            "row_0_code": "A87B-COMBO",
+            "row_0_bom_0_child": "",
+            "row_0_bom_0_qty": "1",
+        })
+        assert resp2.status_code == 303, \
+            f"combo 空配方应 303 回表单（err），实际 {resp2.status_code}"
+        loc2 = resp2.headers.get("location", "")
+        assert "err=" in loc2, f"combo 空配方应带 err 重定向，实际 location={loc2}"
+
+        # 3. combo 行首配方行留空、后续真实行存在：空行应被跳过并收集真实行 → 建档成功
+        from sqlalchemy import text
+        async with AsyncSession(biz_engine) as s3:
+            res = await s3.execute(
+                text("SELECT id FROM catalog.item WHERE code = 'A87B-RED'")
+            )
+            child_id = res.scalar_one_or_none()
+        assert child_id is not None, "前置 physical 档案 A87B-RED 应存在"
+        resp3 = client.post("/skus/new", data={
+            "product_name": "A87b组合3",
+            "row_0_name": "A87b精装盒装",
+            "row_0_kind": "combo",
+            "row_0_code": "A87B-COMBO3",
+            "row_0_bom_0_child": "",       # 空配方行在前 → 应跳过
+            "row_0_bom_0_qty": "1",
+            "row_0_bom_1_child": str(child_id),  # 真实配方行在后 → 应被收集
+            "row_0_bom_1_qty": "2",
+        })
+        assert resp3.status_code == 303, \
+            f"combo 含真实配方行应 303 建档成功，实际 {resp3.status_code}"
+        loc3 = resp3.headers.get("location", "")
+        assert "msg=" in loc3 and "err=" not in loc3, \
+            f"combo 有效配方应建档成功，实际 location={loc3}"
+
+
 # ==== A88：引擎零改动回归（registry-check + 引擎文件树不含 catalog 新 worker/chain）====
 @pytest.mark.version_acceptance
 def test_a88_engine_unchanged_regression() -> None:
