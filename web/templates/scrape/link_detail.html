@@ -84,6 +84,8 @@
     <div class="card">
       <div class="card-header d-flex align-items-center justify-content-between">
         <h3 class="card-title mb-0">图片网格（{{ images|length }}）</h3>
+        <a href="/skus/new" class="btn btn-sm btn-outline-primary" id="btn-create-sku"
+           style="display:none"><i class="ti ti-box me-1"></i>用所选图建档</a>
       </div>
       <div class="card-body">
         {% if images %}
@@ -103,6 +105,7 @@
               </div>
               <div class="card-body p-2">
                 <div class="d-flex align-items-center gap-1 flex-wrap">
+                  <input type="checkbox" class="form-check-input img-select" value="{{ img.id }}" onchange="updateCreateSkuBtn()">
                   <span class="badge {{ img.source_mark_cls }}">{{ img.source_mark_label }}</span>
                   {% if img.watermark %}<span class="badge bg-orange-lt">水印</span>{% endif %}
                   {% if img.width and img.height %}
@@ -114,6 +117,21 @@
           </div>
           {% endfor %}
         </div>
+        <script>
+        function updateCreateSkuBtn() {
+          const checked = document.querySelectorAll('.img-select:checked');
+          const btn = document.getElementById('btn-create-sku');
+          if (btn) {
+            if (checked.length > 0) {
+              const ids = Array.from(checked).map(c => c.value).join(',');
+              btn.href = '/skus/new?image_ids=' + ids;
+              btn.style.display = '';
+            } else {
+              btn.style.display = 'none';
+            }
+          }
+        }
+        </script>
         {% else %}
         <div class="text-center py-5 text-muted">
           <div class="h1 mb-2">🖼️</div>

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}SKU 建档 · 刘全{% endblock %}
+{% block content_title %}SKU 建档{% endblock %}
+{% block content %}
+
+{% if msg %}
+<div class="alert alert-success alert-dismissible" role="alert">
+  <i class="ti ti-check me-1"></i>{{ msg }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+{% if err %}
+<div class="alert alert-danger alert-dismissible" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+</div>
+{% endif %}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h4 class="mb-0">档案列表（{{ total }} 条）</h4>
+  <a href="/skus/new" class="btn btn-primary"><i class="ti ti-plus me-1"></i>新建档案</a>
+</div>
+
+<!-- 筛选 -->
+<form method="get" action="/skus" class="row g-2 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label mb-1">商品名</label>
+    <input name="product_name" class="form-control form-control-sm" value="{{ request.query_params.get('product_name', '') }}" placeholder="按商品名筛选">
+  </div>
+  <div class="col-auto">
+    <label class="form-label mb-1">类型</label>
+    <select name="kind" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">全部</option>
+      <option value="physical">实物</option>
+      <option value="combo">组合</option>
+      <option value="custom">定制</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label mb-1">搜索</label>
+    <input name="keyword" class="form-control form-control-sm" value="{{ request.query_params.get('keyword', '') }}" placeholder="编号/档名">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-sm btn-outline-primary">筛选</button>
+  </div>
+</form>
+
+{% if groups %}
+  {% for pn, items in groups.items() %}
+  <div class="card mb-3">
+    <div class="card-header">
+      <h5 class="card-title mb-0"><i class="ti ti-tag me-1"></i>{{ pn }}</h5>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-vcenter table-hover mb-0">
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>档名</th>
+              <th>类型</th>
+              <th>成本</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td><code>{{ item.code }}</code></td>
+              <td>{{ item.name }}</td>
+              <td>
+                {% if item.kind == 'physical' %}
+                <span class="badge bg-blue-lt">实物</span>
+                {% elif item.kind == 'combo' %}
+                <span class="badge bg-purple-lt">组合</span>
+                {% else %}
+                <span class="badge bg-orange-lt">定制</span>
+                {% endif %}
+              </td>
+              <td>{{ "%.2f"|format(item.cost) if item.cost is not none else "—" }}</td>
+              <td>
+                {% if item.status == 'active' %}
+                <span class="badge bg-green-lt">在售</span>
+                {% else %}
+                <span class="badge bg-secondary-lt">下架</span>
+                {% endif %}
+              </td>
+              <td>
+                <a href="/skus/{{ item.id }}" class="btn btn-sm btn-outline-primary">详情</a>
+                <a href="/skus/{{ item.id }}/inventory" class="btn btn-sm btn-outline-secondary">库存</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="empty">
+  <p class="empty-title">暂无档案</p>
+  <p class="empty-subtitle text-muted">点击「新建档案」开始建档</p>
+  <div class="empty-action">
+    <a href="/skus/new" class="btn btn-primary"><i class="ti ti-plus me-1"></i>新建档案</a>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

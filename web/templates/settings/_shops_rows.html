@@ -1,11 +1,11 @@
 {# 店铺列表行（整页 include + HTMX 局部刷新片段共用；上下文：shops/msg/err） #}
 {% if msg %}
-<tr><td colspan="4"><div class="alert alert-success alert-dismissible py-2 mb-2" role="alert">
+<tr><td colspan="5"><div class="alert alert-success alert-dismissible py-2 mb-2" role="alert">
   <i class="ti ti-check me-1"></i>{{ msg }}
 </div></td></tr>
 {% endif %}
 {% if err %}
-<tr><td colspan="4"><div class="alert alert-danger alert-dismissible py-2 mb-2" role="alert">
+<tr><td colspan="5"><div class="alert alert-danger alert-dismissible py-2 mb-2" role="alert">
   <i class="ti ti-alert-triangle me-1"></i>{{ err }}
 </div></td></tr>
 {% endif %}
@@ -13,6 +13,9 @@
 <tr>
   <td class="fw-semibold">{{ shop.name }}</td>
   <td class="text-muted">{{ shop.remark or "—" }}</td>
+  <td>
+    <span class="badge bg-blue-lt">{{ shop.platform or "other" }}</span>
+  </td>
   <td>
     {% if shop.enabled %}
     <span class="badge bg-green-lt">启用</span>
@@ -62,6 +65,15 @@
                 <label class="form-label">备注</label>
                 <input name="remark" class="form-control" value="{{ shop.remark }}">
               </div>
+              <div class="mb-3">
+                <label class="form-label">平台</label>
+                <select name="platform" class="form-select">
+                  <option value="etsy" {{ 'selected' if shop.platform == 'etsy' else '' }}>Etsy</option>
+                  <option value="xianyu" {{ 'selected' if shop.platform == 'xianyu' else '' }}>闲鱼</option>
+                  <option value="xhs" {{ 'selected' if shop.platform == 'xhs' else '' }}>小红书</option>
+                  <option value="other" {{ 'selected' if (shop.platform or 'other') == 'other' else '' }}>其他</option>
+                </select>
+              </div>
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -75,6 +87,6 @@
 </tr>
 {% else %}
 <tr>
-  <td colspan="4" class="text-center text-muted py-4">暂无店铺——新建店铺后在此管理</td>
+  <td colspan="5" class="text-center text-muted py-4">暂无店铺——新建店铺后在此管理</td>
 </tr>
 {% endfor %}

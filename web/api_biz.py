@@ -973,6 +973,451 @@ def create_biz_router(
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
 
+    # ==== v0.7 SKU 建档 — catalog 组（§8.1）====
+
+    # ---- Pydantic 请求体 ----
+
+    class BomRowIn(BaseModel):
+        child_item_id: int
+        qty: float = 1
+
+    class ItemRowIn(BaseModel):
+        name: str
+        kind: str  # physical/combo/custom
+        code: str
+        cost: float | None = None
+        supplier: str | None = None
+        remark: str | None = None
+        bom: list[BomRowIn] | None = None
+        image_file_ids: list[int] | None = None
+
+    class ItemCreateIn(BaseModel):
+        product_name: str | None = None
+        rows: list[ItemRowIn]
+
+    class ItemPatchIn(BaseModel):
+        code: str | None = None
+        cost: float | None = None
+        supplier: str | None = None
+        name: str | None = None
+        remark: str | None = None
+
+    class ItemStatusIn(BaseModel):
+        to: str  # active / delisted
+
+    class AlbumImagesIn(BaseModel):
+        image_file_ids: list[int]
+
+    class ItemImagePatchIn(BaseModel):
+        sort: int | None = None
+        is_main: bool | None = None
+
+    class UsageIn(BaseModel):
+        shop_id: int
+        note: str | None = None
+
+    # ---- GET /api/biz/catalog/items ----
+
+    @router.get("/catalog/items", dependencies=[Depends(_check_token)])
+    async def catalog_list_items(
+        product_name: str | None = None,
+        kind: str | None = None,
+        keyword: str | None = None,
+        page: int = 1,
+    ) -> dict:
+        """档案列表（读）。"""
+        from web.catalog_store import list_items
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+            result = await list_items(
+                session,
+                product_name=product_name,
+                kind=kind,
+                keyword=keyword,
+                page=max(1, page),
+            )
+            return result
+
+    # ---- GET /api/biz/catalog/items/{iid} ----
+
+    @router.get("/catalog/items/{iid}", dependencies=[Depends(_check_token)])
+    async def catalog_get_item(iid: int) -> dict:
+        """档案详情（信息+配方+图库+足迹+库存摘要）。"""
+        from web.catalog_store import get_item_detail
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+            detail = await get_item_detail(session, iid)
+            if detail is None:
+                raise HTTPException(status_code=404, detail="档案不存在")
+            return detail
+
+    # ---- POST /api/biz/catalog/items ----
+
+    @router.post("/catalog/items", dependencies=[Depends(_check_token)])
+    async def catalog_create_items(payload: ItemCreateIn) -> dict:
+        """建档（可多档同提交）。"""
+        from web.catalog_service import CatalogServiceError, create_items
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                rows_dicts = []
+                for row in payload.rows:
+                    rd: dict = {
+                        "name": row.name,
+                        "kind": row.kind,
+                        "code": row.code,
+                        "cost": row.cost,
+                        "supplier": row.supplier,
+                        "remark": row.remark,
+                    }
+                    if row.bom:
+                        rd["bom"] = [{"child_item_id": b.child_item_id, "qty": b.qty} for b in row.bom]
+                    rows_dicts.append(rd)
+                ids = await create_items(
+                    session,
+                    product_name=payload.product_name,
+                    rows=rows_dicts,
+                )
+                # 挂图（建档时可选 image_file_ids）
+                from web.image_service import attach_images
+                for item_id, row in zip(ids, payload.rows):
+                    if row.image_file_ids:
+                        try:
+                            await attach_images(session, item_id, row.image_file_ids)
+                        except Exception:
+                            pass  # 挂图失败不阻断建档
+            except CatalogServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True, "ids": ids}
+
+    # ---- PATCH /api/biz/catalog/items/{iid} ----
+
+    @router.patch("/catalog/items/{iid}", dependencies=[Depends(_check_token)])
+    async def catalog_patch_item(iid: int, payload: ItemPatchIn) -> dict:
+        """编辑档案。"""
+        from web.catalog_service import CatalogServiceError, patch_item
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                await patch_item(
+                    session,
+                    iid,
+                    code=payload.code,
+                    cost=payload.cost,
+                    supplier=payload.supplier,
+                    name=payload.name,
+                    remark=payload.remark,
+                )
+            except CatalogServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True}
+
+    # ---- POST /api/biz/catalog/items/{iid}/status ----
+
+    @router.post("/catalog/items/{iid}/status", dependencies=[Depends(_check_token)])
+    async def catalog_status_item(iid: int, payload: ItemStatusIn) -> dict:
+        """状态转换。"""
+        from web.catalog_service import CatalogServiceError, transition_status
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                await transition_status(session, iid, to=payload.to)
+            except CatalogServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True}
+
+    # ---- DELETE /api/biz/catalog/items/{iid} ----
+
+    @router.delete("/catalog/items/{iid}", dependencies=[Depends(_check_token)])
+    async def catalog_delete_item(iid: int) -> dict:
+        """删除档案（守卫：有下游引用 → 409）。"""
+        from web.catalog_service import CatalogServiceError, delete_item
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                await delete_item(session, iid)
+            except CatalogServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True}
+
+    # ---- POST /api/biz/catalog/items/{iid}/bom ----
+
+    @router.post("/catalog/items/{iid}/bom", dependencies=[Depends(_check_token)])
+    async def catalog_add_bom(iid: int, payload: BomRowIn) -> dict:
+        """为 combo 添加配方行。"""
+        from web.catalog_service import CatalogServiceError, add_bom_row
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                row_id = await add_bom_row(
+                    session, iid,
+                    child_item_id=payload.child_item_id,
+                    qty=payload.qty,
+                )
+            except CatalogServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True, "id": row_id}
+
+    # ---- DELETE /api/biz/catalog/items/{iid}/bom/{row_id} ----
+
+    @router.delete("/catalog/items/{iid}/bom/{row_id}", dependencies=[Depends(_check_token)])
+    async def catalog_delete_bom(iid: int, row_id: int) -> dict:
+        """删除配方行。"""
+        from web.catalog_service import CatalogServiceError, delete_bom_row
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                await delete_bom_row(session, iid, row_id)
+            except CatalogServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True}
+
+    # ---- POST /api/biz/catalog/items/{iid}/images ----
+
+    @router.post("/catalog/items/{iid}/images", dependencies=[Depends(_check_token)])
+    async def catalog_attach_images(iid: int, payload: AlbumImagesIn) -> dict:
+        """挂图。"""
+        from web.image_service import ImageServiceError, attach_images
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                ids = await attach_images(session, iid, payload.image_file_ids)
+            except ImageServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True, "ids": ids}
+
+    # ---- DELETE /api/biz/catalog/items/{iid}/images/{img_id} ----
+
+    @router.delete("/catalog/items/{iid}/images/{img_id}", dependencies=[Depends(_check_token)])
+    async def catalog_detach_image(iid: int, img_id: int) -> dict:
+        """撤图。"""
+        from web.image_service import ImageServiceError, detach_image
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                await detach_image(session, iid, img_id)
+            except ImageServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True}
+
+    # ---- PATCH /api/biz/catalog/items/{iid}/images/{img_id} ----
+
+    @router.patch("/catalog/items/{iid}/images/{img_id}", dependencies=[Depends(_check_token)])
+    async def catalog_patch_image(iid: int, img_id: int, payload: ItemImagePatchIn) -> dict:
+        """排序/主图。"""
+        from web.image_service import ImageServiceError, set_image_meta
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                await set_image_meta(
+                    session, iid, img_id,
+                    sort=payload.sort,
+                    is_main=payload.is_main,
+                )
+            except ImageServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True}
+
+    # ---- POST /api/biz/catalog/images/upload ----
+
+    @router.post("/catalog/images/upload", dependencies=[Depends(_check_token)])
+    async def catalog_upload_image(request: Request) -> dict:
+        """multipart 上传图。"""
+        from web.image_service import ImageServiceError, upload_image
+        from web.settings_store import SettingsStore
+
+        eng = _resolve_engine()
+        try:
+            form = await request.form()
+            file = form.get("file")
+            source_mark = str(form.get("source_mark", "selfshot"))
+            if file is None:
+                raise HTTPException(status_code=422, detail="缺少 file 字段")
+            file_bytes = await file.read()
+            filename = getattr(file, "filename", "upload.jpg") or "upload.jpg"
+
+            store = SettingsStore(eng)
+            storage_root = await store.get("scrape.storage_dir", "/opt/liuquan/scrape/")
+
+            async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+                img_id = await upload_image(
+                    session, file_bytes, filename,
+                    source_mark=source_mark,
+                    storage_root=str(storage_root),
+                )
+        except ImageServiceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        return {"ok": True, "id": img_id}
+
+    # ---- POST /api/biz/catalog/images/{image_id}/usage ----
+
+    @router.post("/catalog/images/{image_id}/usage", dependencies=[Depends(_check_token)])
+    async def catalog_register_usage(image_id: int, payload: UsageIn) -> dict:
+        """登记足迹。"""
+        from web.image_service import ImageServiceError, register_usage
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                usage_id = await register_usage(
+                    session, image_id, payload.shop_id,
+                    note=payload.note or "",
+                )
+            except ImageServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True, "id": usage_id}
+
+    # ---- DELETE /api/biz/catalog/images/{image_id}/usage/{usage_id} ----
+
+    @router.delete("/catalog/images/{image_id}/usage/{usage_id}", dependencies=[Depends(_check_token)])
+    async def catalog_unregister_usage(image_id: int, usage_id: int) -> dict:
+        """撤销足迹。"""
+        from web.image_service import ImageServiceError, unregister_usage
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                await unregister_usage(session, image_id, usage_id)
+            except ImageServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True}
+
+    # ---- GET /api/biz/catalog/images/usage ----
+
+    @router.get("/catalog/images/usage", dependencies=[Depends(_check_token)])
+    async def catalog_list_usages(image_file_id: int | None = None) -> list[dict]:
+        """足迹查询（含 platform）。"""
+        from web.image_service import list_usages
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+            return await list_usages(session, image_file_id=image_file_id)
+
+    # ==== v0.7 SKU 建档 — inventory 组（§8.2）====
+
+    class WarehouseCreateIn(BaseModel):
+        name: str
+        remark: str | None = None
+
+    class LedgerWriteIn(BaseModel):
+        item_id: int
+        warehouse_id: int
+        change_type: str
+        qty: float
+        ref_type: str | None = None
+        ref_id: int | None = None
+        note: str | None = None
+
+    # ---- GET /api/biz/inventory/warehouses ----
+
+    @router.get("/inventory/warehouses", dependencies=[Depends(_check_token)])
+    async def inventory_list_warehouses() -> list[dict]:
+        """仓库列表。"""
+        from web.inventory_service import list_warehouses
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+            rows = await list_warehouses(session)
+            return [
+                {
+                    "id": w.id,
+                    "name": w.name,
+                    "remark": w.remark or "",
+                    "enabled": w.enabled,
+                    "created_at": w.created_at.isoformat() if w.created_at else None,
+                }
+                for w in rows
+            ]
+
+    # ---- POST /api/biz/inventory/warehouses ----
+
+    @router.post("/inventory/warehouses", dependencies=[Depends(_check_token)])
+    async def inventory_create_warehouse(payload: WarehouseCreateIn) -> dict:
+        """建仓。"""
+        from web.inventory_service import InventoryServiceError, create_warehouse
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                wid = await create_warehouse(
+                    session, name=payload.name,
+                    remark=payload.remark or "",
+                )
+            except InventoryServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True, "id": wid}
+
+    # ---- GET /api/biz/inventory/stocks ----
+
+    @router.get("/inventory/stocks", dependencies=[Depends(_check_token)])
+    async def inventory_list_stocks(
+        item_id: int | None = None,
+        warehouse_id: int | None = None,
+    ) -> list[dict]:
+        """库存查询。"""
+        from web.inventory_service import list_stocks
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+            return await list_stocks(
+                session, item_id=item_id, warehouse_id=warehouse_id,
+            )
+
+    # ---- POST /api/biz/inventory/ledger ----
+
+    @router.post("/inventory/ledger", dependencies=[Depends(_check_token)])
+    async def inventory_write_ledger(payload: LedgerWriteIn) -> dict:
+        """唯一库存变动入口。"""
+        from web.inventory_service import InventoryServiceError, write_ledger
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session, session.begin():
+            try:
+                result = await write_ledger(
+                    session,
+                    item_id=payload.item_id,
+                    warehouse_id=payload.warehouse_id,
+                    change_type=payload.change_type,
+                    qty=payload.qty,
+                    ref_type=payload.ref_type,
+                    ref_id=payload.ref_id,
+                    note=payload.note or "",
+                )
+            except InventoryServiceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            return {"ok": True, **result}
+
+    # ---- GET /api/biz/inventory/ledgers ----
+
+    @router.get("/inventory/ledgers", dependencies=[Depends(_check_token)])
+    async def inventory_list_ledgers(
+        item_id: int | None = None,
+        warehouse_id: int | None = None,
+        change_type: str | None = None,
+    ) -> list[dict]:
+        """流水查询。"""
+        from web.inventory_service import list_ledgers
+
+        eng = _resolve_engine()
+        async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+            return await list_ledgers(
+                session,
+                item_id=item_id,
+                warehouse_id=warehouse_id,
+                change_type=change_type,
+            )
+
     return router
 
 

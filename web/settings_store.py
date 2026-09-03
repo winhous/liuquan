@@ -164,13 +164,17 @@ class SettingsStore:
                 "name": s.name,
                 "remark": s.remark or "",
                 "enabled": s.enabled,
+                "platform": getattr(s, "platform", "other") or "other",
                 "created_at": s.created_at,
             }
             for s in rows
         ]
 
-    async def create_shop(self, name: str, remark: str = "") -> int:
+    async def create_shop(self, name: str, remark: str = "", platform: str = "other") -> int:
         """新建店铺（重名抛业务错）。"""
+        _VALID_PLATFORMS = frozenset({"etsy", "xianyu", "xhs", "other"})
+        if platform not in _VALID_PLATFORMS:
+            platform = "other"
         name = name.strip()
         if not name:
             raise SettingsError("店铺名必填")
@@ -182,13 +186,16 @@ class SettingsStore:
             )
             if dup.scalar_one_or_none() is not None:
                 raise SettingsError(f"已存在同名店铺「{name}」（忽略大小写）")
-            row = Shop(name=name, remark=(remark or "").strip())
+            row = Shop(name=name, remark=(remark or "").strip(), platform=platform)
             session.add(row)
             await session.flush()
             return row.id
 
-    async def update_shop(self, shop_id: int, name: str, remark: str = "") -> None:
-        """改店铺名/备注（重名抛业务错）。"""
+    async def update_shop(self, shop_id: int, name: str, remark: str = "", platform: str = "other") -> None:
+        """改店铺名/备注/平台（重名抛业务错）。"""
+        _VALID_PLATFORMS = frozenset({"etsy", "xianyu", "xhs", "other"})
+        if platform not in _VALID_PLATFORMS:
+            platform = "other"
         name = name.strip()
         if not name:
             raise SettingsError("店铺名必填")
@@ -206,6 +213,7 @@ class SettingsStore:
                 raise SettingsError(f"已存在同名店铺「{name}」（忽略大小写）")
             shop.name = name
             shop.remark = (remark or "").strip()
+            shop.platform = platform
 
     async def toggle_shop(self, shop_id: int) -> bool:
         """启停店铺；返回新的 enabled 状态。"""

@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}新建档案 · SKU 建档 · 刘全{% endblock %}
+{% block content_title %}新建档案{% endblock %}
+{% block content %}
+
+<form method="post" action="/skus/new" id="new-item-form">
+  <div class="card mb-3">
+    <div class="card-header">
+      <h3 class="card-title"><i class="ti ti-info-circle me-1"></i>商品名（归类文本）</h3>
+    </div>
+    <div class="card-body">
+      <input name="product_name" class="form-control" placeholder="如：打火机（可空，同商品名下逐档加）" maxlength="120">
+      <small class="text-muted">商品名用于按款聚合；可空。已存在则选择，输入新名 = 新归类。</small>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h3 class="card-title mb-0"><i class="ti ti-list me-1"></i>建档行</h3>
+      <button type="button" class="btn btn-sm btn-outline-success" onclick="addRow()"><i class="ti ti-plus me-1"></i>加一行</button>
+    </div>
+    <div class="card-body" id="rows-container">
+      <!-- 默认一行 -->
+      <div class="row-item border rounded p-3 mb-3" data-idx="0">
+        <div class="row g-2 mb-2">
+          <div class="col-md-3">
+            <label class="form-label">档名 <span class="text-danger">*</span></label>
+            <input name="row_0_name" class="form-control" required maxlength="120" placeholder="红色">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">类型</label>
+            <select name="row_0_kind" class="form-select" onchange="onKindChange(0, this.value)">
+              <option value="physical">实物</option>
+              <option value="combo">组合</option>
+              <option value="custom">定制</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">编号 <span class="text-danger">*</span></label>
+            <input name="row_0_code" class="form-control" required pattern="[A-Za-z0-9_-]{1,40}" maxlength="40" placeholder="LTR-RED">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">成本</label>
+            <input name="row_0_cost" class="form-control" type="number" step="0.01" min="0" placeholder="12.50">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">采购源</label>
+            <input name="row_0_supplier" class="form-control" placeholder="1688/淘宝">
+          </div>
+        </div>
+        <!-- BOM 区（combo 显示） -->
+        <div class="bom-area" id="bom-0" style="display:none">
+          <label class="form-label fw-bold">配方（BOM）</label>
+          <div class="bom-rows" id="bom-rows-0">
+            <div class="bom-row row g-2 mb-1">
+              <div class="col-md-5">
+                <select name="row_0_bom_0_child" class="form-select form-select-sm">
+                  <option value="">选择子件实物档案…</option>
+                  {% for item in items %}
+                    {% if item.kind == 'physical' %}
+                    <option value="{{ item.id }}">{{ item.code }} - {{ item.name }}</option>
+                    {% endif %}
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-3">
+                <input name="row_0_bom_0_qty" class="form-control form-control-sm" type="number" step="0.001" min="0.001" value="1" placeholder="数量">
+              </div>
+              <div class="col-auto">
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeBomRow(this)">删除</button>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="addBomRow(0)">+ 加配方行</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 选图区 -->
+  <div class="card mb-3">
+    <div class="card-header">
+      <h3 class="card-title"><i class="ti ti-photo me-1"></i>选图（可选，可后补）</h3>
+    </div>
+    <div class="card-body">
+      {% if images %}
+      <div class="row g-2" id="image-picker">
+        {% for img in images %}
+        <div class="col-auto">
+          <div class="form-check">
+            <input class="form-check-input image-check" type="checkbox"
+                   name="image_file_ids_raw" value="{{ img.id }}"
+                   id="img-{{ img.id }}"
+                   {% if img.id in preselected_image_ids %}checked{% endif %}>
+            <label class="form-check-label" for="img-{{ img.id }}">
+              {% if img.local_path %}
+              <img src="/scrape/thumbnail/{{ img.id }}" alt="" style="width:80px;height:80px;object-fit:cover;border-radius:4px;">
+              {% else %}
+              <div style="width:80px;height:80px;background:#f1f5f9;border-radius:4px;display:grid;place-items:center;">📷</div>
+              {% endif %}
+            </label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <input type="hidden" name="image_file_ids" id="image-ids-field" value="{{ preselected_image_ids | join(',') }}">
+      <small class="text-muted d-block mt-2">勾选图片后将挂到所有新建档案上。</small>
+      {% else %}
+      <p class="text-muted mb-0">暂无素材库图片。可先建档，后补图。</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary btn-lg"><i class="ti ti-check me-1"></i>提交建档</button>
+    <a href="/skus" class="btn btn-outline-secondary btn-lg">取消</a>
+  </div>
+</form>
+
+<script>
+let rowCounter = 1;
+
+function addRow() {
+  const idx = rowCounter++;
+  const container = document.getElementById('rows-container');
+  const tpl = `
+  <div class="row-item border rounded p-3 mb-3" data-idx="${idx}">
+    <div class="d-flex justify-content-end mb-1">
+      <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.row-item').remove()">删除此行</button>
+    </div>
+    <div class="row g-2 mb-2">
+      <div class="col-md-3">
+        <label class="form-label">档名 <span class="text-danger">*</span></label>
+        <input name="row_${idx}_name" class="form-control" required maxlength="120">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">类型</label>
+        <select name="row_${idx}_kind" class="form-select" onchange="onKindChange(${idx}, this.value)">
+          <option value="physical">实物</option>
+          <option value="combo">组合</option>
+          <option value="custom">定制</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">编号 <span class="text-danger">*</span></label>
+        <input name="row_${idx}_code" class="form-control" required pattern="[A-Za-z0-9_-]{1,40}" maxlength="40">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">成本</label>
+        <input name="row_${idx}_cost" class="form-control" type="number" step="0.01" min="0">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">采购源</label>
+        <input name="row_${idx}_supplier" class="form-control">
+      </div>
+    </div>
+    <div class="bom-area" id="bom-${idx}" style="display:none">
+      <label class="form-label fw-bold">配方（BOM）</label>
+      <div class="bom-rows" id="bom-rows-${idx}">
+        <div class="bom-row row g-2 mb-1">
+          <div class="col-md-5">
+            <select name="row_${idx}_bom_0_child" class="form-select form-select-sm">
+              <option value="">选择子件实物档案…</option>
+              {% for item in items %}{% if item.kind == 'physical' %}
+              <option value="{{ item.id }}">{{ item.code }} - {{ item.name }}</option>
+              {% endif %}{% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <input name="row_${idx}_bom_0_qty" class="form-control form-control-sm" type="number" step="0.001" min="0.001" value="1">
+          </div>
+          <div class="col-auto">
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeBomRow(this)">删除</button>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="addBomRow(${idx})">+ 加配方行</button>
+    </div>
+  </div>`;
+  container.insertAdjacentHTML('beforeend', tpl);
+}
+
+function onKindChange(idx, kind) {
+  const bom = document.getElementById('bom-' + idx);
+  if (bom) bom.style.display = kind === 'combo' ? '' : 'none';
+}
+
+let bomCounters = {};
+function addBomRow(idx) {
+  if (!bomCounters[idx]) bomCounters[idx] = 1;
+  const bi = bomCounters[idx]++;
+  const container = document.getElementById('bom-rows-' + idx);
+  const tpl = `
+  <div class="bom-row row g-2 mb-1">
+    <div class="col-md-5">
+      <select name="row_${idx}_bom_${bi}_child" class="form-select form-select-sm">
+        <option value="">选择子件实物档案…</option>
+        {% for item in items %}{% if item.kind == 'physical' %}
+        <option value="{{ item.id }}">{{ item.code }} - {{ item.name }}</option>
+        {% endif %}{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <input name="row_${idx}_bom_${bi}_qty" class="form-control form-control-sm" type="number" step="0.001" min="0.001" value="1">
+    </div>
+    <div class="col-auto">
+      <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeBomRow(this)">删除</button>
+    </div>
+  </div>`;
+  container.insertAdjacentHTML('beforeend', tpl);
+}
+
+function removeBomRow(btn) {
+  btn.closest('.bom-row').remove();
+}
+
+// 合并勾选的图片 ID 到 hidden field
+document.getElementById('new-item-form').addEventListener('submit', function() {
+  const checked = document.querySelectorAll('.image-check:checked');
+  const ids = Array.from(checked).map(cb => cb.value).join(',');
+  document.getElementById('image-ids-field').value = ids;
+});
+</script>
+{% endblock %}

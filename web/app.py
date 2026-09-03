@@ -36,6 +36,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from models.tm import Task, TaskProposal
 from web.crm_store import CRMStore, CrmWebError
@@ -191,6 +192,9 @@ _ACTION_MSG = {
 MODULES: list[dict[str, Any]] = [
     {"id": "workspace", "name": "工作台", "icon": "ti ti-dashboard", "href": "/modules/workspace",
      "desc": "统计数据等工作台内容后续在定（决策 15：统计一定会做）"},
+    # v0.7：SKU 建档一级菜单（workspace 之后、tm 之前，详设 §4.3）
+    {"id": "skus", "name": "SKU 建档", "icon": "ti ti-box", "href": "/skus",
+     "desc": "货档案建档/配方/图库/库存（v0.7）"},
     {"id": "tm", "name": "任务中心", "icon": "ti ti-list-check", "href": "/tasks",
      "desc": "AI 提案转任务、人工处理回流（v0.2 首个真实模块）"},
     {"id": "crm", "name": "CRM", "icon": "ti ti-message-circle", "href": "/crm",
@@ -590,6 +594,17 @@ def _settings_store(request: Request) -> SettingsStore:
     return request.app.state.settings_store
 
 
+def _resolve_biz_engine(request: Request):
+    """v0.7 SKU 页路由获取业务库 engine（优先用 TMStore 同库 engine）。"""
+    # 优先使用已注入的 TMStore 的 engine（测试和生产一致）
+    tm = getattr(request.app.state, "tm_store", None)
+    if tm is not None and hasattr(tm, "_engine"):
+        return tm._engine
+    # 回退：从 api_biz 的已解析 engine
+    from web.api_biz import _resolve_engine  # noqa: F811
+    return _resolve_engine()
+
+
 # ---- 应用工厂（测试构造注入：tm_store / engine_client_factory）----
 
 def create_app(
@@ -629,7 +644,8 @@ def create_app(
     # ---- 设置页登录保护（决策 37-5：所有「登录用户」可访问；未登录拦到 /login）----
     @app.middleware("http")
     async def _settings_login_guard(request: Request, call_next):
-        if request.url.path.startswith("/settings") and not request.cookies.get("role"):
+        path = request.url.path
+        if (path.startswith("/settings") or path.startswith("/skus")) and not request.cookies.get("role"):
             return RedirectResponse("/login", status_code=303)
         return await call_next(request)
 
@@ -1116,6 +1132,273 @@ def create_app(
         return templates.TemplateResponse(
             request, "module.html", _ctx(request, module_id, module=module)
         )
+
+    # ---- v0.7 SKU 建档页（详设 §4.3 / §7）----
+
+    @app.get("/skus")
+    async def sku_list(
+        request: Request,
+        product_name: str = "",
+        kind: str = "",
+        keyword: str = "",
+        msg: str = "",
+        err: str = "",
+    ):
+        """档案列表页（按商品名分组 + 新建入口）。"""
+        from web.catalog_store import list_items
+
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        biz = _resolve_biz_engine(request)
+        async with async_sessionmaker(biz, expire_on_commit=False)() as session:
+            result = await list_items(
+                session,
+                product_name=product_name or None,
+                kind=kind or None,
+                keyword=keyword or None,
+            )
+        # 按 product_name 分组
+        groups: dict[str, list] = {}
+        for item in result["items"]:
+            pn = item["product_name"] or "(无商品名)"
+            groups.setdefault(pn, []).append(item)
+        return templates.TemplateResponse(
+            request,
+            "skus/index.html",
+            _ctx(
+                request,
+                "skus",
+                groups=groups,
+                total=result["total"],
+                msg=msg,
+                err=err,
+            ),
+        )
+
+    @app.get("/skus/new")
+    async def sku_new(request: Request, image_ids: str = ""):
+        """建档表单页。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_store import list_items
+        # 已有档案列表（combo 引用子件用）
+        biz = _resolve_biz_engine(request)
+        async with async_sessionmaker(biz, expire_on_commit=False)() as session:
+            items_result = await list_items(session, page_size=1000)
+        # 图片列表（素材库勾选用）
+        from web import scrape_store
+        images = await scrape_store.get_images(limit=1000)
+        # 仓库列表
+        from web.inventory_service import list_warehouses
+        async with async_sessionmaker(biz, expire_on_commit=False)() as session:
+            warehouses = await list_warehouses(session)
+        preselected_ids = [int(x) for x in image_ids.split(",") if x.strip().isdigit()]
+        return templates.TemplateResponse(
+            request,
+            "skus/new.html",
+            _ctx(
+                request,
+                "skus",
+                items=items_result["items"],
+                images=images,
+                warehouses=[{"id": w.id, "name": w.name} for w in warehouses],
+                preselected_image_ids=preselected_ids,
+            ),
+        )
+
+    @app.post("/skus/new")
+    async def sku_new_submit(request: Request):
+        """建档表单提交（页面表单 POST → 路由 → service，与 api_biz 共用）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_service import CatalogServiceError, create_items
+
+        biz = _resolve_biz_engine(request)
+        form = await request.form()
+        product_name = (form.get("product_name") or "").strip() or None
+
+        # 解析多行档（row_0_name, row_0_kind, ...）
+        rows: list[dict] = []
+        idx = 0
+        while True:
+            name = form.get(f"row_{idx}_name")
+            if name is None:
+                break
+            kind = form.get(f"row_{idx}_kind", "physical")
+            code = form.get(f"row_{idx}_code", "")
+            cost_str = form.get(f"row_{idx}_cost", "")
+            supplier = form.get(f"row_{idx}_supplier", "")
+            row: dict = {
+                "name": str(name).strip(),
+                "kind": str(kind),
+                "code": str(code).strip(),
+                "cost": float(cost_str) if cost_str else None,
+                "supplier": str(supplier).strip() or None,
+            }
+            # BOM 行
+            bom_rows = []
+            bidx = 0
+            while True:
+                child_id_str = form.get(f"row_{idx}_bom_{bidx}_child")
+                if child_id_str is None:
+                    break
+                qty_str = form.get(f"row_{idx}_bom_{bidx}_qty", "1")
+                bom_rows.append({
+                    "child_item_id": int(child_id_str),
+                    "qty": float(qty_str) if qty_str else 1,
+                })
+                bidx += 1
+            if bom_rows:
+                row["bom"] = bom_rows
+            rows.append(row)
+            idx += 1
+
+        # 图片 ID
+        image_ids_raw = form.get("image_file_ids", "")
+        image_ids = [int(x) for x in str(image_ids_raw).split(",") if x.strip().isdigit()]
+
+        try:
+            async with async_sessionmaker(biz, expire_on_commit=False)() as session, session.begin():
+                ids = await create_items(session, product_name=product_name, rows=rows)
+                # 挂图
+                if image_ids:
+                    from web.image_service import attach_images
+                    for item_id in ids:
+                        try:
+                            await attach_images(session, item_id, image_ids)
+                        except Exception:
+                            pass
+        except CatalogServiceError as exc:
+            return _redirect("/skus/new", err=str(exc))
+        return _redirect("/skus", msg=f"建档成功（{len(ids)} 条）")
+
+    @app.get("/skus/{item_id}")
+    async def sku_detail(request: Request, item_id: int, msg: str = "", err: str = ""):
+        """档案详情页。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_store import get_item_detail
+
+        biz = _resolve_biz_engine(request)
+        async with async_sessionmaker(biz, expire_on_commit=False)() as session:
+            detail = await get_item_detail(session, item_id)
+        if detail is None:
+            return _redirect("/skus", err="档案不存在")
+        # 店铺列表（足迹登记下拉 + 状态操作）
+        from web.settings_store import SettingsStore
+        store = SettingsStore(biz)
+        shops = await store.list_shops()
+        return templates.TemplateResponse(
+            request,
+            "skus/detail.html",
+            _ctx(
+                request,
+                "skus",
+                item=detail,
+                shops=[{"id": s["id"], "name": s["name"]} for s in shops],
+                msg=msg,
+                err=err,
+            ),
+        )
+
+    @app.get("/skus/{item_id}/inventory")
+    async def sku_inventory(
+        request: Request,
+        item_id: int,
+        msg: str = "",
+        err: str = "",
+    ):
+        """库存页。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_store import get_item_detail
+        from web.inventory_service import list_stocks, list_ledgers, list_warehouses
+
+        biz = _resolve_biz_engine(request)
+        async with async_sessionmaker(biz, expire_on_commit=False)() as session:
+            detail = await get_item_detail(session, item_id)
+            if detail is None:
+                return _redirect("/skus", err="档案不存在")
+            stocks = await list_stocks(session, item_id=item_id)
+            ledgers = await list_ledgers(session, item_id=item_id)
+            warehouses = await list_warehouses(session)
+        return templates.TemplateResponse(
+            request,
+            "skus/inventory.html",
+            _ctx(
+                request,
+                "skus",
+                item=detail,
+                stocks=stocks,
+                ledgers=ledgers,
+                warehouses=[{"id": w.id, "name": w.name} for w in warehouses],
+                msg=msg,
+                err=err,
+            ),
+        )
+
+    @app.post("/skus/{item_id}/status")
+    async def sku_status_submit(request: Request, item_id: int):
+        """档案状态转换（页面表单 → service）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_service import CatalogServiceError, transition_status
+
+        biz = _resolve_biz_engine(request)
+        form = await request.form()
+        to = form.get("to", "active")
+        try:
+            async with async_sessionmaker(biz, expire_on_commit=False)() as session, session.begin():
+                await transition_status(session, item_id, to=to)
+        except CatalogServiceError as exc:
+            return _redirect(f"/skus/{item_id}", err=str(exc))
+        return _redirect(f"/skus/{item_id}", msg="状态已更新")
+
+    @app.post("/skus/{item_id}/delete")
+    async def sku_delete_submit(request: Request, item_id: int):
+        """删除档案（页面表单 → service）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.catalog_service import CatalogServiceError, delete_item
+
+        biz = _resolve_biz_engine(request)
+        try:
+            async with async_sessionmaker(biz, expire_on_commit=False)() as session, session.begin():
+                await delete_item(session, item_id)
+        except CatalogServiceError as exc:
+            return _redirect(f"/skus/{item_id}", err=str(exc))
+        return _redirect("/skus", msg="档案已删除")
+
+    @app.post("/skus/{item_id}/inventory/ledger")
+    async def sku_inventory_ledger_submit(request: Request, item_id: int):
+        """库存记账（页面表单 → service）。"""
+        if not request.cookies.get("role"):
+            return RedirectResponse("/login", status_code=303)
+        from web.inventory_service import InventoryServiceError, write_ledger
+
+        biz = _resolve_biz_engine(request)
+        form = await request.form()
+        change_type = form.get("change_type", "purchase")
+        warehouse_id = int(form.get("warehouse_id", 0))
+        qty_str = form.get("qty", "0")
+        note = form.get("note", "")
+        try:
+            qty = float(qty_str)
+        except (ValueError, TypeError):
+            return _redirect(f"/skus/{item_id}/inventory", err="数量格式错误")
+        try:
+            async with async_sessionmaker(biz, expire_on_commit=False)() as session, session.begin():
+                await write_ledger(
+                    session,
+                    item_id=item_id,
+                    warehouse_id=warehouse_id,
+                    change_type=change_type,
+                    qty=qty,
+                    note=note,
+                )
+        except InventoryServiceError as exc:
+            return _redirect(f"/skus/{item_id}/inventory", err=str(exc))
+        return _redirect(f"/skus/{item_id}/inventory", msg="记账成功")
 
     # ---- 任务中心（真实 tm 数据）----
 
@@ -1952,13 +2235,14 @@ def create_app(
 
     @app.post("/settings/shops/{shop_id}")
     async def settings_shops_update(request: Request, shop_id: int):
-        """改店铺（name/remark）。"""
+        """改店铺（name/remark/platform）。"""
         form = await request.form()
         name = str(form.get("name", "")).strip()
         remark = str(form.get("remark", "")).strip()
+        platform = str(form.get("platform", "other")).strip()
         store = _settings_store(request)
         try:
-            await store.update_shop(shop_id, name, remark)
+            await store.update_shop(shop_id, name, remark, platform=platform)
         except SettingsError as exc:
             return _redirect("/settings/shops", err=str(exc))
         return _redirect("/settings/shops", msg="店铺已更新")

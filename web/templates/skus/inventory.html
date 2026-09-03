@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}{{ item.name }} · 库存 · SKU 建档 · 刘全{% endblock %}
+{% block content_title %}{{ item.name }} - 库存管理{% endblock %}
+{% block content %}
+
+{% if msg %}
+<div class="alert alert-success alert-dismissible" role="alert">
+  <i class="ti ti-check me-1"></i>{{ msg }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+{% if err %}
+<div class="alert alert-danger alert-dismissible" role="alert">
+  <i class="ti ti-alert-triangle me-1"></i>{{ err }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a href="/skus/{{ item.id }}" class="btn btn-outline-secondary btn-sm">← 返回详情</a>
+  <h4 class="mb-0">{{ item.code }} · {{ item.name }}
+    <span class="badge bg-blue-lt ms-2">{{ item.kind }}</span>
+  </h4>
+</div>
+
+{% if item.kind != 'physical' %}
+<div class="alert alert-warning">
+  <i class="ti ti-alert-triangle me-1"></i>
+  只有实物档案（physical）可记库存。组合档案（combo）库存由子件各自管理，定制档案（custom）无库存。
+</div>
+{% else %}
+
+<!-- 各仓库存 -->
+<div class="card mb-3">
+  <div class="card-header"><h3 class="card-title"><i class="ti ti-package me-1"></i>各仓库存</h3></div>
+  <div class="card-body">
+    {% if stocks %}
+    <div class="table-responsive">
+      <table class="table table-vcenter">
+        <thead><tr><th>仓库</th><th>库存数</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for s in stocks %}
+          <tr>
+            <td>{{ s.warehouse_id }}</td>
+            <td class="fw-bold">{{ s.qty }}</td>
+            <td>
+              <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#ledger-modal"
+                      onclick="setLedger('purchase', {{ s.warehouse_id }})">入库</button>
+              <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#ledger-modal"
+                      onclick="setLedger('adjust', {{ s.warehouse_id }})">调整</button>
+              <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#ledger-modal"
+                      onclick="setLedger('loss', {{ s.warehouse_id }})">报损</button>
+              <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#ledger-modal"
+                      onclick="setLedger('return', {{ s.warehouse_id }})">退货</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">暂无库存记录。点击下方「记一笔」开始。</p>
+    {% endif %}
+    <button class="btn btn-primary mt-2" data-bs-toggle="modal" data-bs-target="#ledger-modal"
+            onclick="setLedger('purchase', '')"><i class="ti ti-plus me-1"></i>记一笔</button>
+  </div>
+</div>
+
+<!-- 流水 -->
+<div class="card">
+  <div class="card-header"><h3 class="card-title"><i class="ti ti-history me-1"></i>流水记录</h3></div>
+  <div class="card-body">
+    {% if ledgers %}
+    <div class="table-responsive">
+      <table class="table table-sm table-vcenter">
+        <thead>
+          <tr>
+            <th>类型</th>
+            <th>变动</th>
+            <th>变动前</th>
+            <th>变动后</th>
+            <th>备注</th>
+            <th>时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in ledgers %}
+          <tr>
+            <td>
+              {% if l.change_type == 'purchase' %}
+              <span class="badge bg-success-lt">采购入库</span>
+              {% elif l.change_type == 'loss' %}
+              <span class="badge bg-danger-lt">报损</span>
+              {% elif l.change_type == 'adjust' %}
+              <span class="badge bg-warning-lt">调整</span>
+              {% elif l.change_type == 'return' %}
+              <span class="badge bg-info-lt">退货入库</span>
+              {% elif l.change_type == 'sale' %}
+              <span class="badge bg-primary-lt">销售</span>
+              {% else %}
+              <span class="badge bg-secondary-lt">{{ l.change_type }}</span>
+              {% endif %}
+            </td>
+            <td class="{{ 'text-success' if l.qty_delta > 0 else 'text-danger' }}">
+              {{ "+" if l.qty_delta > 0 else "" }}{{ l.qty_delta }}
+            </td>
+            <td>{{ l.before_qty if l.before_qty is not none else "—" }}</td>
+            <td>{{ l.after_qty if l.after_qty is not none else "—" }}</td>
+            <td>{{ l.note or "—" }}</td>
+            <td>{{ l.created_at or "" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">暂无流水。</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 记账弹窗 -->
+<div class="modal fade" id="ledger-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="/skus/{{ item.id }}/inventory/ledger" id="ledger-form">
+        <div class="modal-header">
+          <h5 class="modal-title" id="ledger-modal-title">记一笔</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="change_type" id="ledger-change-type" value="purchase">
+          <div class="mb-3">
+            <label class="form-label">仓库</label>
+            <select name="warehouse_id" id="ledger-warehouse" class="form-select" required>
+              {% for w in warehouses %}
+              <option value="{{ w.id }}">{{ w.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">数量</label>
+            <input name="qty" type="number" step="0.001" min="0.001" class="form-control" required placeholder="输入数量">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">备注</label>
+            <input name="note" class="form-control" placeholder="原因（调整/报损建议必填）">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">确认</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function setLedger(type, whId) {
+  document.getElementById('ledger-change-type').value = type;
+  const titles = {purchase:'采购入库', loss:'报损', adjust:'调整', return:'退货入库', sale:'销售扣减'};
+  document.getElementById('ledger-modal-title').textContent = titles[type] || type;
+  if (whId) document.getElementById('ledger-warehouse').value = whId;
+}
+</script>
+
+{% endif %}
+{% endblock %}

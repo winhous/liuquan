@@ -436,6 +436,21 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v07.py::test_a85_image_usage_footprint"
     desc: "图足迹软提示：登记图用于店1（image_shop_usage + sys.shop.platform join）→ 足迹查询返回「Etsy-店1」；同图同店重复登记幂等；撤销成功"
+  - id: A86
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a86_write_via_api_only_shared_service"
+    desc: "写接口唯一通道 + 共享 service：api_biz catalog/inventory handler 调 service 函数（代码级断言不重复实现校验）；页面路由与 api_biz 共用 service；删除守卫；状态机 active→delisted→active"
+  - id: A87
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a87_web_create_and_list"
+    desc: "建档页/素材库联动：GET /skus/new 渲染（fake）→ POST 建档 → /skus 列表按商品名分组可见；素材库选图入口存在（DOM 断言）+ 素材库详情页「用所选图建档」按钮"
+  - id: A88
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a88_engine_unchanged_regression"
+    desc: "引擎零改动回归：registry-check 通过 + 引擎文件树不含 catalog 新 worker/chain"
   - id: A89
     version: v0.7
     status: implemented
