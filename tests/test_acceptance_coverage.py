@@ -32,12 +32,14 @@ def _build_full_manifest(
     overrides: dict[int, dict],
     fake_filename: str = "_b1_fake_acceptance.py",
 ) -> tuple[str, str]:
-    """构造完整 A1-A75 manifest YAML，返回 (yaml_text, fake_filename)。
+    """构造完整 A1-A89 manifest YAML，返回 (yaml_text, fake_filename)。
 
     overrides: {编号数字: 额外字段 dict}，用于覆盖默认值。
     """
+    # 批 2 已实现的 v0.7 断言集合（A77-A81 + A89）
+    v07_batch2_done = {77, 78, 79, 80, 81, 89}
     entries = []
-    for i in range(1, 77):  # A1-A76（v0.7 批 1 起含 A76）
+    for i in range(1, 90):  # A1-A89（v0.7 批 2 起含 A77-A81/A89）
         aid = f"A{i}"
         if i in overrides:
             ov = overrides[i]
@@ -52,7 +54,14 @@ def _build_full_manifest(
                 f'    status: planned\n'
                 f'    plan: "后续补"\n    desc: "planned gap"'
             )
-        elif i == 76:
+        elif i == 76 or i in v07_batch2_done:
+            entries.append(
+                f'  - id: {aid}\n'
+                f'    version: v0.7\n'
+                f'    status: planned\n'
+                f'    plan: "后续补"\n    desc: "planned gap"'
+            )
+        elif 82 <= i <= 89 and i not in v07_batch2_done:
             entries.append(
                 f'  - id: {aid}\n'
                 f'    version: v0.7\n'

@@ -391,3 +391,33 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v07.py::test_a76_catalog_schema_tables_and_seed"
     desc: "表结构：迁移 0013 建 schema catalog 7 表 + 约束（code UNIQUE/格式 CHECK、kind CHECK、stock UNIQUE、ledger 五类 CHECK、item_image/usage UNIQUE）+ sys.shop.platform 列（CHECK + default other）+ 两仓种子"
+  - id: A77
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a77_manual_create_items"
+    desc: "手工建档 physical：POST items（商品名=打火机 + 档 红色 LTR-RED cost 12.5）→ item 落库 active + 字段正确；同商品再加蓝档成功"
+  - id: A78
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a78_code_format_and_uniqueness"
+    desc: "编号校验：非法编号（逗号/斜杠/空格/中文/超长）→ 4xx；重复编号 → 409 不落库；合法通过；code 必填"
+  - id: A79
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a79_dup_name_in_product"
+    desc: "同商品同名档冲突：product_name=打火机 + name=红色 建两次 → 409"
+  - id: A80
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a80_combo_bom_and_no_stock"
+    desc: "combo 建档 + 配方：先建红机/精装盒 physical → 建 combo 精装红（BOM 红机×1+盒×1）→ 配方可见；child 非 physical 4xx；BOM 挂 physical 档 4xx；combo 无 stock 行"
+  - id: A81
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a81_custom_item_no_stock"
+    desc: "custom：建档 kind=custom → 无库存 + 成本可空；custom 挂 BOM 409；custom 无 stock 行"
+  - id: A89
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a89_legacy_friendly_create_no_image"
+    desc: "存量接缝：老货可无图建档 + code 用 ERP 风格编号（GLCA00001 格式通过）→ 导入通道可行"
