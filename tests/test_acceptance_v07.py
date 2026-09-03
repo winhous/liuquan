@@ -318,9 +318,10 @@ async def test_a78_code_format_and_uniqueness(biz_engine) -> None:
     """A78：编号校验（详设 §8.4-1）。
 
     非法编号（逗号/斜杠/空格/中文/超长）→ 4xx；重复编号 → 409 不落库；
-    合法通过；code 必填。
+    合法通过；code 可选（§16.2 自动编号）。
     """
     from web.catalog_service import create_items, CatalogServiceError
+    from models.catalog import Item
 
     # --- 非法编号测试 ---
     bad_codes = [
@@ -339,22 +340,28 @@ async def test_a78_code_format_and_uniqueness(biz_engine) -> None:
                     rows=[{"name": "测试", "kind": "physical", "code": bad_code}],
                 )
 
-    # --- code 必填 ---
+    # --- code 可选（§16.2 自动编号）---
+    # 注意：根据§16.2，code 现在是可选的，空则自动生成
+    # 测试空 code 应自动生成编号
     async with AsyncSession(biz_engine) as session, session.begin():
-        with pytest.raises(CatalogServiceError, match="必填"):
-            await create_items(
-                session,
-                product_name="测试",
-                rows=[{"name": "测试", "kind": "physical", "code": ""}],
-            )
+        ids = await create_items(
+            session,
+            product_name="测试空code",
+            rows=[{"name": "测试", "kind": "physical", "code": ""}],
+        )
+        assert len(ids) == 1
+        item = await session.get(Item, ids[0])
+        assert item.code.startswith("P-"), f"空 code 应自动生成，实际 {item.code}"
 
     async with AsyncSession(biz_engine) as session, session.begin():
-        with pytest.raises(CatalogServiceError, match="必填"):
-            await create_items(
-                session,
-                product_name="测试",
-                rows=[{"name": "测试", "kind": "physical", "code": None}],
-            )
+        ids = await create_items(
+            session,
+            product_name="测试None code",
+            rows=[{"name": "测试", "kind": "physical", "code": None}],
+        )
+        assert len(ids) == 1
+        item = await session.get(Item, ids[0])
+        assert item.code.startswith("P-"), f"None code 应自动生成，实际 {item.code}"
 
     # --- 重复编号 409 ---
     async with AsyncSession(biz_engine) as session, session.begin():
@@ -1495,3 +1502,283 @@ def test_a88_engine_unchanged_regression() -> None:
         # 不应有 catalog 相关的新 worker 定义
         assert "catalog" not in content, \
             "models/workers.py 不应包含 catalog 相关 worker 定义（v0.7 引擎零改动）"
+
+
+# ==== A90：编号自动生成（§16.2）====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a90_auto_code_generation(biz_engine) -> None:
+    """A90：编号自动生成（§16.2）。
+
+    1. create_items code 空 + product_code 非空 → P-LTR-001 / 同款第二档 P-LTR-002 / combo → C-LTR-001
+    2. product_code 空 → P-{YYYYMMDD}-001
+    3. 手填优先 + 查重/格式仍生效
+    """
+    from web.catalog_service import CatalogServiceError, create_items
+    from models.catalog import Item
+
+    async with AsyncSession(biz_engine) as session:
+        # 1. 创建第一个 physical 档案（code 空，product_code="LTR"）→ 应生成 P-LTR-001
+        ids1 = await create_items(
+            session,
+            product_name="手电筒",
+            rows=[{
+                "name": "红色手电筒",
+                "kind": "physical",
+                "product_code": "LTR",
+            }],
+        )
+        assert len(ids1) == 1
+        item1 = await session.get(Item, ids1[0])
+        assert item1.code == "P-LTR-001", f"首档应生成 P-LTR-001，实际 {item1.code}"
+        assert item1.product_code == "LTR"
+
+        # 2. 创建同款第二档（code 空，product_code="LTR"）→ 应生成 P-LTR-002
+        ids2 = await create_items(
+            session,
+            product_name="手电筒",
+            rows=[{
+                "name": "蓝色手电筒",
+                "kind": "physical",
+                "product_code": "LTR",
+            }],
+        )
+        assert len(ids2) == 1
+        item2 = await session.get(Item, ids2[0])
+        assert item2.code == "P-LTR-002", f"同款第二档应生成 P-LTR-002，实际 {item2.code}"
+
+        # 3. 创建 combo 档案（code 空，product_code="LTRCOMBO"）→ 应生成 C-LTRCOMBO-001
+        #    需要先创建子件
+        child_ids = await create_items(
+            session,
+            product_name=None,
+            rows=[{
+                "name": "子件实物",
+                "kind": "physical",
+                "product_code": "CHILD",
+            }],
+        )
+        child_id = child_ids[0]
+
+        combo_ids = await create_items(
+            session,
+            product_name="手电筒组合",
+            rows=[{
+                "name": "红色手电筒套餐",
+                "kind": "combo",
+                "product_code": "LTRCOMBO",
+                "bom": [{"child_item_id": child_id, "qty": 1}],
+            }],
+        )
+        assert len(combo_ids) == 1
+        combo_item = await session.get(Item, combo_ids[0])
+        assert combo_item.code == "C-LTRCOMBO-001", f"combo 应生成 C-LTRCOMBO-001，实际 {combo_item.code}"
+
+        # 4. product_code 空 → 日期回退
+        from datetime import datetime, timezone
+        today_str = datetime.now(timezone.utc).date().strftime("%Y%m%d")
+        date_ids = await create_items(
+            session,
+            product_name="日期测试",
+            rows=[{
+                "name": "日期测试档",
+                "kind": "physical",
+            }],
+        )
+        date_item = await session.get(Item, date_ids[0])
+        # 验证格式正确（P-YYYYMMDD-XXX），不验证具体序号
+        assert date_item.code.startswith(f"P-{today_str}-"), \
+            f"日期回退应生成 P-{today_str}-XXX，实际 {date_item.code}"
+
+        # 5. 手填优先 + 格式校验
+        manual_ids = await create_items(
+            session,
+            product_name="手填测试",
+            rows=[{
+                "name": "手填档",
+                "kind": "physical",
+                "code": "MANUAL-001",
+            }],
+        )
+        manual_item = await session.get(Item, manual_ids[0])
+        assert manual_item.code == "MANUAL-001", "手填 code 应优先使用"
+
+        # 6. 手填 code 格式校验
+        with pytest.raises(CatalogServiceError, match="编号格式不合法"):
+            await create_items(
+                session,
+                product_name="格式测试",
+                rows=[{
+                    "name": "格式测试档",
+                    "kind": "physical",
+                    "code": "INVALID CODE",
+                }],
+            )
+
+        # 7. 手填 code 重复校验
+        with pytest.raises(CatalogServiceError, match="已被占用"):
+            await create_items(
+                session,
+                product_name="重复测试",
+                rows=[{
+                    "name": "重复测试档",
+                    "kind": "physical",
+                    "code": "MANUAL-001",  # 已存在
+                }],
+            )
+
+        await session.commit()
+
+
+# ==== A91：迁移 0014 + specs 校验（§16.3）====
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_a91_specs_and_migration(biz_engine) -> None:
+    """A91：迁移 0014 + specs 校验（§16.3）。
+
+    1. 真 SQL 断言 catalog.item 有 product_code/specs 列（specs default '{}'）
+    2. 建档写 specs 读出一致
+    3. specs 超 10 键/键空/值超长 → 4xx
+    4. patch specs 全量替换成功
+    """
+    from web.catalog_service import CatalogServiceError, create_items, patch_item
+    from models.catalog import Item
+
+    async with AsyncSession(biz_engine) as session:
+        # 1. 断言新列存在
+        col_rows = await session.execute(
+            text(
+                "SELECT column_name, column_default "
+                "FROM information_schema.columns "
+                "WHERE table_schema = 'catalog' AND table_name = 'item' "
+                "AND column_name IN ('product_code', 'specs')"
+            )
+        )
+        cols = {row[0]: row[1] for row in col_rows.fetchall()}
+        assert "product_code" in cols, "catalog.item 缺少 product_code 列"
+        assert "specs" in cols, "catalog.item 缺少 specs 列"
+        # specs 默认值应为 '{}'
+        assert cols["specs"] is not None and "{}" in str(cols["specs"]), \
+            f"specs 默认值应为 '{{}}'，实际 {cols['specs']}"
+
+        # 2. 建档写 specs 读出一致
+        test_specs = {"颜色": "红色", "尺寸": "M", "材质": "塑料"}
+        ids = await create_items(
+            session,
+            product_name="规格测试",
+            rows=[{
+                "name": "规格测试档",
+                "kind": "physical",
+                "code": "SPEC-001",
+                "specs": test_specs,
+            }],
+        )
+        item = await session.get(Item, ids[0])
+        assert item.specs == test_specs, f"specs 写入读出不一致：{item.specs} != {test_specs}"
+
+        # 3. specs 超 10 键 → 报错
+        too_many_specs = {f"键{i}": f"值{i}" for i in range(11)}
+        with pytest.raises(CatalogServiceError, match="最多 10 个键"):
+            await create_items(
+                session,
+                product_name="规格测试",
+                rows=[{
+                    "name": "超键测试",
+                    "kind": "physical",
+                    "code": "SPEC-002",
+                    "specs": too_many_specs,
+                }],
+            )
+
+        # 4. specs 键空 → 报错
+        with pytest.raises(CatalogServiceError, match="键不能为空"):
+            await create_items(
+                session,
+                product_name="规格测试",
+                rows=[{
+                    "name": "空键测试",
+                    "kind": "physical",
+                    "code": "SPEC-003",
+                    "specs": {"": "value"},
+                }],
+            )
+
+        # 5. specs 值超长 → 报错
+        with pytest.raises(CatalogServiceError, match="值超长"):
+            await create_items(
+                session,
+                product_name="规格测试",
+                rows=[{
+                    "name": "超长值测试",
+                    "kind": "physical",
+                    "code": "SPEC-004",
+                    "specs": {"key": "x" * 101},
+                }],
+            )
+
+        # 6. patch specs 全量替换
+        new_specs = {"新键": "新值"}
+        await patch_item(session, ids[0], specs=new_specs)
+        await session.flush()
+        updated_item = await session.get(Item, ids[0])
+        assert updated_item.specs == new_specs, \
+            f"patch specs 全量替换失败：{updated_item.specs} != {new_specs}"
+
+        # 7. patch product_code 组同步
+        # 创建同商品名另一档
+        ids2 = await create_items(
+            session,
+            product_name="规格测试",
+            rows=[{
+                "name": "规格测试档2",
+                "kind": "physical",
+                "code": "SPEC-005",
+            }],
+        )
+        item2 = await session.get(Item, ids2[0])
+        assert item2.product_code == item.product_code, "同商品名组应共享 product_code"
+
+        # 修改第一档的 product_code → 第二档应同步
+        await patch_item(session, ids[0], product_code="NEWCODE")
+        await session.flush()
+        refreshed_item2 = await session.get(Item, ids2[0])
+        assert refreshed_item2.product_code == "NEWCODE", \
+            f"同组 product_code 应同步为 NEWCODE，实际 {refreshed_item2.product_code}"
+
+        # 8. patch product_name 迁移商品组
+        # 创建新商品名组（不设 product_code）
+        new_group_ids = await create_items(
+            session,
+            product_name="新商品名",
+            rows=[{
+                "name": "新商品名档",
+                "kind": "physical",
+                "code": "NEWGRP-001",
+            }],
+        )
+        new_group_item = await session.get(Item, new_group_ids[0])
+        assert new_group_item.product_code is None
+
+        # 迁移到已有组（规格测试组已有代号 NEWCODE）→ 应采用组内代号
+        await patch_item(session, new_group_ids[0], product_name="规格测试")
+        await session.flush()
+        migrated_item = await session.get(Item, new_group_ids[0])
+        assert migrated_item.product_code == "NEWCODE", \
+            f"迁移到已有组应采用组内代号 NEWCODE，实际 {migrated_item.product_code}"
+
+        # 9. patch product_code 被别的商品名占用 → 409
+        # 创建另一个商品名组
+        other_group_ids = await create_items(
+            session,
+            product_name="其他商品",
+            rows=[{
+                "name": "其他商品档",
+                "kind": "physical",
+                "code": "OTH-001",
+                "product_code": "OTH",
+            }],
+        )
+        with pytest.raises(CatalogServiceError, match="已被商品名"):
+            await patch_item(session, other_group_ids[0], product_code="NEWCODE")
+
+        await session.commit()

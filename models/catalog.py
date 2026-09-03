@@ -31,6 +31,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     Text,
     UniqueConstraint,
@@ -85,6 +86,7 @@ class Item(TmBase):
     code: Mapped[str] = mapped_column(Text, nullable=False)  # 编号（Etsy SKU 框值）
     name: Mapped[str] = mapped_column(Text, nullable=False)  # 档名
     product_name: Mapped[str | None] = mapped_column(Text)  # 商品名归类文本（可空）
+    product_code: Mapped[str | None] = mapped_column(Text)  # 商品英文代号（§16.2）
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # physical/combo/custom
     cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # 成本（可空）
     supplier: Mapped[str | None] = mapped_column(Text)  # 采购来源
@@ -94,6 +96,9 @@ class Item(TmBase):
     remark: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("''")
     )
+    specs: Mapped[dict] = mapped_column(
+        JSON, nullable=False, server_default=text("'{}'::jsonb")
+    )  # 规格属性（§16.3）
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -456,3 +456,13 @@ assertions:
     status: implemented
     test: "tests/test_acceptance_v07.py::test_a89_legacy_friendly_create_no_image"
     desc: "存量接缝：老货可无图建档 + code 用 ERP 风格编号（GLCA00001 格式通过）→ 导入通道可行"
+  - id: A90
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a90_auto_code_generation"
+    desc: "编号自动生成：create_items code 空 + product_code 非空 → P-LTR-001 / 同款第二档 P-LTR-002 / combo → C-LTR-001；product_code 空 → P-{YYYYMMDD}-001；手填优先 + 查重/格式仍生效"
+  - id: A91
+    version: v0.7
+    status: implemented
+    test: "tests/test_acceptance_v07.py::test_a91_specs_and_migration"
+    desc: "迁移 0014：真 SQL 断言 catalog.item 有 product_code/specs 列（specs default '{}'）；建档写 specs 读出一致；specs 超 10 键/键空/值超长 → 4xx；patch specs 全量替换成功"

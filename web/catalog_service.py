@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date, datetime, timezone
 from typing import Sequence
 
 from sqlalchemy import func, select, text
@@ -31,8 +32,10 @@ from models.sys import Shop
 # ---- 常量 ----
 
 _CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+_PRODUCT_CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,20}$")
 _VALID_KINDS = frozenset({"physical", "combo", "custom"})
 _VALID_STATUSES = frozenset({"active", "delisted"})
+_KIND_PREFIX = {"physical": "P", "combo": "C", "custom": "U"}
 
 
 class CatalogServiceError(Exception):
@@ -71,6 +74,131 @@ def _validate_kind(kind: str | None) -> str:
             f"档案类型（kind）不合法「{kind}」，仅允许：physical / combo / custom"
         )
     return kind
+
+
+def _validate_product_code(product_code: str | None) -> str | None:
+    """§16.2：product_code 格式校验。"""
+    if not product_code or not product_code.strip():
+        return None
+    product_code = product_code.strip()
+    if not _PRODUCT_CODE_RE.match(product_code):
+        raise CatalogServiceError(
+            f"商品代号格式不合法「{product_code}」：仅允许字母/数字/下划线/连字符，1-20 字符"
+        )
+    return product_code
+
+
+def _validate_specs(specs: dict | None) -> dict:
+    """§16.3：specs 校验（dict、键≤10、键 strip 非空≤30 字符、值≤100 字符）。"""
+    if not specs or not isinstance(specs, dict):
+        return {}
+
+    if len(specs) > 10:
+        raise CatalogServiceError(f"规格属性最多 10 个键（当前 {len(specs)} 个）")
+
+    validated = {}
+    for key, value in specs.items():
+        if not isinstance(key, str):
+            raise CatalogServiceError("规格属性键必须为字符串")
+        key = key.strip()
+        if not key:
+            raise CatalogServiceError("规格属性键不能为空")
+        if len(key) > 30:
+            raise CatalogServiceError(f"规格属性键「{key}」超长（{len(key)} > 30）")
+
+        str_value = str(value)
+        if len(str_value) > 100:
+            raise CatalogServiceError(
+                f"规格属性「{key}」的值超长（{len(str_value)} > 100）"
+            )
+        validated[key] = str_value
+
+    return validated
+
+
+async def _get_next_seq_for_prefix_code(
+    session: AsyncSession,
+    prefix: str,
+    code_part: str,
+) -> int:
+    """§16.2：获取同 prefix+code_part 的下一个序号。"""
+    # 查已存在的同 prefix+code_part 的编号
+    q = select(Item.code).where(
+        Item.code.like(f"{prefix}-{code_part}-%")
+    )
+    result = (await session.execute(q)).scalars().all()
+
+    max_seq = 0
+    for code in result:
+        # 提取序号部分
+        parts = code.split("-")
+        if len(parts) >= 3:
+            try:
+                seq = int(parts[-1])
+                max_seq = max(max_seq, seq)
+            except ValueError:
+                pass
+
+    return max_seq + 1
+
+
+async def _get_next_seq_for_date(
+    session: AsyncSession,
+    prefix: str,
+    target_date: date,
+) -> int:
+    """§16.2：获取当天该 prefix 的下一个序号。"""
+    date_str = target_date.strftime("%Y%m%d")
+    # 查已存在的同 prefix+日期 的编号
+    q = select(Item.code).where(
+        Item.code.like(f"{prefix}-{date_str}-%")
+    )
+    result = (await session.execute(q)).scalars().all()
+
+    max_seq = 0
+    for code in result:
+        parts = code.split("-")
+        if len(parts) >= 3:
+            try:
+                seq = int(parts[-1])
+                max_seq = max(max_seq, seq)
+            except ValueError:
+                pass
+
+    return max_seq + 1
+
+
+async def _check_product_code_unique(
+    session: AsyncSession,
+    product_code: str,
+    product_name: str | None,
+    exclude_item_id: int = 0,
+) -> None:
+    """§16.2：检查 product_code 是否已被其他商品名使用。"""
+    q = select(Item.id, Item.product_name).where(Item.product_code == product_code)
+    if exclude_item_id:
+        q = q.where(Item.id != exclude_item_id)
+    existing = (await session.execute(q)).first()
+    if existing is not None:
+        existing_name = existing.product_name or "(无商品名)"
+        if product_name != existing_name:
+            raise CatalogServiceError(
+                f"代号「{product_code}」已被商品名「{existing_name}」使用"
+            )
+
+
+async def _get_existing_product_code(
+    session: AsyncSession,
+    product_name: str | None,
+) -> str | None:
+    """§16.2：获取同商品名组内已有的 product_code。"""
+    if not product_name:
+        return None
+    q = select(Item.product_code).where(
+        Item.product_name == product_name,
+        Item.product_code.isnot(None),
+    ).limit(1)
+    return (await session.execute(q)).scalar_one_or_none()
 
 
 async def _check_code_unique(session: AsyncSession, code: str, exclude_id: int = 0) -> None:
@@ -163,13 +291,21 @@ async def create_items(
 ) -> list[int]:
     """建档：多档同提交，全部成功落库 active，任一失败整体回滚。
 
-    每行 dict: {name, kind, code, cost?, supplier?, remark?, bom?[{child_item_id, qty}]}。
+    每行 dict: {name, kind, code?, cost?, supplier?, remark?, product_code?, specs?,
+                bom?[{child_item_id, qty}]}。
 
-    §8.4 清单逐条执行：
-    1. code 必填 + 格式 + 全库查重
-    2. name 非空 ≤120；kind 三值；同 product_name+name 冲突
-    3. combo 配方完整校验
-    4. custom 无 BOM
+    §16.2 编号自动生成规则：
+    - code 非空 → 用户手填值优先（照旧 _validate_code + _check_code_unique）
+    - code 空 → 自动生成 f"{prefix}-{code_part}-{seq:03d}"
+      - prefix：physical→P / combo→C / custom→U
+      - product_code 非空 → code_part = product_code, seq = 全库同 prefix+code_part 最大序号+1
+      - product_code 空 → code_part = YYYYMMDD（当天）, seq = 当天该 prefix 计数+1
+
+    §16.2 同组代号一致性：
+    - 目标 product_name 在库已有档 → 行 product_code 空则采用组内现有代号；非空不同则 409
+    - 全新 product_name → product_code 空可建档；非空须全库唯一
+
+    §16.3 specs 校验：dict 类型、键≤10、键 strip 非空≤30 字符、值≤100 字符
 
     返回新建 item id 列表。
     """
@@ -187,14 +323,25 @@ async def create_items(
     # 先逐行校验，再逐行落库（事务内任一失败整体回滚）
     items_to_create: list[dict] = []
 
+    # 预处理：收集组内已有代号（用于同组代号一致性校验）
+    existing_group_code = await _get_existing_product_code(session, pn)
+
     for idx, row in enumerate(rows, 1):
-        code = _validate_code(row.get("code"))
+        raw_code = row.get("code")
         name = _validate_name(row.get("name"))
         kind = _validate_kind(row.get("kind"))
         cost = row.get("cost")
         supplier = (row.get("supplier") or "").strip() or None
         remark = (row.get("remark") or "").strip() or ""
         bom_rows = row.get("bom") or []
+        raw_product_code = row.get("product_code")
+        raw_specs = row.get("specs")
+
+        # 校验 product_code 格式
+        product_code = _validate_product_code(raw_product_code)
+
+        # 校验 specs
+        specs = _validate_specs(raw_specs)
 
         # custom 拒绝 BOM（§8.4-4）
         if kind == "custom" and bom_rows:
@@ -204,14 +351,49 @@ async def create_items(
         # 临时 item（用于自引用检查），parent_id=0（尚未入库）
         await _validate_bom_rows(session, 0, kind, bom_rows)
 
+        # §16.2 同组代号一致性校验
+        if existing_group_code is not None:
+            # 目标 product_name 在库已有档
+            if product_code is not None and product_code != existing_group_code:
+                raise CatalogServiceError(
+                    f"该商品名已有代号「{existing_group_code}」，不可使用「{product_code}」"
+                )
+            # 采用组内现有代号
+            effective_product_code = existing_group_code
+        else:
+            # 全新 product_name
+            if product_code is not None:
+                # 非空须全库唯一
+                await _check_product_code_unique(session, product_code, pn)
+            effective_product_code = product_code
+
+        # §16.2 自动编号生成
+        if raw_code:
+            # 用户手填 code
+            code = _validate_code(raw_code)
+        else:
+            # 自动生成 code
+            prefix = _KIND_PREFIX[kind]
+            if effective_product_code:
+                code_part = effective_product_code
+                seq = await _get_next_seq_for_prefix_code(session, prefix, code_part)
+            else:
+                # 回退到日期
+                today = datetime.now(timezone.utc).date()
+                code_part = today.strftime("%Y%m%d")
+                seq = await _get_next_seq_for_date(session, prefix, today)
+            code = f"{prefix}-{code_part}-{seq:03d}"
+
         items_to_create.append({
             "code": code,
             "name": name,
             "product_name": pn,
+            "product_code": effective_product_code,
             "kind": kind,
             "cost": cost,
             "supplier": supplier,
             "remark": remark,
+            "specs": specs,
             "bom_rows": bom_rows,
         })
 
@@ -227,10 +409,12 @@ async def create_items(
             code=item_data["code"],
             name=item_data["name"],
             product_name=item_data["product_name"],
+            product_code=item_data["product_code"],
             kind=item_data["kind"],
             cost=item_data["cost"],
             supplier=item_data["supplier"],
             remark=item_data["remark"],
+            specs=item_data["specs"],
             status="active",
         )
         session.add(item)
@@ -264,14 +448,86 @@ async def patch_item(
     supplier: str | None = None,
     name: str | None = None,
     remark: str | None = None,
+    product_name: str | None = None,
+    product_code: str | None = None,
+    specs: dict | None = None,
 ) -> None:
     """编辑档案字段（kind 锁定不可改——详设 §4.3）。
+
+    §16.4 扩展参数：
+    - product_name 变更 = 商品组迁移
+    - product_code 变更：目标代号被别的商品名占用 → 409；允许时同组全部档同步更新
+    - specs 变更：全量替换（校验同 §16.3）
 
     code 变更需重新校验格式 + 查重。
     """
     item = await session.get(Item, item_id)
     if item is None:
         raise CatalogServiceError("档案不存在")
+
+    # 处理 product_name 变更（商品组迁移）
+    new_product_name = item.product_name
+    new_product_code = item.product_code
+    if product_name is not None:
+        new_pn = product_name.strip() if product_name else None
+        if new_pn and len(new_pn) > 120:
+            raise CatalogServiceError(f"商品名超长（{len(new_pn)} > 120）")
+
+        if new_pn != item.product_name:
+            # 商品组迁移：检查目标组 dup-name
+            if name is not None:
+                await _check_dup_name_in_product(
+                    session, new_pn, name, exclude_id=item_id
+                )
+            else:
+                await _check_dup_name_in_product(
+                    session, new_pn, item.name, exclude_id=item_id
+                )
+
+            # §16.2 代号一致性重新校验
+            existing_group_code = await _get_existing_product_code(session, new_pn)
+            if existing_group_code is not None:
+                # 目标组已有代号
+                current_pc = item.product_code
+                if current_pc is not None and current_pc != existing_group_code:
+                    raise CatalogServiceError(
+                        f"该商品名已有代号「{existing_group_code}」，当前代号「{current_pc}」不一致"
+                    )
+                # 采用组内现有代号（同步更新）
+                new_product_code = existing_group_code
+            else:
+                # 全新商品名
+                new_product_code = item.product_code
+
+            new_product_name = new_pn
+        else:
+            new_product_name = item.product_name
+
+    # 处理 product_code 变更
+    if product_code is not None:
+        new_pc = _validate_product_code(product_code)
+        if new_pc != item.product_code:
+            # 目标代号被别的商品名占用 → 409
+            target_pn = new_product_name if product_name is not None else item.product_name
+            await _check_product_code_unique(session, new_pc, target_pn, exclude_item_id=item_id)
+            new_product_code = new_pc
+
+            # §16.4 同 product_name 组内全部档同步更新 product_code
+            if target_pn is not None:
+                q = select(Item.id).where(
+                    Item.product_name == target_pn,
+                    Item.id != item_id,
+                )
+                sibling_ids = (await session.execute(q)).scalars().all()
+                for sibling_id in sibling_ids:
+                    sibling = await session.get(Item, sibling_id)
+                    if sibling is not None:
+                        sibling.product_code = new_pc
+
+    # 处理 specs 变更（全量替换）
+    new_specs = item.specs
+    if specs is not None:
+        new_specs = _validate_specs(specs)
 
     if code is not None:
         code = _validate_code(code)
@@ -280,10 +536,11 @@ async def patch_item(
 
     if name is not None:
         name = _validate_name(name)
-        # 改名需检查同商品名下是否冲突
-        await _check_dup_name_in_product(
-            session, item.product_name, name, exclude_id=item_id
-        )
+        # 改名需检查同商品名下是否冲突（已在 product_name 变更处校验）
+        if product_name is None:
+            await _check_dup_name_in_product(
+                session, item.product_name, name, exclude_id=item_id
+            )
         item.name = name
 
     if cost is not None:
@@ -294,6 +551,11 @@ async def patch_item(
 
     if remark is not None:
         item.remark = remark.strip() or ""
+
+    # 应用变更
+    item.product_name = new_product_name
+    item.product_code = new_product_code
+    item.specs = new_specs
 
 
 # ---- 状态机（§8.1 POST items/{iid}/status） ----

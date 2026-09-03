@@ -82,10 +82,12 @@ class ItemRowIn(BaseModel):
 
     name: str
     kind: str  # physical/combo/custom
-    code: str
+    code: str | None = None  # §16.2：可选，空则自动生成
     cost: float | None = None
     supplier: str | None = None
     remark: str | None = None
+    product_code: str | None = None  # §16.2：商品英文代号
+    specs: dict[str, str] | None = None  # §16.3：规格属性
     bom: list[BomRowIn] | None = None
     image_file_ids: list[int] | None = None
 
@@ -105,6 +107,9 @@ class ItemPatchIn(BaseModel):
     supplier: str | None = None
     name: str | None = None
     remark: str | None = None
+    product_name: str | None = None  # §16.4：商品组迁移
+    product_code: str | None = None  # §16.4：商品代号变更
+    specs: dict[str, str] | None = None  # §16.4：规格属性全量替换
 
 
 class ItemStatusIn(BaseModel):
@@ -1119,6 +1124,8 @@ def create_biz_router(
                         "cost": row.cost,
                         "supplier": row.supplier,
                         "remark": row.remark,
+                        "product_code": row.product_code,
+                        "specs": row.specs,
                     }
                     if row.bom:
                         rd["bom"] = [{"child_item_id": b.child_item_id, "qty": b.qty} for b in row.bom]
@@ -1158,6 +1165,9 @@ def create_biz_router(
                     supplier=payload.supplier,
                     name=payload.name,
                     remark=payload.remark,
+                    product_name=payload.product_name,
+                    product_code=payload.product_code,
+                    specs=payload.specs,
                 )
             except CatalogServiceError as exc:
                 raise HTTPException(status_code=409, detail=str(exc))

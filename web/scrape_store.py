@@ -95,6 +95,7 @@ async def get_images(
     source: str | None = None,
     status: str | None = None,
     link_record_id: int | None = None,  # v0.6：按链接筛选（provider/image_inspect 用）
+    keyword: str | None = None,  # §16.6：搜索关键词（tags/local_path/desc）
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
@@ -114,6 +115,18 @@ async def get_images(
     if link_record_id is not None:
         conditions.append("link_record_id = :link_record_id")
         params["link_record_id"] = link_record_id
+    if keyword:
+        # §16.6：匹配 tags jsonb 数组任一元素 ILIKE OR local_path ILIKE OR desc ILIKE
+        # 转义 %/_ 防止 SQL 注入
+        escaped_kw = keyword.replace("%", "\\%").replace("_", "\\_")
+        params["keyword"] = f"%{escaped_kw}%"
+        conditions.append(
+            """(
+                EXISTS(SELECT 1 FROM jsonb_array_elements_text(tags) t WHERE t ILIKE :keyword)
+                OR local_path ILIKE :keyword
+                OR "desc" ILIKE :keyword
+            )"""
+        )
 
     where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -701,3 +714,116 @@ async def set_link_queue(urls: list[str], settings: Any = None) -> None:
 
     store = settings if settings is not None else _settings_store()
     await store.set("scrape.link_queue", _json.dumps(list(urls)), "扒图定时队列")
+
+
+# =====================================================================
+# §16.6 选图区文件夹浏览器（get_gallery_folders / get_gallery_folder_images）
+# =====================================================================
+
+
+async def get_gallery_folders() -> list[dict[str, Any]]:
+    """§16.6：获取图库文件夹列表。
+
+    link 夹 = 有图记录的 scrape.link_record 每条一个：
+        title = desc/标题, source, count, cover_image_id = 最新一图 id
+    upload 夹 = 无 link_record 且 source_mark='selfshot' 的图按 day_dir 分组：
+        title = day_dir
+    """
+    async with get_db_session() as session:
+        # ---- link 夹 ----
+        link_query = text("""
+            SELECT
+                lr.id,
+                COALESCE(lr.desc, lr.url) AS title,
+                lr.source,
+                COUNT(i.id) AS count,
+                (SELECT i2.id FROM scrape.image_file i2
+                 WHERE i2.link_record_id = lr.id
+                 ORDER BY i2.created_at DESC LIMIT 1) AS cover_image_id
+            FROM scrape.link_record lr
+            JOIN scrape.image_file i ON i.link_record_id = lr.id
+            GROUP BY lr.id, lr.desc, lr.url, lr.source
+            ORDER BY MAX(i.created_at) DESC
+        """)
+        link_rows = (await session.execute(link_query)).mappings().all()
+        folders = [
+            {
+                "folder_type": "link",
+                "id": row["id"],
+                "title": row["title"],
+                "source": row["source"],
+                "count": row["count"],
+                "cover_image_id": row["cover_image_id"],
+            }
+            for row in link_rows
+        ]
+
+        # ---- upload 夹（无 link_record 且 source_mark='selfshot' 按 day_dir 分组）----
+        upload_query = text("""
+            SELECT
+                day_dir AS id,
+                day_dir AS title,
+                COUNT(*) AS count,
+                (SELECT i2.id FROM scrape.image_file i2
+                 WHERE i2.day_dir = i.day_dir
+                   AND i2.link_record_id IS NULL
+                   AND i2.source_mark = 'selfshot'
+                 ORDER BY i2.created_at DESC LIMIT 1) AS cover_image_id
+            FROM scrape.image_file i
+            WHERE i.link_record_id IS NULL
+              AND i.source_mark = 'selfshot'
+              AND i.day_dir IS NOT NULL
+            GROUP BY day_dir
+            ORDER BY day_dir DESC
+        """)
+        upload_rows = (await session.execute(upload_query)).mappings().all()
+        folders.extend(
+            {
+                "folder_type": "upload",
+                "id": row["id"],
+                "title": row["title"],
+                "source": "selfshot",
+                "count": row["count"],
+                "cover_image_id": row["cover_image_id"],
+            }
+            for row in upload_rows
+        )
+
+        return folders
+
+
+async def get_gallery_folder_images(
+    folder_type: str,
+    folder_id: str | int,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """§16.6：获取指定文件夹内的图片列表。
+
+    link 夹按 link_record_id 筛选；upload 夹按 day_dir 筛选。
+    """
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+
+    if folder_type == "link":
+        conditions = "link_record_id = :folder_id"
+        params["folder_id"] = int(folder_id)
+    elif folder_type == "upload":
+        conditions = "link_record_id IS NULL AND source_mark = 'selfshot' AND day_dir = :folder_id"
+        params["folder_id"] = str(folder_id)
+    else:
+        return []
+
+    async with get_db_session() as session:
+        result = await session.execute(
+            text(
+                f"""
+                SELECT {_IMAGE_COLUMNS}
+                FROM scrape.image_file
+                WHERE {conditions}
+                ORDER BY created_at DESC
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            params,
+        )
+        return _rows(result)
