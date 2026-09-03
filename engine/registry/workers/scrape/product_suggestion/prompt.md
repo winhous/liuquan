@@ -19,4 +19,8 @@ width×height 尺寸 / watermark 水印 / url 来源链接 / id 图片 id）
 - 宁缺勿滥：元数据不足的图片可以不输出建议，禁止编造
 
 ## 输出格式
-对每个图片输出一个选品建议，包含标题和详细说明。
+JSON 数组，每项：
+```json
+{"title": "建议标题（一句话，≤80 字）", "detail": "卖点分析；目标市场；建议标题关键词", "evidence": [{"kind": "image", "ref_id": 图片id数字}]}
+```
+只输出 JSON，不要 Markdown 代码块包裹。其余字段（domain/action_id/role/截止天数）由系统补全，无需填写。

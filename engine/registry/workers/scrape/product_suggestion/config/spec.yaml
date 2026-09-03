@@ -3,3 +3,5 @@
 
 default_role: 运营
 default_due_days: 3
+# evidence 上限（TaskProposal 契约 max 20；业务侧可再收紧）
+evidence_max: 20

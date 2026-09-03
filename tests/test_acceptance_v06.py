@@ -1903,6 +1903,124 @@ async def test_a66_product_suggestion_real_llm(db_engine, biz_engine) -> None:
     )
 
 
+# ==== 复核反馈修复回归（2026-09-03）：product_suggestion 代码侧规范化真实 LLM 输出 ====
+# 真实 DeepSeek 输出自由格式（缺 domain/action_id/role/due_days、evidence.ref_id 数字）→
+# TaskProposal 校验必拒（提案进不了审核页）；_normalize_proposals 补全 + 白名单化。
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_product_suggestion_normalizes_real_llm_output(db_engine, biz_engine) -> None:
+    """真实 LLM 不完整输出（照集成真跑日志：仅 title/detail/evidence ref_id 数字，
+    缺 domain/action_id/suggested_role/suggested_due_days）→ run() 代码侧补全 →
+    消费者落 tm.task_proposal pending（domain=scrape + evidence ref_id str 白名单内）。"""
+    from models.workers import ScrapeImageContextData, SuggestionResult
+    from web import scrape_store
+
+    link = await scrape_store.create_link("url-norm", "xhs", "batch-norm")
+    img_ids: list[int] = []
+    async with AsyncSession(biz_engine) as session, session.begin():
+        for u in ("img-norm-1", "img-norm-2"):
+            row = (
+                await session.execute(
+                    text(
+                        "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id) "
+                        "VALUES (:b, :s, :u, :l) RETURNING id"
+                    ),
+                    {"b": "batch-norm", "s": "xhs", "u": u, "l": link["id"]},
+                )
+            ).first()
+            img_ids.append(int(row[0]))
+
+    async def _image_provider(params) -> ScrapeImageContextData:
+        ids = list(getattr(params, "image_ids", None) or [])
+        return ScrapeImageContextData(
+            images=[
+                {
+                    "id": i, "desc": f"三层楼空装饰{i}", "tags": ["定制"],
+                    "author_id": "seller-norm", "source": "xhs", "url": f"u-{i}",
+                    "width": 80, "height": 60, "watermark": False,
+                }
+                for i in ids
+            ]
+        )
+
+    def _suggestion_output(out_cls):
+        """照集成真跑日志：真实 LLM 输出缺 domain/action_id/role/due_days，ref_id 是数字。"""
+        assert out_cls is SuggestionResult
+        return SuggestionResult(
+            proposals=[
+                {
+                    "title": "三层楼空摆件选品建议",
+                    "detail": "卖点：三层结构适合桌面陈列；目标市场：家居装饰；关键词：三层 摆件",
+                    "evidence": [{"kind": "image", "ref_id": img_ids[0]}],  # 数字 ref_id
+                },
+                {"detail": "无标题条目应被丢弃"},  # 无 title → 宁缺勿滥丢弃
+            ],
+            note="",
+        )
+
+    biz_client = _biz_client_for(biz_engine)
+    runner, _ = _build_runner(
+        db_engine,
+        biz_client=biz_client,
+        providers={"scrape.image_context": _image_provider},
+        agent_output=_suggestion_output,
+    )
+    result = await runner.run("scrape_suggest_chain", {"image_ids": img_ids})
+    assert result.status == "done", f"suggest 链应 DONE：{result.error}"
+
+    # 末步输出（engine_step）proposals 已被规范化（领域字段补全 + 丢弃无标题 + ref_id 字符串）
+    from models.workers import SuggestionResult as _SR
+
+    async with AsyncSession(db_engine) as esession:
+        step_rows = (
+            await esession.execute(
+                text(
+                    "SELECT output FROM engine_step WHERE task_id = :tid "
+                    "ORDER BY step_index DESC LIMIT 1"
+                ),
+                {"tid": result.task_id},
+            )
+        ).fetchall()
+    assert step_rows, "链应产出 engine_step"
+    final_out = _SR.model_validate(step_rows[0][0])
+    assert len(final_out.proposals) == 1, f"应丢弃无标题条目，剩 1 条，实际 {final_out.proposals}"
+    prop = final_out.proposals[0]
+    assert prop["domain"] == "scrape" and prop["action_id"] == "scrape.suggest"
+    assert prop["suggested_role"] in ("运营", "采购", "管理员")
+    assert isinstance(prop["suggested_due_days"], int)
+    ev = prop["evidence"]
+    assert ev and all(isinstance(e.get("ref_id"), str) for e in ev), f"ref_id 应为字符串：{ev}"
+    assert all(e["ref_id"] in {str(i) for i in img_ids} for e in ev), "evidence 应在勾选图白名单内"
+
+    # 消费者落 tm.task_proposal pending（domain=scrape + evidence 可追溯）
+    from engine.actions import CONSUMERS
+    from engine.registry import load_registry
+    from engine.server import QueueConsumer
+
+    registry = load_registry(REPO_ROOT)
+    consumer = QueueConsumer(
+        engine=db_engine,
+        registry=registry,
+        runner=runner,
+        consumers=CONSUMERS,
+        biz_client=biz_client,
+    )
+    await consumer._after_task(result)
+    async with AsyncSession(biz_engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT id, status, domain, source FROM tm.task_proposal "
+                    "WHERE title = '三层楼空摆件选品建议' ORDER BY id DESC LIMIT 1"
+                )
+            )
+        ).fetchall()
+    assert rows, "规范化后的建议应落 tm.task_proposal"
+    assert rows[0][1] == "pending" and rows[0][2] == "scrape"
+
+
 # ==== A67：EngineContext.biz_client 注入 + image_inspect 经 biz_client 读路径 + PATCH 写回 ====
 
 
