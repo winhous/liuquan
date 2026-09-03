@@ -326,6 +326,10 @@ async def create_items(
     # 预处理：收集组内已有代号（用于同组代号一致性校验）
     existing_group_code = await _get_existing_product_code(session, pn)
 
+    # 本批内已占用编号（自动生成需跳号、手填重复需报错——同批多行同商品自动编号
+    # 不能都查 DB（未 flush），否则同批两行都算出 P-LTR-001 撞 UNIQUE）
+    used_codes: set[str] = set()
+
     for idx, row in enumerate(rows, 1):
         raw_code = row.get("code")
         name = _validate_name(row.get("name"))
@@ -367,10 +371,13 @@ async def create_items(
                 await _check_product_code_unique(session, product_code, pn)
             effective_product_code = product_code
 
-        # §16.2 自动编号生成
+        # §16.2 自动编号生成（本批内跳号：auto 与 used_codes 冲突则递增）
         if raw_code:
             # 用户手填 code
             code = _validate_code(raw_code)
+            if code in used_codes:
+                raise CatalogServiceError(f"编号「{code}」在本批建档中重复")
+            used_codes.add(code)
         else:
             # 自动生成 code
             prefix = _KIND_PREFIX[kind]
@@ -383,6 +390,10 @@ async def create_items(
                 code_part = today.strftime("%Y%m%d")
                 seq = await _get_next_seq_for_date(session, prefix, today)
             code = f"{prefix}-{code_part}-{seq:03d}"
+            while code in used_codes:
+                seq += 1
+                code = f"{prefix}-{code_part}-{seq:03d}"
+            used_codes.add(code)
 
         items_to_create.append({
             "code": code,

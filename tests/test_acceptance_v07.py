@@ -1627,6 +1627,47 @@ async def test_a90_auto_code_generation(biz_engine) -> None:
                 }],
             )
 
+        # 8. 同批多行（同商品同次提交）自动编号跳号：两行 code 都空 → P-LTR-001 / P-LTR-002
+        batch_ids = await create_items(
+            session,
+            product_name="同批多行",
+            rows=[
+                {"name": "同批红", "kind": "physical", "product_code": "BATCH"},
+                {"name": "同批蓝", "kind": "physical", "product_code": "BATCH"},
+            ],
+        )
+        assert len(batch_ids) == 2
+        b1 = await session.get(Item, batch_ids[0])
+        b2 = await session.get(Item, batch_ids[1])
+        assert b1.code == "P-BATCH-001" and b2.code == "P-BATCH-002", \
+            f"同批两行应生成 P-BATCH-001/P-BATCH-002，实际 {b1.code}/{b2.code}"
+
+        # 9. 手填与自动编号同批撞车：row1 手填 P-BATCH2-001，row2 自动 → 应跳号 P-BATCH2-002
+        mix_ids = await create_items(
+            session,
+            product_name="混合批次",
+            rows=[
+                {"name": "手填撞", "kind": "physical", "product_code": "BATCH2",
+                 "code": "P-BATCH2-001"},
+                {"name": "自动跳", "kind": "physical", "product_code": "BATCH2"},
+            ],
+        )
+        m1 = await session.get(Item, mix_ids[0])
+        m2 = await session.get(Item, mix_ids[1])
+        assert m1.code == "P-BATCH2-001" and m2.code == "P-BATCH2-002", \
+            f"自动编号应避开本批手填号，实际 {m1.code}/{m2.code}"
+
+        # 10. 同批两行手填同一 code → 报错（本批内重复）
+        with pytest.raises(CatalogServiceError, match="本批建档中重复"):
+            await create_items(
+                session,
+                product_name="批内重复",
+                rows=[
+                    {"name": "重1", "kind": "physical", "code": "DUP-BATCH-01"},
+                    {"name": "重2", "kind": "physical", "code": "DUP-BATCH-01"},
+                ],
+            )
+
         await session.commit()
 
 
