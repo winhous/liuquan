@@ -62,6 +62,9 @@
         <div class="alert alert-secondary mt-3 mb-0 py-2 small">
           <i class="ti ti-folder me-1"></i>本地文件夹：{{ link.storage_dir }}
           <span class="text-muted">（相对存储目录，含图片 + meta.txt）</span>
+          <!-- 复核反馈 2（2026-09-03）：打开本地文件夹按钮（刘全所在机器的文件管理器；无桌面环境时展示路径提示） -->
+          <button type="button" class="btn btn-outline-primary btn-sm ms-2 btn-open-folder"
+                  data-folder-kind="link" data-link-id="{{ link.id }}">打开本地文件夹</button>
         </div>
         {% endif %}
         {% if link.can_upload %}
@@ -192,5 +195,33 @@
       btn.disabled = false; btn.textContent = original;
     }
   }
+  // 复核反馈 2（2026-09-03）：打开本地文件夹（服务器文件管理器 / 无桌面则提示路径）
+  async function openLocalFolder(btn) {
+    const kind = btn.dataset.folderKind, linkId = btn.dataset.linkId;
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ 打开中…';
+    try {
+      const r = await fetch('/scrape/open-folder', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: kind, link_id: linkId })
+      });
+      const data = await r.json();
+      if (data.ok) {
+        btn.textContent = original;
+        alert((data.message || '已打开') + '\n路径：' + data.path);
+      } else {
+        alert('打开失败: ' + (data.error || '未知错误'));
+        btn.disabled = false; btn.textContent = original;
+      }
+    } catch (e) {
+      alert('网络错误: ' + e.message);
+      btn.disabled = false; btn.textContent = original;
+    }
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.btn-open-folder').forEach(b => {
+      b.addEventListener('click', () => openLocalFolder(b));
+    });
+  });
 </script>
 {% endblock %}

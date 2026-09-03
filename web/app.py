@@ -904,9 +904,13 @@ def create_app(
             return {"ok": False, "error": f"引擎调用失败：{exc}"}
 
     @app.get("/scrape/thumbnail/{image_id}")
-    async def scrape_thumbnail(request: Request, image_id: str):
+    async def scrape_thumbnail(request: Request, image_id: int):
         """返回图片缩略图（从本地文件读取；批 6：local_path 为相对 storage_dir
-        路径时经设置键 scrape.storage_dir 解析，绝对路径兼容存量）。"""
+        路径时经设置键 scrape.storage_dir 解析，绝对路径兼容存量）。
+
+        2026-09-03 集成验收修复（复核反馈 1）：image_id 参数必须 int 注解——URL 路径参数
+        默认 str，而 scrape_store.get_image_by_id 绑定 BIGINT 列（asyncpg 拒绝字符串 →
+        500「invalid input for query argument」，缩略图全占位图）；int 注解让 FastAPI 转换。"""
         from pathlib import Path
         from web import scrape_store
 
@@ -925,6 +929,81 @@ def create_app(
         import mimetypes
         ct = mimetypes.guess_type(str(path))[0] or "image/jpeg"
         return FileResponse(str(path), media_type=ct)
+
+    @app.post("/scrape/open-folder")
+    async def scrape_open_folder(request: Request):
+        """复核反馈 2（2026-09-03）：打开本地文件夹（刘全所在机器的文件管理器）。
+
+        仅限存储目录内路径：kind=root → storage_dir 根；kind=link + link_id →
+        storage_dir/{link.storage_dir}。服务器有桌面环境（Linux xdg-open / mac open /
+        Windows explorer）时打开文件管理器；无桌面/命令缺失 → 返回路径文本提示不报错。
+        安全：路径必须 resolve 后位于 storage_dir 内（防任意路径打开）；subprocess 列表参数无 shell。
+        """
+        import platform
+        import subprocess
+        from pathlib import Path
+
+        from web import scrape_store
+
+        if not request.cookies.get("role"):
+            return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        kind = data.get("kind", "")
+        storage_root = Path(
+            str(await _settings_store(request).get("scrape.storage_dir", "/opt/liuquan/scrape/"))
+        )
+        target: Path | None = None
+        if kind == "root":
+            target = storage_root
+        elif kind == "link":
+            link_id = data.get("link_id")
+            try:
+                link_id = int(link_id)
+            except (TypeError, ValueError):
+                return JSONResponse({"ok": False, "error": "链接 id 无效"}, status_code=400)
+            link = await scrape_store.get_link_by_id(link_id)
+            link_row = (link or {}).get("link") or link
+            if not link_row or not link_row.get("storage_dir"):
+                return JSONResponse({"ok": False, "error": "链接无本地文件夹（未成功下载）"}, status_code=404)
+            target = storage_root / str(link_row["storage_dir"])
+        if target is None:
+            return JSONResponse({"ok": False, "error": "未知 kind"}, status_code=400)
+
+        try:
+            target_resolved = target.resolve()
+            root_resolved = storage_root.resolve()
+            target_resolved.relative_to(root_resolved)  # 防越界
+        except ValueError:
+            return JSONResponse({"ok": False, "error": "路径越界被拒"}, status_code=403)
+        if not target_resolved.is_dir():
+            return JSONResponse(
+                {"ok": False, "error": f"本地文件夹不存在（未下载或已被清理）：{target_resolved}"},
+                status_code=404,
+            )
+
+        sysname = platform.system()
+        if sysname == "Linux":
+            cmd = ["xdg-open"]
+        elif sysname == "Darwin":
+            cmd = ["open"]
+        elif sysname == "Windows":
+            cmd = ["explorer"]
+        else:
+            cmd = []
+        if cmd:
+            try:
+                subprocess.Popen(cmd + [str(target_resolved)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return JSONResponse({"ok": True, "message": "已尝试打开本地文件夹", "path": str(target_resolved)})
+            except Exception as exc:  # noqa: BLE001 - 无桌面/命令缺失降级提示
+                return JSONResponse(
+                    {"ok": True, "message": f"无法打开文件管理器（{exc}），路径如下可手动打开", "path": str(target_resolved)}
+                )
+        return JSONResponse(
+            {"ok": True, "message": "当前系统不支持自动打开，路径如下可手动打开", "path": str(target_resolved)}
+        )
 
     @app.get("/crm/thumbnail/{image_id}")
     async def crm_thumbnail(request: Request, image_id: int):

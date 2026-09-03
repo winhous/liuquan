@@ -24,3 +24,40 @@
   </div>
 </div>
 {% endblock %}
+{% block scripts %}
+<script>
+  // 复核反馈 2（2026-09-03）：打开本地存储目录（服务器文件管理器 / 无桌面则提示路径）
+  async function openLocalFolder(btn) {
+    const kind = btn.dataset.folderKind;
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ 打开中…';
+    try {
+      const r = await fetch('/scrape/open-folder', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: kind })
+      });
+      const data = await r.json();
+      const msgEl = document.getElementById('open-folder-msg');
+      btn.disabled = false; btn.textContent = original;
+      if (data.ok) {
+        if (msgEl) msgEl.textContent = data.path;
+        else alert((data.message || '已打开') + '\n路径：' + data.path);
+      } else if (msgEl) {
+        msgEl.textContent = '打开失败: ' + (data.error || '未知错误');
+      } else {
+        alert('打开失败: ' + (data.error || '未知错误'));
+      }
+    } catch (e) {
+      btn.disabled = false; btn.textContent = original;
+      alert('网络错误: ' + e.message);
+    }
+  }
+  function bindOpenFolder() {
+    document.querySelectorAll('.btn-open-folder').forEach(b => {
+      if (!b.dataset.bound) { b.dataset.bound = '1'; b.addEventListener('click', () => openLocalFolder(b)); }
+    });
+  }
+  document.addEventListener('DOMContentLoaded', bindOpenFolder);
+  document.addEventListener('htmx:afterSwap', bindOpenFolder);
+</script>
+{% endblock %}

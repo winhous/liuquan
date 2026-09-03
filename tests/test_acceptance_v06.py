@@ -3328,3 +3328,100 @@ async def test_a74_netdisk_upload_default_setting(biz_engine) -> None:
         )
     finally:
         _ENGINE_INPUT_DEFAULTS["netdisk.upload_default"] = prev  # 恢复模块快照（同进程防污染）
+
+
+# ==== 复核反馈修复回归（2026-09-03）：缩略图 500（str→BIGINT）+ 打开本地文件夹 ====
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_scrape_thumbnail_str_path_returns_image(biz_engine, tmp_path) -> None:
+    """复核反馈 1 修复回归：/scrape/thumbnail/{id} 曾因 URL 路径参数 str 绑定 BIGINT 列
+    → asyncpg 500（缩略图全占位）；int 注解 + store 强制 int 后应 200 返回真实图字节。"""
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    await store.set("scrape.storage_dir", str(tmp_path), "扒图存储目录")
+
+    img_dir = tmp_path / "xhs" / "note123"
+    img_dir.mkdir(parents=True)
+    fake_bytes = b"\xff\xd8\xff\xe0fake-jpeg-content"
+    (img_dir / "01.jpg").write_bytes(fake_bytes)
+
+    link = await scrape_store.create_link(_XHS_EXPLORE, "xhs", "batch-thumb")
+    async with AsyncSession(biz_engine) as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO scrape.image_file (batch_id, source, url, link_record_id, "
+                "local_path, source_mark, width, height, watermark, status) "
+                "VALUES (:b, :s, :u, :l, :p, :m, :w, :h, :wm, 'downloaded')"
+            ),
+            {
+                "b": "batch-thumb", "s": "xhs", "u": _XHS_EXPLORE + "#1", "l": link["id"],
+                "p": "xhs/note123/01.jpg", "m": "scraped", "w": 80, "h": 60, "wm": False,
+            },
+        )
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+
+    # 模板渲染的 URL 是 str（int id 经 URL 路径成字符串）——打真实请求
+    resp = client.get("/scrape/thumbnail/1")
+    assert resp.status_code == 200, f"缩略图应 200（修复前 str 参数 500），实际 {resp.status_code}: {resp.text[:80]}"
+    assert resp.content == fake_bytes, "缩略图应返回真实文件字节"
+    # 越界 id 应 404（store 返回 None）而非 500
+    resp_miss = client.get("/scrape/thumbnail/99999")
+    assert resp_miss.status_code == 404
+
+
+@pytest.mark.version_acceptance
+@pytest.mark.asyncio
+async def test_open_local_folder_route(biz_engine, tmp_path, monkeypatch) -> None:
+    """复核反馈 2：POST /scrape/open-folder——kind=root 打开存储根目录（subprocess.Popen
+    收到 xdg-open + 绝对路径）；kind=link 无文件夹 404；kind 未知 400；路径越界 403。"""
+    import subprocess as _sp
+
+    from web import scrape_store
+    from web.settings_store import SettingsStore
+
+    store = SettingsStore(biz_engine)
+    root = tmp_path / "scrape-root"
+    root.mkdir(parents=True)
+    await store.set("scrape.storage_dir", str(root), "扒图存储目录")
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(_sp, "Popen", lambda cmd, **kw: calls.append(cmd))
+    import platform as _platform
+    monkeypatch.setattr(_platform, "system", lambda: "Linux")
+
+    app = _web_app(biz_engine, _noop_engine_handler)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    _login(client)
+
+    # kind=root → 打开存储根
+    resp = client.post("/scrape/open-folder", json={"kind": "root"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert str(root.resolve()) in data["path"]
+    assert calls and calls[-1][0] == "xdg-open", f"应调 xdg-open，实际 {calls}"
+
+    # kind=link 无下载文件夹 → 404
+    link = await scrape_store.create_link(_XHS_EXPLORE, "xhs", "batch-open")
+    resp2 = client.post("/scrape/open-folder", json={"kind": "link", "link_id": link["id"]})
+    assert resp2.status_code == 404
+    assert "无本地文件夹" in resp2.json()["error"]
+
+    # kind=link 正常 → 打开链接文件夹
+    link_dir = root / "xhs" / "abc456"
+    link_dir.mkdir(parents=True)
+    await scrape_store.update_link(link["id"], storage_dir="xhs/abc456")
+    resp3 = client.post("/scrape/open-folder", json={"kind": "link", "link_id": link["id"]})
+    assert resp3.status_code == 200
+    assert resp3.json()["path"].endswith(str(link_dir))
+
+    # kind 未知 → 400
+    resp4 = client.post("/scrape/open-folder", json={"kind": "weird"})
+    assert resp4.status_code == 400

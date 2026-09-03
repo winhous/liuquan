@@ -133,8 +133,16 @@ async def get_images(
         return _rows(result)
 
 
-async def get_image_by_id(image_id: str) -> dict[str, Any] | None:
-    """Get single image by id."""
+async def get_image_by_id(image_id: int | str) -> dict[str, Any] | None:
+    """Get single image by id.
+
+    2026-09-03 集成验收修复（复核反馈 1）：id 绑定 BIGINT 列，入参强制 int（str 会被
+    asyncpg 拒为 invalid input → 500；web 路由缩略图端点曾传 str URL 路径参数）。
+    """
+    try:
+        image_id = int(image_id)
+    except (TypeError, ValueError):
+        return None
     async with get_db_session() as session:
         result = await session.execute(
             text(
@@ -151,7 +159,7 @@ async def get_image_by_id(image_id: str) -> dict[str, Any] | None:
 
 
 async def update_image(
-    image_id: str,
+    image_id: int | str,
     *,
     width: int | None = None,
     height: int | None = None,
@@ -164,6 +172,11 @@ async def update_image(
 ) -> dict[str, Any] | None:
     """Update image fields (only non-None values)."""
     import json as _json
+
+    try:
+        image_id = int(image_id)
+    except (TypeError, ValueError):
+        return None
 
     sets = []
     params: dict[str, Any] = {"id": image_id}
