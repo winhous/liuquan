@@ -42,6 +42,14 @@
           <tr><td class="text-muted" style="width:120px">编号</td><td><code>{{ item.code }}</code></td></tr>
           <tr><td class="text-muted">档名</td><td>{{ item.name }}</td></tr>
           <tr><td class="text-muted">商品名</td><td>{{ item.product_name or "—" }}</td></tr>
+          <tr><td class="text-muted">商品代号</td><td>{{ item.product_code or "—" }}</td></tr>
+          <tr><td class="text-muted">规格属性</td><td>
+            {% if item.specs %}
+              {% for k, v in item.specs.items() %}
+              <span class="badge bg-light text-dark border me-1">{{ k }}：{{ v }}</span>
+              {% endfor %}
+            {% else %}—{% endif %}
+          </td></tr>
           <tr><td class="text-muted">类型</td><td>{{ item.kind }}</td></tr>
           <tr><td class="text-muted">成本</td><td>{{ "%.2f"|format(item.cost) if item.cost is not none else "—" }}</td></tr>
           <tr><td class="text-muted">采购源</td><td>{{ item.supplier or "—" }}</td></tr>

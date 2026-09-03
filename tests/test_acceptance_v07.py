@@ -1910,6 +1910,9 @@ async def test_a92_edit_functionality(biz_engine) -> None:
         assert "A92红色改名" in resp_detail.text
         assert "25.50" in resp_detail.text
         assert "淘宝" in resp_detail.text
+        # 规格属性须渲染在详情页（BUG: 2026-09-04 整体测试——详情页曾不显示 specs）
+        assert "颜色：红色" in resp_detail.text and "尺寸：M" in resp_detail.text, \
+            "详情页应渲染规格属性徽章"
 
         # 2. 编号改重 → err
         resp2 = client.post("/skus/new", data={
@@ -2125,6 +2128,35 @@ async def test_a94_gallery_browser(biz_engine) -> None:
                 "new.html 应含搜索框"
             assert "gallery-folders" in resp_new.text or "gallery-body" in resp_new.text, \
                 "new.html 应含文件夹容器"
+
+        # 5. search 结果含 datetime 字段时 JSON 序列化不得 500
+        #    （BUG: 2026-09-04 整体测试——get_images 行含 created_at datetime，
+        #     JSONResponse 直接序列化失败 → 有结果时 search 500）
+        from datetime import datetime as _dt
+
+        async def fake_search_images(**kwargs):
+            return [{
+                "id": 1,
+                "batch_id": "b1",
+                "source": "xhs",
+                "url": "xhs-sample-url-no-scheme",
+                "link_record_id": None,
+                "source_mark": "scraped",
+                "local_path": "xhs/dir/a.jpg",
+                "day_dir": "xhs/dir",
+                "desc": "打火机红色款",
+                "tags": ["打火机", "红色"],
+                "status": "downloaded",
+                "created_at": _dt(2026, 9, 4, 10, 0, 0),
+            }]
+
+        with patch("web.scrape_store.get_images", side_effect=fake_search_images):
+            resp_search2 = client.get("/skus/gallery/search?q=打火机")
+            assert resp_search2.status_code == 200, \
+                f"search 含 datetime 行不得 500，实际 {resp_search2.status_code}"
+            body2 = resp_search2.json()
+            assert body2 and body2[0]["id"] == 1 and "created_at" in body2[0], \
+                "search 应返回序列化后的图片行"
 
 
 # ==== A95：导航（§16.5）====

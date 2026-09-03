@@ -1345,27 +1345,30 @@ def create_app(
         """图库文件夹列表（JSON）。"""
         if not request.cookies.get("role"):
             return RedirectResponse("/login", status_code=303)
+        from fastapi.encoders import jsonable_encoder
         from web import scrape_store
         folders = await scrape_store.get_gallery_folders()
-        return JSONResponse(folders)
+        return JSONResponse(jsonable_encoder(folders))
 
     @app.get("/skus/gallery/folder/{folder_type}/{folder_id}")
     async def sku_gallery_folder_images(request: Request, folder_type: str, folder_id: str):
         """文件夹内图片列表（JSON）。"""
         if not request.cookies.get("role"):
             return RedirectResponse("/login", status_code=303)
+        from fastapi.encoders import jsonable_encoder
         from web import scrape_store
         images = await scrape_store.get_gallery_folder_images(folder_type, folder_id)
-        return JSONResponse(images)
+        return JSONResponse(jsonable_encoder(images))
 
     @app.get("/skus/gallery/search")
     async def sku_gallery_search(request: Request, q: str = ""):
         """图库搜索（JSON）。"""
         if not request.cookies.get("role"):
             return RedirectResponse("/login", status_code=303)
+        from fastapi.encoders import jsonable_encoder
         from web import scrape_store
         images = await scrape_store.get_images(keyword=q or None, limit=200)
-        return JSONResponse(images)
+        return JSONResponse(jsonable_encoder(images))
 
     @app.post("/skus/gallery/upload")
     async def sku_gallery_upload(request: Request):
