@@ -21,3 +21,10 @@ vendor/
 tools/mermaid-render/node_modules/
 tools/mermaid-render/package.json
 tools/mermaid-render/package-lock.json
+
+# 环境工具下载目录（非项目产物）
+dsh-readme-research/
+cookies.txt
+
+# Figma MCP 本地工具配置（非项目产物）
+.figma-mcp/

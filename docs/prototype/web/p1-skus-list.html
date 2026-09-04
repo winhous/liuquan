@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>货品建档 · ERP · 刘全（高保真样张 v0.1）</title>
+<link rel="stylesheet" href="/web/static/vendor/tabler/css/tabler.min.css">
+<link rel="stylesheet" href="/web/static/vendor/tabler/plugins/tabler-icons/css/tabler-icons.min.css">
+<link rel="stylesheet" href="/web/static/app.css">
+<style>
+  /* 样张专属打磨（原型稿可后续并入 app.css） */
+  .proto-tag{position:fixed;right:14px;bottom:14px;z-index:1050;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+  .stat-chip{font-variant-numeric:tabular-nums}
+  code.sku-code{font-size:.82em;letter-spacing:.02em}
+  .table > :not(caption) > * > *{padding:.55rem .75rem}
+  .card-table td{vertical-align:middle}
+  .spec-mini{font-size:.78rem;color:#667085}
+  .hover-bg:hover{background:#f8fafc}
+</style>
+</head>
+<body>
+<div class="page">
+  <!-- ============ 侧栏（新导航模型：ERP 默认展开，子项直达） ============ -->
+  <aside class="navbar navbar-vertical navbar-expand-lg">
+    <div class="container-fluid">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <h1 class="navbar-brand navbar-brand-autodark">
+        <a href="#" class="d-flex align-items-center gap-2 text-reset text-decoration-none">
+          <i class="ti ti-briefcase-2 fs-3 text-primary"></i>
+          <span class="fw-bold">刘全</span>
+        </a>
+      </h1>
+      <div class="collapse navbar-collapse" id="navbar-menu">
+        <ul class="navbar-nav pt-lg-3">
+          <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-dashboard nav-link-icon"></i>工作台</a></li>
+          <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-list-check nav-link-icon"></i>任务中心</a></li>
+          <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="collapse" href="#sub-crm" role="button" aria-expanded="false">
+              <i class="ti ti-message-circle nav-link-icon"></i>CRM<span class="nav-link-toggle"></span>
+            </a>
+            <div class="collapse" id="sub-crm" data-bs-parent="#navbar-menu">
+              <ul class="nav nav-pills">
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-users"></i>客户列表</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-language"></i>对话翻译</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-list"></i>跟进待办</a></li>
+              </ul>
+            </div>
+          </li>
+          <!-- ERP：样张默认展开，子项直达（修复「要先点开一级才见子项」） -->
+          <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="collapse" href="#sub-erp" role="button" aria-expanded="true">
+              <i class="ti ti-box nav-link-icon"></i>ERP<span class="nav-link-toggle"></span>
+            </a>
+            <div class="collapse show" id="sub-erp">
+              <ul class="nav nav-pills">
+                <li class="nav-item"><a class="nav-link active" href="p1-skus-list.html"><i class="ti ti-box"></i>货品建档</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-package"></i>库存管理</a></li>
+                <li class="nav-item"><a class="nav-link disabled" href="#"><i class="ti ti-shopping-cart"></i>补货建议<span class="badge bg-secondary-lt ms-auto">规划</span></a></li>
+                <li class="nav-item"><a class="nav-link disabled" href="#"><i class="ti ti-alert-triangle"></i>异常预警<span class="badge bg-secondary-lt ms-auto">规划</span></a></li>
+                <li class="nav-item"><a class="nav-link disabled" href="#"><i class="ti ti-eye"></i>生产库存（只读）<span class="badge bg-secondary-lt ms-auto">规划</span></a></li>
+              </ul>
+            </div>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="collapse" href="#sub-seo" role="button" aria-expanded="false">
+              <i class="ti ti-chart-line nav-link-icon"></i>SEO<span class="nav-link-toggle"></span>
+            </a>
+            <div class="collapse" id="sub-seo" data-bs-parent="#navbar-menu">
+              <ul class="nav nav-pills">
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-photo"></i>素材库<span class="badge bg-blue-lt ms-auto">重排</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-keyboard"></i>关键词研究</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-edit"></i>SEO 优化</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-chart-line"></i>listing 体检</a></li>
+              </ul>
+            </div>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="collapse" href="#sub-set" role="button" aria-expanded="false">
+              <i class="ti ti-settings nav-link-icon"></i>设置<span class="nav-link-toggle"></span>
+            </a>
+            <div class="collapse" id="sub-set" data-bs-parent="#navbar-menu">
+              <ul class="nav nav-pills">
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-building-store"></i>店铺管理</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-key"></i>API 密钥</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-clock"></i>定时任务</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-photo"></i>扒图设置</a></li>
+                <li class="nav-item"><a class="nav-link" href="#"><i class="ti ti-adjustments"></i>系统参数</a></li>
+              </ul>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </aside>
+
+  <div class="page-wrapper">
+    <!-- ============ 顶栏 ============ -->
+    <header class="navbar navbar-expand-md navbar-light d-print-none">
+      <div class="container-xl">
+        <ol class="breadcrumb breadcrumb-arrows mb-0 me-auto" aria-label="breadcrumbs">
+          <li class="breadcrumb-item"><a href="#">ERP</a></li>
+          <li class="breadcrumb-item active" aria-current="page">货品建档</li>
+        </ol>
+        <div class="d-flex align-items-center gap-2">
+          <span class="navbar-text d-none d-md-inline-flex text-muted"><i class="ti ti-user me-1"></i>运营</span>
+          <span class="avatar avatar-xs bg-blue-lt"><i class="ti ti-user"></i></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============ 内容 ============ -->
+    <div class="page-body">
+      <div class="container-xl">
+        <!-- 页头：标题 + 统计 + 主操作 -->
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+          <div>
+            <h2 class="page-title mb-1">货品建档</h2>
+            <div class="d-flex flex-wrap gap-2 text-muted stat-chip">
+              <span>共 <b class="text-dark">6</b> 档</span>
+              <span class="dot"></span>
+              <span><span class="text-green">●</span> 在售 5</span>
+              <span class="dot"></span>
+              <span>组合 1</span>
+            </div>
+          </div>
+          <div class="d-flex gap-2">
+            <a href="#" class="btn btn-outline-secondary"><i class="ti ti-upload me-1"></i>批量导入</a>
+            <a href="p2-skus-new.html" class="btn btn-primary"><i class="ti ti-plus me-1"></i>新建档案</a>
+          </div>
+        </div>
+
+        <div class="card">
+          <!-- 筛选条 -->
+          <div class="card-header border-bottom py-2">
+            <div class="row g-2 w-100 align-items-end">
+              <div class="col-12 col-md-4 col-lg-3">
+                <label class="form-label mb-1">搜索</label>
+                <div class="input-icon">
+                  <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+                  <input type="text" class="form-control" placeholder="编号 / 商品代号 / 档名…" value="打火机">
+                </div>
+              </div>
+              <div class="col-6 col-md-2 col-lg-2">
+                <label class="form-label mb-1">类型</label>
+                <select class="form-select">
+                  <option>全部</option><option>实物</option><option selected>组合</option><option>定制</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-2 col-lg-2">
+                <label class="form-label mb-1">状态</label>
+                <select class="form-select"><option>全部</option><option>在售</option><option>下架</option></select>
+              </div>
+              <div class="col-12 col-md-auto d-flex gap-2">
+                <button class="btn btn-primary w-100 w-md-auto"><i class="ti ti-filter me-1"></i>筛选</button>
+                <button class="btn btn-link text-muted" title="清除">清除</button>
+              </div>
+              <div class="col-12 col-md-auto ms-md-auto text-muted small d-flex align-items-center">
+                结果 <b class="mx-1">2</b> 条
+              </div>
+            </div>
+          </div>
+
+          <!-- 表格 -->
+          <div class="table-responsive">
+            <table class="table table-vcenter card-table">
+              <thead>
+                <tr class="text-nowrap">
+                  <th class="w-1"><input class="form-check-input m-0" type="checkbox" title="全选"></th>
+                  <th>编号</th>
+                  <th>商品代号</th>
+                  <th>档名</th>
+                  <th>规格</th>
+                  <th>类型</th>
+                  <th class="text-end">成本</th>
+                  <th>状态</th>
+                  <th class="text-end">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- ① 实物：打火机 红色 -->
+                <tr class="hover-bg">
+                  <td><input class="form-check-input m-0" type="checkbox"></td>
+                  <td><code class="sku-code">P-LTR-001</code></td>
+                  <td><span class="text-muted">LTR</span></td>
+                  <td>
+                    <div class="d-flex align-items-center gap-2">
+                      <span class="avatar avatar-sm bg-azure-lt"><i class="ti ti-flame"></i></span>
+                      <div>
+                        <div class="fw-semibold">打火机 · 红色</div>
+                        <div class="spec-mini">商品名：打火机</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="badge bg-blue-lt">颜色：红色</span></td>
+                  <td><span class="badge bg-blue-lt">实物</span></td>
+                  <td class="text-end">¥12.50</td>
+                  <td><span class="badge bg-green-lt"><i class="ti ti-circle-filled text-green me-1" style="font-size:.5rem"></i>在售</span></td>
+                  <td class="text-end text-nowrap">
+                    <a href="#" class="btn btn-sm btn-ghost-primary">详情</a>
+                    <a href="#" class="btn btn-sm btn-ghost-secondary">编辑</a>
+                    <button class="btn btn-sm btn-icon btn-ghost-secondary" title="更多"><i class="ti ti-dots-vertical"></i></button>
+                  </td>
+                </tr>
+                <!-- ② 实物：打火机 蓝色 -->
+                <tr class="hover-bg">
+                  <td><input class="form-check-input m-0" type="checkbox"></td>
+                  <td><code class="sku-code">P-LTR-002</code></td>
+                  <td><span class="text-muted">LTR</span></td>
+                  <td>
+                    <div class="d-flex align-items-center gap-2">
+                      <span class="avatar avatar-sm bg-cyan-lt"><i class="ti ti-flame"></i></span>
+                      <div><div class="fw-semibold">打火机 · 蓝色</div><div class="spec-mini">商品名：打火机</div></div>
+                    </div>
+                  </td>
+                  <td><span class="badge bg-blue-lt">颜色：蓝色</span></td>
+                  <td><span class="badge bg-blue-lt">实物</span></td>
+                  <td class="text-end">¥13.00</td>
+                  <td><span class="badge bg-green-lt"><i class="ti ti-circle-filled text-green me-1" style="font-size:.5rem"></i>在售</span></td>
+                  <td class="text-end text-nowrap">
+                    <a href="#" class="btn btn-sm btn-ghost-primary">详情</a>
+                    <a href="#" class="btn btn-sm btn-ghost-secondary">编辑</a>
+                    <button class="btn btn-sm btn-icon btn-ghost-secondary" title="更多"><i class="ti ti-dots-vertical"></i></button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 空态示意（搜索无结果时） -->
+          <div class="empty d-none">
+            <div class="empty-icon"><i class="ti ti-search-off"></i></div>
+            <p class="empty-title">没有匹配的档案</p>
+            <p class="empty-subtitle text-muted">换个关键词，或清除筛选条件后重试</p>
+            <div class="empty-action"><a href="#" class="btn btn-outline-secondary">清除全部筛选</a></div>
+          </div>
+
+          <!-- 分页 -->
+          <div class="card-footer d-flex align-items-center justify-content-between py-2">
+            <div class="text-muted small">第 1 页 / 共 1 页</div>
+            <ul class="pagination m-0">
+              <li class="page-item disabled"><a class="page-link" href="#"><i class="ti ti-chevron-left"></i></a></li>
+              <li class="page-item active"><a class="page-link" href="#">1</a></li>
+              <li class="page-item disabled"><a class="page-link" href="#"><i class="ti ti-chevron-right"></i></a></li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- 底部提示：此稿为高保真样张 -->
+        <p class="text-muted small mt-2">
+          <i class="ti ti-info-circle me-1"></i>
+          样张演示要点：ERP 导航默认展开直达子项 · 表格增加规格徽章列与勾选 · 空态/分页/统计 chips（此页为静态原型，非真实数据）
+        </p>
+      </div>
+    </div>
+
+    <footer class="footer footer-transparent d-print-none">
+      <div class="container-xl text-muted small">
+        <i class="ti ti-briefcase-2 me-1"></i>刘全 · 高保真原型轮 · v0.1 样张
+      </div>
+    </footer>
+  </div>
+</div>
+
+<!-- 原型浮动标签 -->
+<div class="proto-tag badge bg-dark text-wrap p-2" style="text-align:left">
+  <div class="d-flex align-items-center gap-1"><i class="ti ti-brush"></i><b>高保真样张 v0.1</b></div>
+  <div class="small fw-normal">建档列表页 · 新导航模型示意<br>原型非真实数据 · 看风格与结构</div>
+</div>
+
+<script src="/web/static/vendor/tabler/js/tabler.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>刘全 v0.7 品模型 · 上架流程与销售流程全景图（讨论稿）</title>
+<style>
+  :root{
+    --ink:#1a2b4d; --line:#5b6b8c; --bg:#f4f6fb;
+    --c-phy:#e65100;  --c-phy-bg:#fff3e0;   /* 实物层 橙 */
+    --c-sku:#2e7d32;  --c-sku-bg:#e8f5e9;   /* 档案 绿 */
+    --c-com:#8e24aa;  --c-com-bg:#f3e5f5;   /* 组合/定制 紫 */
+    --c-pro:#1565c0;  --c-pro-bg:#e3f2fd;   /* 品 蓝 */
+    --c-shop:#00695c; --c-shop-bg:#e0f2f1;  /* 店铺×品 青 */
+    --c-img:#6d4c41;  --c-img-bg:#efebe9;   /* 素材/图 棕 */
+    --c-seo:#f9a825;  --c-seo-bg:#fffde7;   /* SEO 黄 */
+    --c-rule:#c62828; --c-rule-bg:#fce4ec;  /* 红线 红 */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Noto Sans CJK SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
+  header{background:#fff;border-bottom:2px solid #dfe6f2;padding:14px 26px;position:sticky;top:0;z-index:5}
+  header h1{margin:0;font-size:19px}
+  header .sub{font-size:12px;color:#7a8aa8;margin-top:2px}
+  header .tag{display:inline-block;font-size:11px;border:1px solid #f9a825;color:#b28704;background:#fffde7;border-radius:10px;padding:0 8px;margin-left:8px}
+  main{max-width:1180px;margin:0 auto;padding:22px 26px 60px}
+  section{margin-top:34px}
+  h2{font-size:17px;border-left:5px solid var(--ink);padding-left:10px;margin:0 0 4px}
+  .sec-sub{font-size:12.5px;color:#7a8aa8;margin:0 0 16px}
+  .card{border:1.5px solid #dfe6f2;border-radius:12px;background:#fff;padding:16px 18px}
+  /* ---------- 泳道分层 ---------- */
+  .lane{position:relative;margin:6px 0}
+  .lane-row{display:flex;gap:10px;flex-wrap:wrap;align-items:stretch}
+  .lane-label{position:absolute;left:-14px;top:50%;transform:translate(-100%,-50%);font-size:12px;color:#7a8aa8;white-space:nowrap;writing-mode:vertical-rl;letter-spacing:2px}
+  .box{border-radius:10px;padding:10px 14px;font-size:13px;min-width:180px;flex:0 1 auto;border:2px solid}
+  .box b{display:block;font-size:13.5px;margin-bottom:2px}
+  .box small{opacity:.75}
+  .box .mono{font-family:Consolas,monospace;background:rgba(0,0,0,.05);border-radius:4px;padding:0 5px;font-size:12px}
+  .phy{background:var(--c-phy-bg);border-color:var(--c-phy)}
+  .sku{background:var(--c-sku-bg);border-color:var(--c-sku)}
+  .com{background:var(--c-com-bg);border-color:var(--c-com)}
+  .pro{background:var(--c-pro-bg);border-color:var(--c-pro)}
+  .shopbox{background:var(--c-shop-bg);border-color:var(--c-shop)}
+  .imgbox{background:var(--c-img-bg);border-color:var(--c-img)}
+  .seobox{background:var(--c-seo-bg);border-color:var(--c-seo)}
+  .rulebox{background:var(--c-rule-bg);border-color:var(--c-rule)}
+  .arrow-row{display:flex;justify-content:center;color:var(--line);font-size:13px;padding:2px 0}
+  .arrow-row .txt{background:#fff;padding:0 10px;border-radius:8px;font-size:11.5px;color:#7a8aa8}
+  .dashed{text-align:center;font-size:12px;color:#7a8aa8;padding:6px 0 2px;letter-spacing:1px}
+  /* ---------- 步骤流程 ---------- */
+  .steps{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
+  .step{flex:1 1 300px;border-radius:10px;border:1.5px solid #dfe6f2;background:#fff;padding:10px 14px;font-size:12.8px;position:relative}
+  .step .n{position:absolute;top:-10px;left:10px;background:var(--ink);color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .step b{display:block;margin:4px 0 2px;font-size:13.2px}
+  .step .ph{display:inline-block;font-size:10.5px;border-radius:8px;padding:0 7px;color:#fff;margin-bottom:2px}
+  .ph-a{background:var(--c-pro)} .ph-b{background:var(--c-shop)} .ph-c{background:var(--c-sku)} .ph-d{background:#37474f}
+  .step ul{margin:4px 0 0;padding-left:16px}
+  .step li{margin:1px 0}
+  /* ---------- 对比三列 ---------- */
+  .tri{display:flex;gap:10px;flex-wrap:wrap}
+  .tri .col{flex:1 1 300px;border-radius:10px;padding:10px 14px;font-size:12.8px;border:2px solid}
+  .tri .col b{font-size:13.5px;display:block;margin-bottom:4px}
+  /* ---------- 表格 ---------- */
+  table{border-collapse:collapse;width:100%;font-size:12.6px;background:#fff;border-radius:10px;overflow:hidden}
+  th,td{border:1px solid #e3e9f3;padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#eef3fc;font-size:12.2px;white-space:nowrap}
+  td .mono{font-family:Consolas,monospace;font-size:11.5px;background:#f1f4fa;border-radius:4px;padding:0 5px}
+  .yes{color:var(--c-sku);font-weight:700}.no{color:var(--c-rule);font-weight:700}
+  .foot{font-size:12px;color:#7a8aa8;margin-top:30px;border-top:1px dashed #c3cfe4;padding-top:10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧩 刘全 v0.7 品模型 · 上架流程 / 销售流程全景图<span class="tag">讨论稿 · 待用户确认后入详设</span></h1>
+  <div class="sub">范围：品 = listing 去掉店铺之后的"商品"；Etsy 上卖的每一档，库里必有预设档案（实物 SKU / 组合配方 / 定制占位），上架只引用、不现场新建（定稿 §3.6）。库存永远只在 实物 SKU × 仓库。</div>
+</header>
+<main>
+
+<!-- ================= ① 概念分层 ================= -->
+<section>
+  <h2>① 概念分层：实物 / 档案 / 品 / 店铺×品（listing）/ 图 / SEO</h2>
+  <p class="sec-sub">例：金属打火机，含 颜色[红,蓝] 与 包装[普装,精装] 两路档；精装打火机 = 组合配方（机+精装盒）。店 1 图 A、店 2 图 B —— 同一个品、同一批货。</p>
+
+  <div class="lane" style="padding-left:26px">
+    <div class="lane-row">
+      <div class="box imgbox"><b>素材库（图源）</b><small>扒图链接/自拍/AI/授权，带来源标记；一个链接 = 一组图</small></div>
+      <div class="box shopbox" style="flex:1.6">
+        <b>店铺 × 品 = Etsy listing（每店一份"样子"）</b>
+        <small>店1 listing：图集 A（图A）· SEO A · 价 · 启用档[红✓蓝✓精装✗]</small><br>
+        <small>店2 listing：图集 B（图B）· SEO B · 价 · 启用档[红✓蓝✗精装✓]</small>
+        <div style="margin-top:6px;border-top:1px dashed #00695c55;padding-top:6px">
+          <span class="seobox" style="display:inline-block;border-width:1px;padding:1px 8px;border-radius:6px;font-size:11.5px">SEO / 标题 / 价格 挂这里，不挂货</span>
+        </div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="txt">▲ 店×品 = 一个 Etsy listing；图/SEO/价/启用哪些档，每店各管各的，互不打架</span></div>
+    <div class="lane-row">
+      <div class="box pro" style="flex:2">
+        <b>品：金属打火机（商品主档，全局唯一，跨店共享）</b>
+        <small>建档单位。定义变体档 → 每档指向一个"本地档案"：</small><br>
+        <small>红 → <span class="mono">LTR-RED</span>（实物）　蓝 → <span class="mono">LTR-BLU</span>（实物）　普装 → <span class="mono">LTR-PLN</span>（实物）　精装 → <span class="mono">COMBO-LTR-DLX</span>（组合配方）</small>
+        <div style="margin-top:6px;border-top:1px dashed #1565c055;padding-top:6px">
+          <span class="imgbox" style="display:inline-block;border-width:1px;padding:1px 8px;border-radius:6px;font-size:11.5px">底图模板（默认图）挂品级，店未覆盖时自动继承</span>
+        </div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="txt">▲ 每档必指向已预设档案 —— "库里有规划，不许现场造"</span></div>
+    <div class="lane-row">
+      <div class="box sku"><b>实物 SKU（有库存）</b><small><span class="mono">LTR-RED</span> 红打火机<br>编号/成本/采购源</small></div>
+      <div class="box sku"><b>实物 SKU（有库存）</b><small><span class="mono">LTR-BLU</span> 蓝打火机<br>编号/成本/采购源</small></div>
+      <div class="box com"><b>组合配方（无库存）</b><small><span class="mono">COMBO-LTR-DLX</span> 精装打火机<br>BOM：打火机×1 + 精装盒×1<br>库存穿透到子件</small></div>
+      <div class="box com"><b>定制占位（无库存）</b><small><span class="mono">CUSTOM-BQ</span> 定制花束<br>接单生产，内容记订单</small></div>
+    </div>
+    <div class="arrow-row"><span class="txt">▲ 库存、流水、扣减只认这一层 —— 不管多少店多少图，仓库就这些实物</span></div>
+    <div class="lane-row">
+      <div class="box phy"><b>仓库实物</b><small>红机 ×N　蓝机 ×N　精装盒 ×N<br>（精装打火机不是一件货，它只是档案）</small></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= ② 上架流程 ================= -->
+<section>
+  <h2>② 上架一个 listing 的流程（从素材到 Etsy 在售）</h2>
+  <p class="sec-sub">阶段 A 建档 → B 开店准备 → C 校验与上架 → D 在售后续。红线：系统不写 Etsy（上架动作 = 人工抄录任务单），本机永不直连 Etsy。</p>
+  <div class="steps">
+    <div class="step"><span class="n">1</span><span class="ph ph-a">建档 A</span><b>素材库选素材</b>链接记录「建档」→ 该链接整组图预载（或从素材库弹层跨链接混选）</div>
+    <div class="step"><span class="n">2</span><span class="ph ph-a">建档 A</span><b>建品 + 变体框架</b>品名（链接 desc 建议）→ 填变体维度（≤3，如 颜色:[红,蓝] × 包装:[普装,精装]）→ 系统按维度自动展开全部档位草稿</div>
+    <div class="step"><span class="n">3</span><span class="ph ph-a">建档 A</span><b>每档挂"本地档案"</b>红→选实物 <span class="mono">LTR-RED</span>；精装→选组合配方 <span class="mono">COMBO-LTR-DLX</span>（预设 BOM）；没有的档案先建档（编号查重 + 禁逗号斜杠校验）→ <span class="yes">不允许空映射</span></div>
+    <div class="step"><span class="n">4</span><span class="ph ph-a">建档 A</span><b>底图 + 状态</b>从素材勾选图挂品级「底图模板」→ 补成本/编号 → 状态 = 建档中 → 在售</div>
+    <div class="step"><span class="n">5</span><span class="ph ph-b">开店 B</span><b>选店铺 → 生成 listing 草稿</b>店铺×品 = 一条 listing：默认继承品底图（图 A），个别店可整套覆盖（图 B）；勾选本店启用哪些档</div>
+    <div class="step"><span class="n">6</span><span class="ph ph-b">开店 B</span><b>SEO 初稿（v0.8 联动）</b>按"店×品"生成标题/描述/tag 初稿 → 提案 → 人改后用</div>
+    <div class="step"><span class="n">7</span><span class="ph ph-c">校验 C</span><b>上架前机器校验</b>每个启用档都有本地档案？编号唯一/格式合法？图齐？→ 不通过 = 按钮灰，缺什么提示什么（§3.6：库里没有的 SKU 禁止上架）</div>
+    <div class="step"><span class="n">8</span><span class="ph ph-c">上架 C</span><b>上架任务单（TM）</b>出任务单：标题/描述/13 tag/每档该填的 SKU 编号/图包 → 运营照着抄进 Etsy 后台（变体 SKU 框必须填表里高亮的编号 = 订单对账钥匙）</div>
+    <div class="step"><span class="n">9</span><span class="ph ph-c">上架 C</span><b>回填 listing_id</b>人工把 Etsy listing_id 贴回 → 平台在售档就位 → 系统拉 listing 自动核对：变体数/SKU 是否填对/图数</div>
+    <div class="step"><span class="n">10</span><span class="ph ph-d">在售 D</span><b>此后</b>改价/换季 tag/下架 = 在"店×品"上操作；订单回来按 <span class="mono">sku</span> 直对上（见下节）</div>
+  </div>
+</section>
+
+<!-- ================= ③ 销售流程 ================= -->
+<section>
+  <h2>③ 销售一单的流程（Etsy 订单进来到账平）</h2>
+  <p class="sec-sub">订单行带 <span class="mono">transaction.sku</span>（= 上架时填的本地档案编号）→ 三种命中，三种走法。库存为 0 不阻塞销售（接单采购模式），但每笔变动都留流水。</p>
+  <div class="steps">
+    <div class="step"><span class="n">1</span><b>订单回流</b>Etsy 订单 → 行级 <span class="mono">sku</span> 命中本地档案（两段式：先实物/组合/定制判断）</div>
+  </div>
+  <div style="height:10px"></div>
+  <div class="tri">
+    <div class="col sku"><b>🟢 命中实物 SKU</b><span class="mono">LTR-RED</span> 直扣
+      <ul style="margin:6px 0 0;padding-left:16px">
+        <li>库存：红机 所在仓库 -1（按 SKU×仓库）</li>
+        <li>出库单：红打火机 ×1</li>
+        <li>够不够都卖（接单采购），不足触发补货建议</li>
+      </ul>
+    </div>
+    <div class="col com"><b>🟣 命中组合配方</b><span class="mono">COMBO-LTR-DLX</span> BOM 展开
+      <ul style="margin:6px 0 0;padding-left:16px">
+        <li>展开：打火机 -1、精装盒 -1（子件各自所在仓库扣）</li>
+        <li>出库单/拣货校验：机 ×1 + 精装盒 ×1 —— 系统判断"有没有精装盒、盒里有没有打火机"就在这里</li>
+      </ul>
+    </div>
+    <div class="col com"><b>🟣 命中定制占位</b><span class="mono">CUSTOM-BQ</span> 转人工
+      <ul style="margin:6px 0 0;padding-left:16px">
+        <li>不扣库存（本来就没有）</li>
+        <li>按订单详情（内容记在订单行）生成接单生产/采购任务 → 人工处理</li>
+      </ul>
+    </div>
+  </div>
+  <div style="height:10px"></div>
+  <div class="steps">
+    <div class="step"><span class="n">4</span><b>库存流水必留</b>每笔变动落流水：时间/类型（销售扣减·采购入库·报损·调整·退货入库）/数量/操作人/关联单号 → 对不上可追溯（谁、何时、为何）</div>
+    <div class="step"><span class="n">5</span><b>对账闭环</b>订单行 ↔ 扣减记录 ↔ 流水 ↔ 库存余额 四方对得上 = 一单销完；对不上 = 进对账差异，可查流水定位</div>
+  </div>
+</section>
+
+<!-- ================= ④ 边界场景裁决 ================= -->
+<section>
+  <h2>④ 用模型跑 8 个边界场景（压力测试）</h2>
+  <table>
+    <tr><th style="width:30%">场景</th><th>模型怎么答</th></tr>
+    <tr><td>金打火机：店 1 图 A、店 2 图 B 在卖</td><td><span class="yes">同一个品、同一个档</span>；图 A/B 是两店 listing 各自的图集（店×品），货不裂、库存不裂</td></tr>
+    <tr><td>同款红/蓝两色一 listing</td><td>同一品、两个档（颜色维度）；每档一个实物 SKU、独立库存/成本 —— 金一个库存、银一个库存，互不掺和（§3.7）</td></tr>
+    <tr><td>精装/普装作为 listing 变体</td><td>普装 → 实物 SKU；精装 → <span class="mono">COMBO-</span> 组合配方（机+盒），出库展开校验 —— 不用新建一件叫"精装打火机"的货</td></tr>
+    <tr><td>打火机+烟 的套餐 listing（跨品）</td><td>不是品内档位，是<span class="yes">卖法层</span>组合：<span class="mono">COMBO-LIGHTER-CIG</span> 虚拟 SKU + BOM（引用两品下的实物 SKU，v0.8）—— 品层不吞卖法层</td></tr>
+    <tr><td>两店卖同一品、卖不同档子集</td><td>品不变；店 1 listing 启用[红✓蓝✓]，店 2 启用[精装✓] —— 启用档是店×品的属性</td></tr>
+    <tr><td>库存为 0 的档照卖</td><td><span class="yes">接单采购模式</span>：库存不影响销售；售出后触发采购建议/备货提醒，数字照记（0）</td></tr>
+    <tr><td>定制花束（CRM 那种）</td><td>品级勾「定制」→ <span class="mono">CUSTOM-BQ</span> 占位：无库存、成本可空、接单生产，内容记订单详情</td></tr>
+    <tr><td>一图含两个主体（打火机+烟）且都要卖</td><td><span class="no">不能共用</span>：建档勾图时打「待拆」标记暂不挂图集；改图（COMFYUI，后置单独做法）拆好后再挂 —— v0.7 不做裁剪</td></tr>
+    <tr><td>同店同品开两个 listing（A/B 测试）</td><td>开放项：一期<span class="no">不确认</span>；店×品 = 一个 listing，双 listing 留扩展位，不阻塞本期</td></tr>
+  </table>
+</section>
+
+<!-- ================= ⑤ 结论 ================= -->
+<section>
+  <h2>⑤ 结论：品是帮了忙，还是添了乱？</h2>
+  <div class="card">
+    <p style="margin:0 0 8px"><b>品帮了什么（消掉三个没品时的坑）</b></p>
+    <ul style="margin:0 0 14px;padding-left:18px">
+      <li>店 1/店 2 的"打火机"不再互不相识 —— 品 = 唯一的打火机，两店 listing 都指向它，<b>货只建一次</b>（v1 文档痛批的"同一棵树 12 条物料"不会发生）</li>
+      <li>图/SEO 有明确挂点 = 店×品，店间图差异天然分开不打架</li>
+      <li>「精装打火机」这类<span class="com" style="border-width:1px;padding:0 6px;border-radius:6px;font-size:11px">半组合档</span>有处安放：指向预设组合配方，BOM 展开扣</li>
+    </ul>
+    <p style="margin:0 0 8px"><b>品的边界（守住 = 纯简化器，越界 = 添乱）</b></p>
+    <ul style="margin:0;padding-left:18px">
+      <li>品 <span class="no">不管</span>库存（只在 实物 SKU×仓库）、<span class="no">不管</span>价格（店×品）、<span class="no">不管</span>SEO/图（店×品，品只挂默认底图）、<span class="no">不管</span>店</li>
+      <li>品只回答三个问题：这是个什么商品？有几个档？每档对应仓库里哪样货（或哪个配方/定制）？</li>
+    </ul>
+  </div>
+</section>
+
+<div class="foot">刘全 v0.7 SKU 建档 · 品模型讨论稿（2026-09-03）—— 与用户逐点对齐中，未入详设。配套文档：docs/数据底层逻辑-实物物料卖法三层模型.md（定稿 §2/§3.7/§3.6）、docs/调研-Etsy变体与SKU机制.md、docs/版本规划.md（v0.7）。本图节点为讨论结论，最终以确认后的《SKU 建档详设》为准。</div>
+</main>
+</body>
+</html>
